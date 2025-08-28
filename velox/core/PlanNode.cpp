@@ -2781,7 +2781,8 @@ PartitionedOutputNode::PartitionedOutputNode(
     PartitionFunctionSpecPtr partitionFunctionSpec,
     RowTypePtr outputType,
     VectorSerde::Kind serdeKind,
-    PlanNodePtr source)
+    PlanNodePtr source,
+    bool isRootFragment)
     : PlanNode(id),
       kind_(kind),
       sources_{{std::move(source)}},
@@ -2790,7 +2791,8 @@ PartitionedOutputNode::PartitionedOutputNode(
       replicateNullsAndAny_(replicateNullsAndAny),
       partitionFunctionSpec_(std::move(partitionFunctionSpec)),
       serdeKind_(serdeKind),
-      outputType_(std::move(outputType)) {
+      outputType_(std::move(outputType)),
+      isRootFragment_(isRootFragment) {
   VELOX_USER_CHECK_GT(numPartitions_, 0);
   if (numPartitions_ == 1) {
     VELOX_USER_CHECK(
@@ -2815,7 +2817,8 @@ std::shared_ptr<PartitionedOutputNode> PartitionedOutputNode::broadcast(
     int numPartitions,
     RowTypePtr outputType,
     VectorSerde::Kind serdeKind,
-    PlanNodePtr source) {
+    PlanNodePtr source,
+    bool isRootFragment) {
   std::vector<TypedExprPtr> noKeys;
   return std::make_shared<PartitionedOutputNode>(
       id,
@@ -2826,7 +2829,8 @@ std::shared_ptr<PartitionedOutputNode> PartitionedOutputNode::broadcast(
       std::make_shared<GatherPartitionFunctionSpec>(),
       std::move(outputType),
       serdeKind,
-      std::move(source));
+      std::move(source),
+      isRootFragment);
 }
 
 // static
@@ -2834,7 +2838,8 @@ std::shared_ptr<PartitionedOutputNode> PartitionedOutputNode::arbitrary(
     const PlanNodeId& id,
     RowTypePtr outputType,
     VectorSerde::Kind serdeKind,
-    PlanNodePtr source) {
+    PlanNodePtr source,
+    bool isRootFragment) {
   std::vector<TypedExprPtr> noKeys;
   return std::make_shared<PartitionedOutputNode>(
       id,
@@ -2845,7 +2850,8 @@ std::shared_ptr<PartitionedOutputNode> PartitionedOutputNode::arbitrary(
       std::make_shared<GatherPartitionFunctionSpec>(),
       std::move(outputType),
       serdeKind,
-      std::move(source));
+      std::move(source),
+      isRootFragment);
 }
 
 // static
@@ -2853,7 +2859,8 @@ std::shared_ptr<PartitionedOutputNode> PartitionedOutputNode::single(
     const PlanNodeId& id,
     RowTypePtr outputType,
     VectorSerde::Kind serdeKind,
-    PlanNodePtr source) {
+    PlanNodePtr source,
+    bool isRootFragment) {
   std::vector<TypedExprPtr> noKeys;
   return std::make_shared<PartitionedOutputNode>(
       id,
@@ -2864,7 +2871,8 @@ std::shared_ptr<PartitionedOutputNode> PartitionedOutputNode::single(
       std::make_shared<GatherPartitionFunctionSpec>(),
       std::move(outputType),
       serdeKind,
-      std::move(source));
+      std::move(source),
+      isRootFragment);
 }
 
 void EnforceSingleRowNode::addDetails(std::stringstream& /* stream */) const {
