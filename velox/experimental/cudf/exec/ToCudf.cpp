@@ -264,6 +264,52 @@ bool CompileState::compile() {
     } else if (
         auto localExchangeOp = dynamic_cast<exec::LocalExchange*>(oper)) {
       keepOperator = 1;
+    } else if (
+        auto partitionOp = dynamic_cast<exec::PartitionedOutput*>(oper)) {
+      auto planNode =
+          std::dynamic_pointer_cast<const core::PartitionedOutputNode>(
+              getPlanNode(partitionOp->planNodeId()));
+      VELOX_CHECK(planNode != nullptr);
+      if ((!CudfOptions::getInstance().cudfExchange) ||
+          (planNode->isRootFragment())) {
+        keepOperator = 1;
+      } else {
+        replaceOp.push_back(std::make_unique<CudfPartitionedOutput>(
+            id, ctx, planNode, partitionOp->eagerFlush_));
+        replaceOp.back()->initialize();
+      }
+    } else if (auto exchangeOp = dynamic_cast<exec::Exchange*>(oper)) {
+      auto planNode = std::dynamic_pointer_cast<const core::ExchangeNode>(
+          getPlanNode(oper->planNodeId()));
+      VELOX_CHECK(planNode != nullptr);
+      if (!CudfOptions::getInstance().cudfExchange) {
+        keepOperator = 1;
+      } else {
+        // Get or create the CudfExchangeClient, using parameters from the Velox
+        // exchange client.
+        auto clientIter =
+            cudfExchangeClientByPlanNode_.find(oper->planNodeId());
+        std::shared_ptr<CudfExchangeClient> client = nullptr;
+        if (clientIter == cudfExchangeClientByPlanNode_.end()) {
+          // create new cudfExchangeClient
+          std::shared_ptr<ExchangeClient> veloxExchangeClient =
+              exchangeOp->exchangeClient_;
+          client = createCudfExchangeClient(
+              oper->planNodeId(),
+              veloxExchangeClient->taskId_,
+              veloxExchangeClient->destination_,
+              veloxExchangeClient->numberOfConsumers_,
+              veloxExchangeClient->executor_);
+        } else {
+          client = clientIter->second;
+        }
+        replaceOp.push_back(
+            std::make_unique<CudfExchange>(id, ctx, planNode, client));
+        replaceOp.back()->initialize();
+      }
+    } else if (
+        auto localExchangeOp = dynamic_cast<exec::LocalExchange*>(oper)) {
+      keepOperator = 1;
     }
 
     if (producesGpuOutput(oper) and
