@@ -36,6 +36,10 @@
 #include "velox/exec/TaskTraceWriter.h"
 #include "velox/exec/TraceUtil.h"
 
+#ifdef VELOX_ENABLE_CUDF
+#include <velox/experimental/cudf-exchange/CudfOutputQueueManager.h>
+#endif
+
 using facebook::velox::common::testutil::TestValue;
 
 namespace facebook::velox::exec {
@@ -1083,11 +1087,22 @@ void Task::initializePartitionOutput() {
   if (partitionedOutputNode != nullptr) {
     VELOX_CHECK(hasPartitionedOutput());
     VELOX_CHECK_GT(numOutputDrivers, 0);
+    VLOG(0) << "initializing OutputBufferManager with "
+            << partitionedOutputNode->numPartitions() << " partitions and "
+            << numOutputDrivers << " drivers";
     bufferManager->initializeTask(
         shared_from_this(),
         partitionedOutputNode->kind(),
         partitionedOutputNode->numPartitions(),
         numOutputDrivers);
+#ifdef VELOX_ENABLE_CUDF
+    auto queueMgr = facebook::velox::cudf_exchange::CudfOutputQueueManager::
+        getInstanceRef();
+    queueMgr->initializeTask(
+        shared_from_this(),
+        partitionedOutputNode->numPartitions(),
+        numOutputDrivers);
+#endif
   }
 }
 
@@ -2566,6 +2581,17 @@ void Task::maybeRemoveFromOutputBufferManager() {
       }
       bufferManager->removeTask(taskId_);
     }
+#ifdef VELOX_ENABLE_CUDF
+    // Do the same for the Cudf Queue Manager
+    auto queueMgr = facebook::velox::cudf_exchange::CudfOutputQueueManager::
+        getInstanceRef();
+    // TODO: Add stats, call to queueMgr->stats(taskId_) doesn't exist yet.
+    // std::lock_guard<std::timed_mutex> l(mutex_);
+    // if (!taskStats_.outputBufferStats.has_value()) {
+    //   taskStats_.outputBufferStats = queueMgr->stats(taskId_);
+    // }
+    queueMgr->removeTask(taskId_);
+#endif
   }
 }
 
