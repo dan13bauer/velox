@@ -19,6 +19,7 @@
 #include "velox/experimental/cudf-exchange/CudfOutputQueueManager.h"
 #include "velox/experimental/cudf/exec/NvtxHelper.h"
 #include "velox/experimental/cudf/vector/CudfVector.h"
+
 namespace facebook::velox::cudf_exchange {
 
 /// This is the cudf equivalent of the PartitionedOutput operator for cudf.
@@ -64,14 +65,14 @@ class CudfPartitionedOutput : public exec::Operator,
   void initPartitionKeys(
       const std::shared_ptr<const core::PartitionedOutputNode>& planNode);
 
-  // Partitions the cudf vector using the partition keys and a hash
-  // function
-  void hashPartition(facebook::velox::cudf_velox::CudfVectorPtr cudfVector);
+  // Partitions the cudf table view using the partition keys and a hash
+  // function using the given stream.
+  void hashPartition(cudf::table_view tableView, rmm::cuda_stream_view stream);
 
-  // Splits the cudf vector into equal sizes. This is used when
+  // Splits the cudf table view into equal sizes. This is used when
   // RoundRobin partitioning is requested but round robin on a
   // row-by-row basis is not meaningful for cudf exchange.
-  void equalPartition(facebook::velox::cudf_velox::CudfVectorPtr cudfVector);
+  void equalPartition(cudf::table_view tableView, rmm::cuda_stream_view stream);
 
   // Splits the table along the given offsets and enqueues each offset
   // to the corresponding partition, i.e. first split to the partition 0,
@@ -89,6 +90,9 @@ class CudfPartitionedOutput : public exec::Operator,
 
   bool finished_{false};
   std::string spec_;
+
+  // Used for switching columns when column order differs between input and output.
+  std::vector<uint32_t> remap_;
 };
 
 } // namespace facebook::velox::cudf_exchange
