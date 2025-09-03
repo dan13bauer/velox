@@ -84,7 +84,9 @@ class CudfOutputQueueManagerTest : public testing::Test {
         std::move(queryCtx),
         Task::ExecutionMode::kParallel);
 
-    queueManager_->initializeTask(task, numDestinations, numDrivers);
+    auto kind =
+        facebook::velox::core::PartitionedOutputNode::Kind::kPartitioned;
+    queueManager_->initializeTask(task, kind, numDestinations, numDrivers);
     return task;
   }
 
@@ -138,7 +140,7 @@ class CudfOutputQueueManagerTest : public testing::Test {
         taskId,
         destination,
         [destination, expectedEndMarker, &receivedData](
-            std::unique_ptr<cudf::packed_columns> data,
+            std::shared_ptr<cudf::packed_columns> data,
             std::vector<int64_t> remainingBytes) {
           ASSERT_EQ(expectedEndMarker, data == nullptr)
               << "for destination " << destination;
@@ -151,7 +153,7 @@ class CudfOutputQueueManagerTest : public testing::Test {
       int destination,
       bool& receivedEndMarker) {
     return [destination, &receivedEndMarker](
-               std::unique_ptr<cudf::packed_columns> data,
+               std::shared_ptr<cudf::packed_columns> data,
                std::vector<int64_t> remainingBytes) {
       EXPECT_FALSE(receivedEndMarker) << "for destination " << destination;
       EXPECT_TRUE(data == nullptr) << "for destination " << destination;
@@ -185,7 +187,7 @@ class CudfOutputQueueManagerTest : public testing::Test {
   CudfDataAvailableCallback receiveData(int destination, bool& receivedData) {
     receivedData = false;
     return [destination, &receivedData](
-               std::unique_ptr<cudf::packed_columns> data,
+               std::shared_ptr<cudf::packed_columns> data,
                std::vector<int64_t> /*remainingBytes*/) {
       EXPECT_FALSE(receivedData) << "for destination " << destination;
       EXPECT_TRUE(data != nullptr) << "for destination " << destination;
@@ -222,7 +224,7 @@ class CudfOutputQueueManagerTest : public testing::Test {
       queueManager_->getData(
           taskId,
           destination,
-          [&](std::unique_ptr<cudf::packed_columns> data,
+          [&](std::shared_ptr<cudf::packed_columns> data,
               std::vector<int64_t> /*remainingBytes*/) {
             if (data == nullptr) {
               atEnd = true;
@@ -240,7 +242,7 @@ class CudfOutputQueueManagerTest : public testing::Test {
     // out of order requests are allowed (fetch after delete)
     {
       struct Response {
-        std::unique_ptr<cudf::packed_columns> data;
+        std::shared_ptr<cudf::packed_columns> data;
         std::vector<int64_t> remainingBytes;
       };
       folly::Promise<Response> promise;
@@ -249,7 +251,7 @@ class CudfOutputQueueManagerTest : public testing::Test {
           taskId,
           destination,
           [&promise](
-              std::unique_ptr<cudf::packed_columns> data,
+              std::shared_ptr<cudf::packed_columns> data,
               std::vector<int64_t> remainingBytes) {
             promise.setValue(
                 Response{std::move(data), std::move(remainingBytes)});
@@ -387,7 +389,7 @@ TEST_F(CudfOutputQueueManagerTest, lateTaskCreation) {
 
   // Fetch data from a non-existing task.
   struct Response {
-    std::unique_ptr<cudf::packed_columns> data;
+    std::shared_ptr<cudf::packed_columns> data;
     std::vector<int64_t> remainingBytes;
   };
   folly::Promise<Response> promise;
@@ -396,7 +398,7 @@ TEST_F(CudfOutputQueueManagerTest, lateTaskCreation) {
       taskId,
       destination,
       [&promise](
-          std::unique_ptr<cudf::packed_columns> data,
+          std::shared_ptr<cudf::packed_columns> data,
           std::vector<int64_t> remainingBytes) {
         promise.setValue(Response{std::move(data), std::move(remainingBytes)});
       });
@@ -421,7 +423,7 @@ TEST_F(CudfOutputQueueManagerTest, lateTaskCreation) {
         taskId,
         destination,
         [&promise](
-            std::unique_ptr<cudf::packed_columns> data,
+            std::shared_ptr<cudf::packed_columns> data,
             std::vector<int64_t> remainingBytes) {
           promise.setValue(
               Response{std::move(data), std::move(remainingBytes)});

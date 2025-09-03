@@ -30,12 +30,12 @@ namespace facebook::velox::cudf_exchange {
 /// The remainingBytes vector contains the sizes for the
 /// packed_columns elements remaining in the queue.
 using CudfDataAvailableCallback = std::function<void(
-    std::unique_ptr<cudf::packed_columns> data,
+    std::shared_ptr<cudf::packed_columns> data,
     std::vector<int64_t> remainingBytes)>;
 
 struct CudfDataAvailable {
   CudfDataAvailableCallback callback{nullptr};
-  std::unique_ptr<cudf::packed_columns> data;
+  std::shared_ptr<cudf::packed_columns> data;
   std::vector<int64_t> remainingBytes;
 
   void notify() {
@@ -73,15 +73,10 @@ class CudfDestinationQueue {
 
   /// @brief Enqueues the data to the back of the queue.
   /// @param data Corresponds to a RowVector
-  void enqueueBack(std::unique_ptr<cudf::packed_columns> data);
-
-  /// @brief Enqueues the data to the front of the queue. This is needed when
-  /// a transfer fails.
-  /// @param data
-  void enqueueFront(std::unique_ptr<cudf::packed_columns> data);
+  void enqueueBack(std::shared_ptr<cudf::packed_columns> data);
 
   struct Data {
-    std::unique_ptr<cudf::packed_columns> data;
+    std::shared_ptr<cudf::packed_columns> data;
     std::vector<int64_t> remainingBytes;
     /// Whether the result is returned immediately without invoking the `notify'
     /// callback.
@@ -95,7 +90,7 @@ class CudfDestinationQueue {
   [[nodiscard]] Data getData(CudfDataAvailableCallback notify);
 
   /// Removes all remaining data from the queue and returns the removed data.
-  std::vector<std::unique_ptr<cudf::packed_columns>> deleteResults();
+  std::vector<std::shared_ptr<cudf::packed_columns>> deleteResults();
 
   /// Returns and clears the notify callback, if any, along with arguments for
   /// the callback.
@@ -112,7 +107,7 @@ class CudfDestinationQueue {
  private:
   void clearNotify();
 
-  std::deque<std::unique_ptr<cudf::packed_columns>> queue_;
+  std::deque<std::shared_ptr<cudf::packed_columns>> queue_;
   CudfDataAvailableCallback notify_{nullptr};
   Stats stats_;
 };
@@ -133,11 +128,14 @@ class CudfOutputQueue {
   };
 
   /// @brief Creates a new output queue for a data-producing task.
-  /// @param taskId The id of the source task that produces the data
+  /// @param task A reference tot he task that produces the data
+  /// @param kind The kind of output queue, see PartitionedOutputNode::Kind
+  /// enum.
   /// @param numDestinations The number of destinations, i.e. the partitions.
   /// @param numDrivers The initial number of drivers.
   CudfOutputQueue(
       std::shared_ptr<exec::Task> task,
+      facebook::velox::core::PartitionedOutputNode::Kind kind,
       int numDestinations,
       uint32_t numDrivers);
 
@@ -150,13 +148,20 @@ class CudfOutputQueue {
   /// already initialized.
   bool initialize(
       std::shared_ptr<exec::Task> task,
+      facebook::velox::core::PartitionedOutputNode::Kind kind,
       int numDestinations,
       uint32_t numDrivers);
 
   core::PartitionedOutputNode::Kind kind() const {
-    // TODO: Need to support the other modes as well
-    return core::PartitionedOutputNode::Kind::kPartitioned;
+    return kind_;
   }
+
+  /// @brief The total number of output queues may not be known at the task
+  /// start time for broadcast and arbitrary output queue type. This method can
+  /// be called to update the total number of broadcast or arbitrary
+  /// destinations while the task is running. The function throws if this is
+  /// partitioned output buffer type.
+  void updateOutputBuffers(int numQueues, bool noMoreBuffers);
 
   /// @brief When we understand the final number of split groups (for grouped
   /// execution only), we need to update the number of producing drivers here.
@@ -213,22 +218,48 @@ class CudfOutputQueue {
   // updating the total number of drivers, we don't.
   void checkIfDone(bool oneDriverFinished);
 
+  /// Given an updated total number of broadcast buffers, add any missing ones
+  /// and enqueue data that has been produced so far (e.g. dataToBroadcast_).
+  void addOutputBuffersLocked(int numBuffers);
+
+  void enqueueBroadcastOutputLocked(
+      std::unique_ptr<cudf::packed_columns> data,
+      std::vector<CudfDataAvailable>& dataAvailableCbs);
+
   void enqueuePartitionedOutputLocked(
       int destination,
       std::unique_ptr<cudf::packed_columns> data,
       std::vector<CudfDataAvailable>& dataAvailableCbs);
 
+  FOLLY_ALWAYS_INLINE bool isBroadcast() const {
+    return kind_ == core::PartitionedOutputNode::Kind::kBroadcast;
+  }
+
+  FOLLY_ALWAYS_INLINE bool isPartitioned() const {
+    return kind_ == core::PartitionedOutputNode::Kind::kPartitioned;
+  }
+
+  FOLLY_ALWAYS_INLINE bool isArbitrary() const {
+    return kind_ == core::PartitionedOutputNode::Kind::kArbitrary;
+  }
+
   // Reference to the task that owns this CudfQueue.
   std::shared_ptr<exec::Task> task_{nullptr};
+  core::PartitionedOutputNode::Kind kind_;
 
   // Total number of drivers expected to produce results. This number will
   // decrease in the end of grouped execution, when we understand the real
   // number of producer drivers (depending on the number of split groups).
   uint32_t numDrivers_{0};
 
-  // If true, then we don't allow to add new destination buffers. This only
-  // applies for non-partitioned output buffer type.
+  // If true, then we don't allow to add new destination queues. This only
+  // applies for non-partitioned output type.
   bool noMoreBuffers_{false};
+
+  // While noMoreBuffers_ is false, stores the enqueued data to
+  // broadcast to destinations that have not yet been initialized. Cleared
+  // after receiving no-more-broadcast-buffers signal.
+  std::vector<std::shared_ptr<cudf::packed_columns>> dataToBroadcast_;
 
   // For governing multi-threaded access.
   std::mutex mutex_;

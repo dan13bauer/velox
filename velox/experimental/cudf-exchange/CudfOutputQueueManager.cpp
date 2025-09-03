@@ -20,6 +20,7 @@
 #include <cudf/table/table.hpp>
 #include <rmm/cuda_stream_view.hpp>
 #include <rmm/exec_policy.hpp>
+#include "velox/core/PlanNode.h"
 
 namespace facebook::velox::cudf_exchange {
 
@@ -35,6 +36,7 @@ CudfOutputQueueManager::getInstanceRef() {
 
 void CudfOutputQueueManager::initializeTask(
     std::shared_ptr<exec::Task> task,
+    facebook::velox::core::PartitionedOutputNode::Kind kind,
     int numDestinations,
     int numDrivers) {
   const auto& taskId = task->taskId();
@@ -42,9 +44,9 @@ void CudfOutputQueueManager::initializeTask(
     auto it = queues.find(taskId);
     if (it == queues.end()) {
       queues[taskId] = std::make_shared<CudfOutputQueue>(
-          std::move(task), numDestinations, numDrivers);
+          std::move(task), kind, numDestinations, numDrivers);
     } else {
-      if (!it->second->initialize(task, numDestinations, numDrivers)) {
+      if (!it->second->initialize(task, kind, numDestinations, numDrivers)) {
         VELOX_FAIL(
             "Registering a cudf output queue for pre-existing taskId {}",
             taskId);
@@ -88,7 +90,11 @@ void CudfOutputQueueManager::getData(
     if (it == queues.end()) {
       // create the queue structures such that the notify callback can be
       // stored. It will be later initialized once the task is being created.
-      outputQueue = std::make_shared<CudfOutputQueue>(nullptr, destination, 0);
+      // Set to partitioned, this will be changed when properly initialized.
+      auto kind =
+          facebook::velox::core::PartitionedOutputNode::Kind::kPartitioned;
+      outputQueue =
+          std::make_shared<CudfOutputQueue>(nullptr, kind, destination, 0);
       queues[taskId] = outputQueue;
     } else {
       // queue exists.

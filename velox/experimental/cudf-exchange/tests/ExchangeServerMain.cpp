@@ -25,6 +25,7 @@
 #include <rmm/mr/device/pool_memory_resource.hpp>
 #include <csignal>
 #include "velox/common/memory/MemoryPool.h"
+#include "velox/core/PlanNode.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/experimental/cudf-exchange/Communicator.h"
 #include "velox/experimental/cudf-exchange/CudfExchangeProtocol.h"
@@ -90,7 +91,8 @@ class CudfExchangeServerTest {
         std::move(queryCtx),
         Task::ExecutionMode::kParallel);
 
-    queueManager_->initializeTask(task, numDestinations, numDrivers);
+    auto kind = PartitionedOutputNode::Kind::kPartitioned;
+    queueManager_->initializeTask(task, kind, numDestinations, numDrivers);
     return task;
   }
 

@@ -36,7 +36,7 @@ void CudfDestinationQueue::Stats::recordDequeue(
 }
 
 void CudfDestinationQueue::enqueueBack(
-    std::unique_ptr<cudf::packed_columns> data) {
+    std::shared_ptr<cudf::packed_columns> data) {
   // drop duplicate end markers.
   if (data == nullptr && !queue_.empty() && queue_.back() == nullptr) {
     return;
@@ -46,17 +46,6 @@ void CudfDestinationQueue::enqueueBack(
     stats_.recordEnqueue(data.get());
   }
   queue_.push_back(std::move(data));
-}
-
-void CudfDestinationQueue::enqueueFront(
-    std::unique_ptr<cudf::packed_columns> data) {
-  // ignore nullptr.
-  if (data == nullptr) {
-    return;
-  }
-
-  // insert at the front.
-  queue_.push_front(std::move(data));
 }
 
 CudfDestinationQueue::Data CudfDestinationQueue::getData(
@@ -85,9 +74,9 @@ CudfDestinationQueue::Data CudfDestinationQueue::getData(
   return {std::move(data), std::move(remainingBytes), true};
 }
 
-std::vector<std::unique_ptr<cudf::packed_columns>>
+std::vector<std::shared_ptr<cudf::packed_columns>>
 CudfDestinationQueue::deleteResults() {
-  std::vector<std::unique_ptr<cudf::packed_columns>> freed;
+  std::vector<std::shared_ptr<cudf::packed_columns>> freed;
   for (auto i = 0; i < queue_.size(); ++i) {
     if (queue_[i] == nullptr) {
       VELOX_CHECK_EQ(i, queue_.size() - 1, "null marker found in the middle");
@@ -134,12 +123,16 @@ std::string CudfDestinationQueue::toString() {
 }
 
 // ---------- CudfOutputQueue ----------
-
 CudfOutputQueue::CudfOutputQueue(
     std::shared_ptr<exec::Task> task,
+    facebook::velox::core::PartitionedOutputNode::Kind kind,
     int numDestinations,
     uint32_t numDrivers)
-    : task_(task), numDrivers_(numDrivers) {
+    : task_(task), kind_(kind), numDrivers_(numDrivers) {
+  VELOX_CHECK(
+      kind_ == core::PartitionedOutputNode::Kind::kBroadcast ||
+          kind_ == core::PartitionedOutputNode::Kind::kPartitioned,
+      "Unsupported output queue");
   // create a queue for each destination.
   queues_.reserve(numDestinations);
   for (int i = 0; i < numDestinations; ++i) {
@@ -150,6 +143,7 @@ CudfOutputQueue::CudfOutputQueue(
 
 bool CudfOutputQueue::initialize(
     std::shared_ptr<exec::Task> task,
+    facebook::velox::core::PartitionedOutputNode::Kind kind,
     int numDestinations,
     uint32_t numDrivers) {
   std::lock_guard<std::mutex> l(mutex_);
@@ -159,12 +153,45 @@ bool CudfOutputQueue::initialize(
   }
   task_ = task;
   numDrivers_ = numDrivers;
+  kind_ = kind;
   // create additional queues if there are more destinations.
   for (int i = queues_.size(); i < numDestinations; ++i) {
     // create the destination queues inside the vector using emplace_back.
     queues_.emplace_back(std::make_unique<CudfDestinationQueue>());
   }
   return true;
+}
+
+void CudfOutputQueue::updateOutputBuffers(int numQueues, bool noMoreBuffers) {
+  if (isPartitioned()) {
+    VELOX_CHECK_EQ(queues_.size(), numQueues);
+    VELOX_CHECK(noMoreBuffers);
+    noMoreBuffers_ = true;
+    return;
+  }
+
+  std::vector<ContinuePromise> promises;
+  bool isFinished;
+  {
+    std::lock_guard<std::mutex> l(mutex_);
+
+    if (numQueues > queues_.size()) {
+      addOutputBuffersLocked(numQueues);
+    }
+
+    if (!noMoreBuffers) {
+      return;
+    }
+
+    noMoreBuffers_ = true;
+    isFinished = isFinishedLocked();
+    // updateAfterAcknowledgeLocked(dataToBroadcast_, promises);
+  }
+
+  // releaseAfterAcknowledge(dataToBroadcast_, promises);
+  if (isFinished) {
+    task_->setAllOutputConsumed();
+  }
 }
 
 void CudfOutputQueue::updateNumDrivers(uint32_t newNumDrivers) {
@@ -195,10 +222,19 @@ bool CudfOutputQueue::enqueue(
     std::lock_guard<std::mutex> l(mutex_);
     VELOX_CHECK_LT(destination, queues_.size());
 
-    // TODO: Support other output modes as well. This is only for partitioned.
-    enqueuePartitionedOutputLocked(
-        destination, std::move(data), dataAvailableCallbacks);
-
+    switch (kind_) {
+      case core::PartitionedOutputNode::Kind::kBroadcast:
+        VELOX_CHECK_EQ(destination, 0, "Bad destination {}", destination);
+        enqueueBroadcastOutputLocked(std::move(data), dataAvailableCallbacks);
+        break;
+      case core::PartitionedOutputNode::Kind::kArbitrary:
+        VELOX_FAIL("kArbitrary not yet supported in CudfQueues");
+        break;
+      case core::PartitionedOutputNode::Kind::kPartitioned:
+        enqueuePartitionedOutputLocked(
+            destination, std::move(data), dataAvailableCallbacks);
+        break;
+    }
     // FIXME: Add a check whether queue exceeds its limit.
   }
   // Now that data is enqueued, notify blocked readers (outside of mutex.)
@@ -269,6 +305,51 @@ void CudfOutputQueue::checkIfDone(bool oneDriverFinished) {
   // Notify outside of mutex.
   for (auto& notification : finished) {
     notification.notify();
+  }
+}
+
+void CudfOutputQueue::addOutputBuffersLocked(int numQueues) {
+  // Adds additional output buffers. Allowed for broadcast and arbitrary
+  // if not "closed".
+  VELOX_CHECK(!noMoreBuffers_);
+  VELOX_CHECK(!isPartitioned());
+  queues_.reserve(numQueues);
+  for (int32_t i = queues_.size(); i < numQueues; ++i) {
+    auto queue = std::make_unique<CudfDestinationQueue>();
+    if (isBroadcast()) {
+      // enqueue data that has already been sent to the other
+      // destination queues.
+      for (const auto& data : dataToBroadcast_) {
+        queue->enqueueBack(data);
+      }
+      if (atEnd_) {
+        queue->enqueueBack(nullptr);
+      }
+    }
+    queues_.emplace_back(std::move(queue));
+  }
+  // TODO: Add stats!
+  // finishedBufferStats_.resize(numQueues);
+}
+
+void CudfOutputQueue::enqueueBroadcastOutputLocked(
+    std::unique_ptr<cudf::packed_columns> data,
+    std::vector<CudfDataAvailable>& dataAvailableCbs) {
+  VELOX_DCHECK(isBroadcast());
+  VELOX_DCHECK(dataAvailableCbs.empty());
+
+  std::shared_ptr<cudf::packed_columns> sharedData(data.release());
+  for (auto& queue : queues_) {
+    if (queue != nullptr) {
+      queue->enqueueBack(sharedData);
+      dataAvailableCbs.emplace_back(queue->getAndClearNotify());
+    }
+  }
+
+  // NOTE: we don't need to add new queue to 'dataToBroadcast_' if there is no
+  // more output buffers.
+  if (!noMoreBuffers_) {
+    dataToBroadcast_.emplace_back(sharedData);
   }
 }
 

@@ -31,22 +31,21 @@ namespace facebook::velox::cudf_exchange {
 // Computes a mapping from names in n2 to names in n1
 // and returns that mapping in remap.
 // Names in n2 must occurs in n1.
-static 
-void getRemapping(const std::vector<std::string>& n1,
-                   const std::vector<std::string>& n2,
-                   std::vector<uint32_t>& remap) {
-    std::unordered_map<std::string, uint32_t> lookup;
-    for (uint32_t i = 0; i < n1.size(); ++i) {
-        lookup[n1[i]] = i;
-    }
+static void getRemapping(
+    const std::vector<std::string>& n1,
+    const std::vector<std::string>& n2,
+    std::vector<uint32_t>& remap) {
+  std::unordered_map<std::string, uint32_t> lookup;
+  for (uint32_t i = 0; i < n1.size(); ++i) {
+    lookup[n1[i]] = i;
+  }
 
-    remap.clear();
-    remap.reserve(n2.size());
-    for (const auto& key : n2) {
-        remap.push_back(lookup.at(key));
-    }
+  remap.clear();
+  remap.reserve(n2.size());
+  for (const auto& key : n2) {
+    remap.push_back(lookup.at(key));
+  }
 }
-
 
 CudfPartitionedOutput::CudfPartitionedOutput(
     int32_t operatorId,
@@ -69,11 +68,11 @@ CudfPartitionedOutput::CudfPartitionedOutput(
   auto sources = planNode->sources();
   std::vector<std::string> inNames, outNames;
   inNames.reserve(planNode->inputType()->size());
-  for(int i = 0; i < planNode->inputType()->size(); ++i) {
+  for (int i = 0; i < planNode->inputType()->size(); ++i) {
     inNames.push_back(planNode->inputType()->nameOf(i));
   }
   outNames.reserve(planNode->outputType()->size());
-  for(int i = 0; i < planNode->outputType()->size(); ++i) {
+  for (int i = 0; i < planNode->outputType()->size(); ++i) {
     outNames.push_back(planNode->outputType()->nameOf(i));
   }
   if (inNames != outNames) {
@@ -118,8 +117,7 @@ void CudfPartitionedOutput::addInput(RowVectorPtr input) {
         tableView.num_rows(),
         nullptr);
     // FIXME Will return true if queue is full: ignore for now
-    VLOG(3) << "enqueued cudf vector with "
-            << tableView.num_rows() << " rows";
+    VLOG(3) << "enqueued cudf vector with " << tableView.num_rows() << " rows";
   }
 }
 
@@ -206,7 +204,9 @@ void CudfPartitionedOutput::initPartitionKeys(
   }
 }
 
-void CudfPartitionedOutput::hashPartition(cudf::table_view tableView, rmm::cuda_stream_view stream) {
+void CudfPartitionedOutput::hashPartition(
+    cudf::table_view tableView,
+    rmm::cuda_stream_view stream) {
   VLOG(3) << "Hashing and partitioning into " << numPartitions_ << " chunks";
 
   // Use cudf hash partitioning
@@ -229,11 +229,12 @@ void CudfPartitionedOutput::hashPartition(cudf::table_view tableView, rmm::cuda_
   // Erase first element since it's always 0 and we don't need it.
   partitionOffsets.erase(partitionOffsets.begin());
 
-  splitAndEnqueue(
-      partitionedTable->view(), partitionOffsets, stream);
+  splitAndEnqueue(partitionedTable->view(), partitionOffsets, stream);
 }
 
-void CudfPartitionedOutput::equalPartition(cudf::table_view tableView, rmm::cuda_stream_view stream) {
+void CudfPartitionedOutput::equalPartition(
+    cudf::table_view tableView,
+    rmm::cuda_stream_view stream) {
   VLOG(3) << "Splitting into " << numPartitions_ << " chunks";
   std::vector<cudf::size_type> offsets;
   cudf::size_type size = tableView.num_rows();

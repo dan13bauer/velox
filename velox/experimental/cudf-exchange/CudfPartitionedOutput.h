@@ -91,7 +91,8 @@ class CudfPartitionedOutput : public exec::Operator,
   bool finished_{false};
   std::string spec_;
 
-  // Used for switching columns when column order differs between input and output.
+  // Used for switching columns when column order differs between input and
+  // output.
   std::vector<uint32_t> remap_;
 };
 

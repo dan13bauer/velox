@@ -60,7 +60,7 @@ void CudfExchangeServer::process() {
           partitionKey_.taskId,
           partitionKey_.destination,
           [this](
-              std::unique_ptr<cudf::packed_columns> data,
+              std::shared_ptr<cudf::packed_columns> data,
               std::vector<int64_t> remainingBytes) {
             // This upcall may be called from another thread than the
             // communicator thread. It is called

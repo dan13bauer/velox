@@ -30,13 +30,16 @@ class CudfOutputQueueManager {
 
   /// @brief Initializes a task and creates the corresponding output queues that
   /// are associated with this task.
-  /// @param taskId The unique task Id.
+  /// @param task A reference to the task
+  /// @param kind The kind of output queue that should be created, matches the
+  /// partitioned output kind.
   /// @param numQueues The number of queues (destinations or partitions)
   /// associated with this task.
   /// @param numDrivers The number of drivers that contribute data to these
   /// queues. Used to recognize when the queues are complete.
   void initializeTask(
       std::shared_ptr<exec::Task> task,
+      core::PartitionedOutputNode::Kind kind,
       int numDestinations,
       int numDrivers);
 

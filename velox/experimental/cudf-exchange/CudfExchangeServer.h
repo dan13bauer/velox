@@ -103,7 +103,7 @@ class CudfExchangeServer
       partitionKeyHash_; // A hash of above, used to create unique tags.
 
   std::atomic<ServerState> state_;
-  std::unique_ptr<cudf::packed_columns> dataPtr_{nullptr};
+  std::shared_ptr<cudf::packed_columns> dataPtr_{nullptr};
   std::recursive_mutex dataMutex_; // mutex for above ptr.
 
   uint32_t sequenceNumber_{0};
