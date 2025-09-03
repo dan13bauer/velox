@@ -1100,6 +1100,7 @@ void Task::initializePartitionOutput() {
         getInstanceRef();
     queueMgr->initializeTask(
         shared_from_this(),
+        partitionedOutputNode->kind(),
         partitionedOutputNode->numPartitions(),
         numOutputDrivers);
 #endif
