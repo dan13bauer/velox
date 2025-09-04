@@ -63,50 +63,6 @@ std::shared_ptr<CudfExchangeSource> CudfExchangeSource::create(
   return source;
 }
 
-bool CudfExchangeSource::shouldRequestLocked() {
-  VLOG(3) << "*** should request locked called atEnd_ :" << atEnd_;
-  if (atEnd_) {
-    return false;
-  }
-
-  if (!requestPending_) {
-    VELOX_CHECK(!promise_.valid() || promise_.isFulfilled());
-    VLOG(3) << "requestPending_ set to true since promise valid: "
-            << promise_.valid()
-            << " and promise fulfilled: " << promise_.isFulfilled();
-    requestPending_ = true;
-    return true;
-  }
-
-  // We are still processing previous request.
-  return false;
-}
-
-folly::SemiFuture<ExchangeSource::Response> CudfExchangeSource::request(
-    std::chrono::microseconds maxWait) {
-  // Highlayer requested data transfer
-  VLOG(3) << "+ recv request for data";
-
-  // Before calling 'request', the caller should have called
-  // 'shouldRequestLocked' and received 'true' response. Hence, we expect
-  // requestPending_ == true, atEnd_ == false.
-  VELOX_CHECK(requestPending_);
-
-  // if the receiver is not yet in state HandshakeComplete, we need to remember
-  // this.
-  requestIssuedBeforeHandshakeComplete_ = !setStateIf(
-      ReceiverState::HandshakeComplete, ReceiverState::ReadyToReceive);
-  communicator_->addToWorkQueue(getSelfPtr());
-
-  promise_ =
-      VeloxPromise<ExchangeSource::Response>("CudfExchangeSource::request");
-  VLOG(3) << "Created new promise_";
-  auto future = promise_.getSemiFuture();
-
-  VLOG(3) << "- recv request for data";
-  return future;
-}
-
 void CudfExchangeSource::process() {
   switch (state_) {
     case ReceiverState::Created: {
@@ -128,13 +84,6 @@ void CudfExchangeSource::process() {
     } break;
     case ReceiverState::WaitingForHandshakeComplete:
       // Waiting for metadata is handled by an upcall from UCXX. Nothing to do
-      break;
-    case ReceiverState::HandshakeComplete:
-      if (requestIssuedBeforeHandshakeComplete_) {
-        // Need to transition to ReadyToReceive since request has been called.
-        setState(ReceiverState::ReadyToReceive);
-        requestIssuedBeforeHandshakeComplete_ = false;
-      }
       break;
     case ReceiverState::ReadyToReceive:
       // change state before calling getMetadata since immediate upcalls in
@@ -161,7 +110,6 @@ void CudfExchangeSource::close() {
   VLOG(1) << "CudfExchangeSource::close called.";
   VLOG(1) << fmt::format("closing task: {}", partitionKey_.toString());
   closed_.store(true);
-  checkSetRequestPromise(); // fulfill any outstanding open request promise.
   VLOG(3) << "Close receiver to remote " << partitionKey_.toString() << ".";
   if (endpointRef_) {
     endpointRef_->removeCommElem(getSelfPtr());
@@ -211,7 +159,7 @@ std::shared_ptr<CudfExchangeSource> CudfExchangeSource::getSelfPtr() {
   return shared_from_this();
 }
 
-void CudfExchangeSource::enqueueAndFulfillPromise(
+void CudfExchangeSource::enqueue(
     std::unique_ptr<cudf::packed_columns> columns,
     MetadataMsg& metadata) {
   std::vector<velox::ContinuePromise> queuePromises;
@@ -220,44 +168,11 @@ void CudfExchangeSource::enqueueAndFulfillPromise(
     std::lock_guard<std::mutex> l(queue_->mutex());
 
     queue_->enqueueLocked(std::move(columns), queuePromises);
-    // enqueueLocked returns one or more promises of waiting CudfExchanges that
-    // can get fulfilled by the reading from the queue.
-    requestPromise =
-        std::move(promise_); // move promise_ while holding the lock.
-    requestPending_ = false;
   }
   // wake up consumers of the CudfExchangeQueue
   for (auto& promise : queuePromises) {
     promise.setValue();
   }
-
-  // Tell the caller of request that the request has been fulfilled.
-  if (requestPromise.valid() && !requestPromise.isFulfilled()) {
-    VLOG(3) << "Fulfilling promise_";
-    requestPromise.setValue(ExchangeSource::Response{
-        metadata.dataSizeBytes, // 0
-        metadata.atEnd, // True
-        metadata.remainingBytes // Empty vector
-    });
-  } else {
-    // The source must have been closed.
-    VELOX_CHECK(closed_.load());
-  }
-}
-
-bool CudfExchangeSource::checkSetRequestPromise() {
-  velox::VeloxPromise<ExchangeSource::Response> promise;
-  {
-    std::lock_guard<std::mutex> l(queue_->mutex());
-    VLOG(3) << "On close: finalizing promise_";
-    promise = std::move(promise_);
-  }
-  if (promise.valid() && !promise.isFulfilled()) {
-    promise.setValue(ExchangeSource::Response{0, false, {}});
-    return true;
-  }
-
-  return false;
 }
 
 void CudfExchangeSource::setEndpoint(std::shared_ptr<EndpointRef> endpointRef) {
@@ -386,7 +301,7 @@ void CudfExchangeSource::onMetadata(
       atEnd_ = true;
       // enqueue a nullpointer to mark the end for this source.
       VLOG(3) << "There is no more data to transfer";
-      enqueueAndFulfillPromise(nullptr, ptr->metadata);
+      enqueue(nullptr, ptr->metadata);
       setState(ReceiverState::Done);
       communicator_->addToWorkQueue(getSelfPtr());
       // jump out of this function.
@@ -465,7 +380,7 @@ void CudfExchangeSource::onData(
     setState(ReceiverState::Done);
   } else {
     VLOG(3) << toString() << "+ onData " << ucs_status_string(status)
-            << "got chunk: " << sequenceNumber_;
+            << " got chunk: " << sequenceNumber_;
 
     this->sequenceNumber_++;
 
@@ -478,8 +393,8 @@ void CudfExchangeSource::onData(
     std::unique_ptr<cudf::packed_columns> columns =
         std::make_unique<cudf::packed_columns>(
             std::move(ptr->metadata.cudfMetadata), std::move(ptr->dataBuf));
-    enqueueAndFulfillPromise(std::move(columns), ptr->metadata);
-    setState(ReceiverState::HandshakeComplete);
+    enqueue(std::move(columns), ptr->metadata);
+    setState(ReceiverState::ReadyToReceive);
   }
   communicator_->addToWorkQueue(getSelfPtr());
 }
