@@ -74,23 +74,6 @@ class CudfExchangeSource
     return true;
   }
 
-  /// Returns true if there is no request to the source pending or if
-  /// this should be retried. If true, the caller is expected to call
-  /// request(). This is expected to be called while holding lock over
-  /// queue_.mutex(). This sets the status of 'this' to be pending. The
-  /// caller is thus expected to call request() without holding a lock over
-  /// queue_.mutex(). This pattern prevents multiple exchange consumer
-  /// threads from issuing the same request.
-  bool shouldRequestLocked();
-
-  /// @brief Called by the upperlayer, e.g CudfExchange to request a transfer
-  /// from remote task
-  /// @param taskId the timeout we are prepared to wait on the server before
-  /// failing the transfer
-  /// @return The future that will indicate when the transfer is done or failed.
-  folly::SemiFuture<ExchangeSource::Response> request(
-      std::chrono::microseconds maxWait);
-
   /// @brief Advances the UCXX communication that was started by issuing
   /// "request"
   void process() override;
@@ -130,7 +113,6 @@ class CudfExchangeSource
   enum class ReceiverState : uint32_t {
     Created,
     WaitingForHandshakeComplete,
-    HandshakeComplete,
     ReadyToReceive,
     WaitingForMetadata,
     WaitingForData,
@@ -164,14 +146,10 @@ class CudfExchangeSource
   /// @return A shared pointer to itself.
   std::shared_ptr<CudfExchangeSource> getSelfPtr();
 
-  // Put the received data into the queue and keep track of the promises.
-  void enqueueAndFulfillPromise(
+  // Put the received data into the exchange queue.
+  void enqueue(
       std::unique_ptr<cudf::packed_columns> columns,
       MetadataMsg& metadata);
-
-  /// Completes the future returned from 'request()' if it hasn't completed
-  /// already.
-  bool checkSetRequestPromise();
 
   /// @brief Sets the endpoint for this receiver.
   void setEndpoint(std::shared_ptr<EndpointRef> endpointRef);
@@ -230,13 +208,6 @@ class CudfExchangeSource
 
   // The shared queue of packed_columns that all CudfExchangeSources write to
   const std::shared_ptr<CudfExchangeQueue> queue_{nullptr};
-
-  // the promise made to the upper layer initiating the communication
-  VeloxPromise<ExchangeSource::Response> promise_{
-      VeloxPromise<ExchangeSource::Response>::makeEmpty()};
-
-  std::atomic<bool> requestIssuedBeforeHandshakeComplete_{false};
-  std::atomic<bool> requestPending_{false};
   std::atomic<bool> closed_{false};
   bool atEnd_{false}; // set when "atEnd" is being received.
 

@@ -41,17 +41,13 @@ void CudfExchangeClient::addRemoteTaskId(const std::string& remoteTaskId) {
     } else {
       sources_.push_back(source);
       queue_->addSourceLocked();
-      readySources_.push(source);
       VLOG(3) << "Added remote split for task: " << remoteTaskId;
-      requestSpecs = pickSourcesToRequestLocked();
     }
   }
 
   // Outside of lock.
   if (toClose) {
     toClose->close();
-  } else {
-    request(std::move(requestSpecs));
   }
 }
 
@@ -62,7 +58,6 @@ void CudfExchangeClient::noMoreRemoteTasks() {
 
 void CudfExchangeClient::close() {
   std::vector<std::shared_ptr<CudfExchangeSource>> sources;
-  std::queue<std::shared_ptr<CudfExchangeSource>> readySources;
   {
     std::lock_guard<std::mutex> l(queue_->mutex());
     if (closed_) {
@@ -70,7 +65,6 @@ void CudfExchangeClient::close() {
     }
     closed_ = true;
     sources = std::move(sources_);
-    readySources = std::move(readySources_);
   }
 
   // Outside of mutex.
@@ -112,7 +106,7 @@ folly::F14FastMap<std::string, RuntimeMetric> CudfExchangeClient::stats()
 
 std::unique_ptr<cudf::packed_columns>
 CudfExchangeClient::next(int consumerId, bool* atEnd, ContinueFuture* future) {
-  VLOG(3) << "CudfExchangeClient::next called.";
+  VLOG(3) << "CudfExchangeClient::next called for task " << taskId_;
   std::vector<std::shared_ptr<CudfExchangeSource>> requestSpecs;
   std::unique_ptr<cudf::packed_columns> columns;
   ContinuePromise stalePromise = ContinuePromise::makeEmpty();
@@ -137,79 +131,15 @@ CudfExchangeClient::next(int consumerId, bool* atEnd, ContinueFuture* future) {
     if (columns != nullptr && queue_->size() > maxQueuedColumns_) {
       return columns;
     }
-
-    requestSpecs = pickSourcesToRequestLocked();
   }
 
   // Outside of lock
   if (stalePromise.valid()) {
     stalePromise.setValue();
   }
-  // not at end and still room in the queue: request more data from all
-  // eligible sources.
-  request(std::move(requestSpecs));
   return columns;
 }
 
-void CudfExchangeClient::request(
-    std::vector<std::shared_ptr<CudfExchangeSource>>&& sources) {
-  auto self = shared_from_this();
-  for (auto& source : sources) {
-    VLOG(3) << "Requesting data from source: " << source->toString();
-    auto future = folly::SemiFuture<ExchangeSource::Response>::makeEmpty();
-    future = source->request(kRequestDataMaxWait);
-    VELOX_CHECK(future.valid());
-    std::move(future)
-        .via(executor_)
-        .thenValue(
-            [self, source = std::move(source), sendTimeMs = getCurrentTimeMs()](
-                ExchangeSource::Response&& response) {
-              const auto requestTimeMs = getCurrentTimeMs() - sendTimeMs;
-              RECORD_HISTOGRAM_METRIC_VALUE(
-                  kMetricExchangeDataTimeMs, requestTimeMs);
-              RECORD_METRIC_VALUE(kMetricExchangeDataBytes, response.bytes);
-              RECORD_HISTOGRAM_METRIC_VALUE(
-                  kMetricExchangeDataSize, response.bytes);
-              RECORD_METRIC_VALUE(kMetricExchangeDataCount);
-
-              VLOG(3) << "Received data from source: " << source->toString();
-
-              std::vector<std::shared_ptr<CudfExchangeSource>> requestSpecs;
-              {
-                std::lock_guard<std::mutex> l(self->queue_->mutex());
-                if (self->closed_) {
-                  return;
-                }
-                // add source back into the ready queue when not at end.
-                if (!response.atEnd) {
-                  self->readySources_.push(std::move(source));
-                  requestSpecs = self->pickSourcesToRequestLocked();
-                }
-              }
-              self->request(std::move(requestSpecs));
-            })
-        .thenError(
-            folly::tag_t<std::exception>{}, [self](const std::exception& e) {
-              self->queue_->setError(e.what());
-            });
-  }
-}
-
-std::vector<std::shared_ptr<CudfExchangeSource>>
-CudfExchangeClient::pickSourcesToRequestLocked() {
-  if (closed_) {
-    return {};
-  }
-  std::vector<std::shared_ptr<CudfExchangeSource>> requestSpecs;
-  while (!readySources_.empty()) {
-    auto& source = readySources_.front();
-    VELOX_CHECK(source->shouldRequestLocked());
-    requestSpecs.push_back(std::move(source));
-    readySources_.pop();
-  }
-
-  return requestSpecs;
-}
 
 CudfExchangeClient::~CudfExchangeClient() {
   close();

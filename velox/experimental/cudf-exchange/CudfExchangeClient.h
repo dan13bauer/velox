@@ -100,10 +100,6 @@ class CudfExchangeClient
   }
 
  private:
-  std::vector<std::shared_ptr<CudfExchangeSource>> pickSourcesToRequestLocked();
-
-  void request(std::vector<std::shared_ptr<CudfExchangeSource>>&& requestSpecs);
-
   // Handy for ad-hoc logging.
   const std::string taskId_;
   const int destination_;
@@ -119,10 +115,6 @@ class CudfExchangeClient
 
   // Total number of packed_clumns in flight.
   int64_t totalPendingColumns_{0};
-
-  // A queue of sources for which no reply is pending and that are not
-  // atEnd. These are the sources to which requests are going to be sent.
-  std::queue<std::shared_ptr<CudfExchangeSource>> readySources_;
 };
 
 } // namespace facebook::velox::cudf_exchange
