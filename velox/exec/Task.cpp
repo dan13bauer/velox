@@ -2575,22 +2575,26 @@ void Task::maybeRemoveFromOutputBufferManager() {
       // Capture output buffer stats before deleting the buffer.
       {
         std::lock_guard<std::timed_mutex> l(mutex_);
-        if (!taskStats_.outputBufferStats.has_value()) {
-          taskStats_.outputBufferStats = bufferManager->stats(taskId_);
+        auto optStats = bufferManager->stats(taskId_);
+        if (!taskStats_.outputBufferStats.has_value() && optStats.has_value()) {
+          taskStats_.outputBufferStats = optStats;
         }
       }
       bufferManager->removeTask(taskId_);
     }
 #ifdef VELOX_ENABLE_CUDF
-    // Do the same for the Cudf Queue Manager
-    auto queueMgr = facebook::velox::cudf_exchange::CudfOutputQueueManager::
-        getInstanceRef();
-    // TODO: Add stats, call to queueMgr->stats(taskId_) doesn't exist yet.
-    // std::lock_guard<std::timed_mutex> l(mutex_);
-    // if (!taskStats_.outputBufferStats.has_value()) {
-    //   taskStats_.outputBufferStats = queueMgr->stats(taskId_);
-    // }
-    queueMgr->removeTask(taskId_);
+      // Capture output queue stats before deleting the queue.
+      auto queueMgr = facebook::velox::cudf_exchange::CudfOutputQueueManager::
+          getInstanceRef();
+      // Capture output buffer stats before deleting the buffer.
+      {
+        std::lock_guard<std::timed_mutex> l(mutex_);
+        auto optStats = queueMgr->stats(taskId_);
+        if (optStats.has_value() && optStats.value().totalPagesSent > 0) {
+          taskStats_.outputBufferStats = optStats;
+        }
+      }
+      queueMgr->removeTask(taskId_);
 #endif
   }
 }
