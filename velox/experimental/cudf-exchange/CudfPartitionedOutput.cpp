@@ -125,6 +125,11 @@ void CudfPartitionedOutput::addInput(RowVectorPtr input) {
     VLOG(3) << "enqueued cudf vector with "
             << tableView.num_rows() << " rows";
   }
+  // record the statistics.
+  {
+    auto lockedStats = stats_.wlock();
+    lockedStats->addOutputVector(input->estimateFlatSize(), input->size());
+  }
 }
 
 exec::BlockingReason CudfPartitionedOutput::isBlocked(ContinueFuture* future) {
