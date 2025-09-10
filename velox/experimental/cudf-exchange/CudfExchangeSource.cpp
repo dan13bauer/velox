@@ -134,7 +134,8 @@ folly::F14FastMap<std::string, RuntimeMetric> CudfExchangeSource::metrics()
   // exchange client.
   map["cudfExchangeSource.numPackedColumns"] = metrics_.numPackedColumns_;
   map["cudfExchangeSource.totalBytes"] = metrics_.totalBytes_;
-  map["cudfExchangeSource.rttPerRequest"] = metrics_.rttPerRequest_;
+  map["cudfExchangeSource.timePerPackedColumns"] = metrics_.timePerPackedColumns_;
+
   return map;
 }
 
@@ -349,6 +350,7 @@ void CudfExchangeSource::onMetadata(
             << " using tag: " << std::hex << dataTag << std::dec;
 
     setState(ReceiverState::WaitingForData);
+    ptr->sendTime = getCurrentTimeMicro(); // Remember the start fim for the stats.
     request_ = endpointRef_->endpoint_->tagRecv(
         ptr->dataBuf->data(),
         ptr->metadata.dataSizeBytes,
@@ -389,6 +391,7 @@ void CudfExchangeSource::onData(
     VLOG(0) << toString() << errorMsg;
     setState(ReceiverState::Done);
   } else {
+    auto endTime = getCurrentTimeMicro();
     VLOG(3) << toString() << "+ onData " << ucs_status_string(status)
             << " got chunk: " << sequenceNumber_;
 
@@ -397,14 +400,17 @@ void CudfExchangeSource::onData(
     std::shared_ptr<DataAndMetadata> ptr =
         std::static_pointer_cast<DataAndMetadata>(arg);
 
-    metrics_.numPackedColumns_.addValue(1);
-    metrics_.totalBytes_.addValue(ptr->metadata.dataSizeBytes);
-
     std::unique_ptr<cudf::packed_columns> columns =
         std::make_unique<cudf::packed_columns>(
             std::move(ptr->metadata.cudfMetadata), std::move(ptr->dataBuf));
     enqueue(std::move(columns), ptr->metadata);
     setState(ReceiverState::ReadyToReceive);
+
+    metrics_.numPackedColumns_.addValue(1);
+    metrics_.totalBytes_.addValue(ptr->metadata.dataSizeBytes);
+    uint64_t timeDiffNanos =
+                    (endTime - ptr->sendTime) * 1000L;
+    metrics_.timePerPackedColumns_.addValue(timeDiffNanos);
   }
   communicator_->addToWorkQueue(getSelfPtr());
 }

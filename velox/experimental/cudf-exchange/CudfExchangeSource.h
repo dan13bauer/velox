@@ -41,11 +41,11 @@ namespace facebook::velox::cudf_exchange {
 struct CudfExchangeMetrics {
   CudfExchangeMetrics()
       : numPackedColumns_(RuntimeMetric(RuntimeCounter::Unit::kNone)),
-        totalBytes_(RuntimeCounter::Unit::kBytes),
-        rttPerRequest_(RuntimeMetric(RuntimeCounter::Unit::kNanos)) {}
+        totalBytes_(RuntimeMetric(RuntimeCounter::Unit::kBytes)),
+        timePerPackedColumns_(RuntimeMetric(RuntimeCounter::Unit::kNanos)) {}
   RuntimeMetric numPackedColumns_; // total number of packed columns received.
   RuntimeMetric totalBytes_; // total number of bytes received
-  RuntimeMetric rttPerRequest_;
+  RuntimeMetric timePerPackedColumns_;
 };
 
 /// The CudfExchangeSource is the client that communicates with the remote
@@ -122,6 +122,7 @@ class CudfExchangeSource
   struct DataAndMetadata {
     MetadataMsg metadata;
     std::unique_ptr<rmm::device_buffer> dataBuf;
+    uint64_t sendTime;
   };
 
   /// @brief The constructor is private in order to ensure that exchange sources

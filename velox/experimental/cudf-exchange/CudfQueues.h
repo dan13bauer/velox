@@ -22,6 +22,7 @@
 #include <vector>
 #include "velox/core/PlanNode.h"
 #include "velox/exec/Task.h"
+#include "velox/exec/OutputBuffer.h" // for the Stats structure
 
 namespace facebook::velox::cudf_exchange {
 
@@ -57,8 +58,6 @@ class CudfDestinationQueue {
     void recordEnqueue(const cudf::packed_columns* data);
 
     void recordDequeue(const cudf::packed_columns* data);
-
-    bool finished{false};
 
     // what has been queued
     int64_t bytesQueued{0};
@@ -128,10 +127,6 @@ class CudfDestinationQueue {
 /// more data will be added.
 class CudfOutputQueue {
  public:
-  struct Stats {
-    /// TODO: Fill in the stats and update the counters
-  };
-
   /// @brief Creates a new output queue for a data-producing task.
   /// @param taskId The id of the source task that produces the data
   /// @param numDestinations The number of destinations, i.e. the partitions.
@@ -167,7 +162,7 @@ class CudfOutputQueue {
   /// fixed. Is is an error to provide a destination larger than the initial
   /// number of destinations. This will change in the future and if destination
   /// > numDestinations, then this will be dynamically adapted like it is done
-  /// in OutputBuffer.
+  /// in OutputQueue.
   /// @param destination The destination, must be < numDestinations.
   /// @param data The data.
   /// @param future Currently not used since no max queue size is enforced.
@@ -175,6 +170,7 @@ class CudfOutputQueue {
   bool enqueue(
       int destination,
       std::unique_ptr<cudf::packed_columns> data,
+      int32_t numRows,
       ContinueFuture* future);
 
   /// @brief Returns the data for the given destination through the callback
@@ -186,13 +182,13 @@ class CudfOutputQueue {
   /// @brief Indicates that a driver is done and won't enqueue any more data.
   void noMoreData();
 
-  /// @brief Returns true if the OutputBuffer is finished. Thread-safe.
+  /// @brief Returns true if the OutputQueue is finished. Thread-safe.
   bool isFinished();
 
   /// @brief Same as isFinished but must only be called when owning the lock.
   bool isFinishedLocked();
 
-  /// @brief Deletes all buffered data and makes all subsequent getData requests
+  /// @brief Deletes all queued data and makes all subsequent getData requests
   /// for 'destination' return empty results. Returns true if all destinations
   /// are deleted, meaning that the buffer is fully consumed and the producer
   /// can be marked finished and the buffers freed.
@@ -204,7 +200,23 @@ class CudfOutputQueue {
 
   std::string toString();
 
+  /// @brief The stats of this output queue are shoe-horned into the stats object
+  /// of OutputBuffer. Since the OutputBuffer's stat object is part of the Task stats
+  /// and eventually processed at the Presto layer, this is the least intrusive way to
+  /// convey stats information. The stats info from the CudfDestinationQueue are omitted
+  /// since also the DestinationBuffer's stats are never processed by Presto.
+  exec::OutputBuffer::Stats stats();
+
  private:
+  // Methods that update the statistics.
+  void updateStatsWithEnqueuedLocked(int64_t bytes, int64_t rows);
+
+  void updateStatsWithFreedLocked(int64_t bytes);
+
+  void updateTotalQueuedBytesMsLocked();
+
+  int64_t getAverageQueueTimeMsLocked() const;
+
   // internal function that is called when all drivers are done.
   void noMoreDrivers();
 
@@ -213,7 +225,7 @@ class CudfOutputQueue {
   // updating the total number of drivers, we don't.
   void checkIfDone(bool oneDriverFinished);
 
-  void enqueuePartitionedOutputLocked(
+  bool enqueuePartitionedOutputLocked(
       int destination,
       std::unique_ptr<cudf::packed_columns> data,
       std::vector<CudfDataAvailable>& dataAvailableCbs);
@@ -228,7 +240,7 @@ class CudfOutputQueue {
 
   // If true, then we don't allow to add new destination buffers. This only
   // applies for non-partitioned output buffer type.
-  bool noMoreBuffers_{false};
+  bool noMoreQueues_{false};
 
   // For governing multi-threaded access.
   std::mutex mutex_;
@@ -236,10 +248,33 @@ class CudfOutputQueue {
   // One buffer per destination.
   std::vector<std::unique_ptr<CudfDestinationQueue>> queues_;
 
+  // The sizes of queues_ and finishedQueueStats_ are the same, but
+  // finishedQueueStats_[i] is set if and only if queues_[i] is null as
+  // the queue is finished and deleted.
+  std::vector<CudfDestinationQueue::Stats> finishedQueueStats_;
+
+
   // keep track of the number of drivers that have finished.
   uint32_t numFinished_{0};
 
   bool atEnd_ = false;
+
+  // actual data in 'queues_'
+  int64_t queuedBytes_{0};
+  int64_t queuedPackedColumns_{0};
+
+  // The total number of bytes/rows/packedColumns sent via this output queue.
+  int64_t totalBytesSent_{0};
+  int64_t totalRowsSent_{0};
+  int64_t totalPackedColumnsSent_{0};
+
+  // Time since last change in queuedBytes_. Used to compute total time data
+  // is queued. Ignored if queuedBytes_ is zero.
+  uint64_t queueStartMs_;
+
+  // Total time data is queued as bytes * time.
+  double totalQueuedBytesMs_;
+
 };
 
 } // namespace facebook::velox::cudf_exchange

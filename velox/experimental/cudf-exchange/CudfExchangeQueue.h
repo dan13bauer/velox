@@ -75,11 +75,6 @@ class CudfExchangeQueue {
     return queue_.size();
   }
 
-  /// Returns the total bytes held by packed_columns in 'this'.
-  int64_t totalBytes() const {
-    return totalBytes_;
-  }
-
   /// Returns the maximum value of total bytes.
   uint64_t peakBytes() const {
     return peakBytes_;

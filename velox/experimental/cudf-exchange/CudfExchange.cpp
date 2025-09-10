@@ -202,18 +202,6 @@ void CudfExchange::recordExchangeClientStats() {
     lockedStats->runtimeStats.erase(name);
     lockedStats->runtimeStats.insert({name, value});
   }
-
-  auto backgroundCpuTimeMs =
-      exchangeClientStats.find(ExchangeClient::kBackgroundCpuTimeMs);
-  if (backgroundCpuTimeMs != exchangeClientStats.end()) {
-    const CpuWallTiming backgroundTiming{
-        static_cast<uint64_t>(backgroundCpuTimeMs->second.count),
-        0,
-        static_cast<uint64_t>(backgroundCpuTimeMs->second.sum) *
-            Timestamp::kNanosecondsInMillisecond};
-    lockedStats->backgroundTiming.clear();
-    lockedStats->backgroundTiming.add(backgroundTiming);
-  }
 }
 
 } // namespace facebook::velox::cudf_exchange

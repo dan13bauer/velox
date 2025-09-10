@@ -76,30 +76,24 @@ void CudfExchangeClient::close() {
 folly::F14FastMap<std::string, RuntimeMetric> CudfExchangeClient::stats()
     const {
   folly::F14FastMap<std::string, RuntimeMetric> stats;
-#if 0
   std::lock_guard<std::mutex> l(queue_->mutex());
 
   for (const auto& source : sources_) {
-    if (source->supportsMetrics()) {
-      for (const auto& [name, value] : source->metrics()) {
-        if (UNLIKELY(stats.count(name) == 0)) {
-          stats.insert(std::pair(name, RuntimeMetric(value.unit)));
-        }
-        stats[name].merge(value);
+    for (const auto& [name, value] : source->metrics()) {
+      if (UNLIKELY(stats.count(name) == 0)) {
+        stats.insert(std::pair(name, RuntimeMetric(value.unit)));
       }
-    } else {
-      for (const auto& [name, value] : source->stats()) {
-        stats[name].addValue(value);
-      }
+      stats[name].merge(value);
     }
   }
 
   stats["peakBytes"] =
       RuntimeMetric(queue_->peakBytes(), RuntimeCounter::Unit::kBytes);
-  stats["numReceivedPages"] = RuntimeMetric(queue_->receivedPages());
-  stats["averageReceivedPageBytes"] = RuntimeMetric(
-      queue_->averageReceivedPageBytes(), RuntimeCounter::Unit::kBytes);
-#endif
+  stats["numReceivedPackedColumns"] = RuntimeMetric(queue_->receivedColumns());
+  stats["averageReceivedColumnsBytes"] = RuntimeMetric(
+      queue_->averageReceivedColumnsBytes(), RuntimeCounter::Unit::kBytes);
+
+
   return stats;
 }
 
