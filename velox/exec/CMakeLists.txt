@@ -101,18 +101,34 @@ velox_add_library(
   WindowFunction.cpp
   WindowPartition.cpp)
 
-velox_link_libraries(
-  velox_exec
-  velox_file
-  velox_core
-  velox_vector
-  velox_connector
-  velox_expression
-  velox_time
-  velox_common_base
-  velox_test_util
-  velox_arrow_bridge
-  velox_common_compression)
+if(${VELOX_ENABLE_CUDF})
+  velox_link_libraries(
+    velox_exec
+    velox_file
+    velox_core
+    velox_vector
+    velox_connector
+    velox_expression
+    velox_time
+    velox_common_base
+    velox_test_util
+    velox_arrow_bridge
+    velox_common_compression
+    cudf::cudf)
+else()
+  velox_link_libraries(
+    velox_exec
+    velox_file
+    velox_core
+    velox_vector
+    velox_connector
+    velox_expression
+    velox_time
+    velox_common_base
+    velox_test_util
+    velox_arrow_bridge
+    velox_common_compression)
+endif()
 
 velox_add_library(velox_cursor Cursor.cpp)
 velox_link_libraries(
