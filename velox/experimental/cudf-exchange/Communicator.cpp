@@ -102,7 +102,6 @@ void Communicator::stop() {
           << " elements_.size(): " << elements_.size()
           << " endpoints_.size(): " << endpoints_.size()
           << " workQueue_._size(): " << workQueue_.size();
-  worker_->stopProgressThread();
   running_.store(false);
 }
 

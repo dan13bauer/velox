@@ -32,7 +32,7 @@ struct Acceptor {
       ucp_ep_h ep);
 
   /// @brief Adds the endpoint reference to the handleToEndpointRef_ map such
-  /// that endpoint handls can be resoved
+  /// that endpoint handles can be resolved
   void registerEndpointRef(std::shared_ptr<EndpointRef> endpointRef);
 
   // Maps the lower-layer UCP endpoint handle to an endpoint reference.

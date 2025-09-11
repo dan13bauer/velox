@@ -4,8 +4,6 @@ The CuDF Exchange is a replacement for the inter-worker velox exchange that happ
 
 The velox cudf exchange implements all the necessary components to efficiently transfer cudf-vectors between tasks. At the core is a UCXX based transfer that directly copies the raw vector data from GPU memory to GPU memory.
 
-A high level description of the design is given here: https://github.ibm.com/perfleap/tt/wiki/Cudf-Exchange-Design-Sketch
-
 ## CMake Configuration
 
 When building for the first time, this error occurs:
@@ -38,8 +36,8 @@ To build the UCXX tests:
 cmake --build _build/release -j --target=exchange_client_tst
 cmake --build _build/release -j --target=exchange_srv_tst
 
-UCX_TCP_KEEPINTVL=1ms UCX_KEEPALIVE_INTERVAL=1ms _build/release/velox/experimental/cudf-exchange/tests/exchange_srv_tst -logtostdout -v=3 -port <PORT>
-UCX_TCP_KEEPINTVL=1ms UCX_KEEPALIVE_INTERVAL=1ms _build/release/velox/experimental/cudf-exchange/tests/exchange_client_tst -logtostdout -v=3 -port <PORT>
+_build/release/velox/experimental/cudf-exchange/tests/exchange_srv_tst -logtostdout -v=3 -port <PORT>
+_build/release/velox/experimental/cudf-exchange/tests/exchange_client_tst -logtostdout -v=3 -port <PORT>
 ```
 
 

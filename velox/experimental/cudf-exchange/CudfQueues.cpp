@@ -85,18 +85,14 @@ CudfDestinationQueue::Data CudfDestinationQueue::getData(
   return {std::move(data), std::move(remainingBytes), true};
 }
 
-std::vector<std::unique_ptr<cudf::packed_columns>>
-CudfDestinationQueue::deleteResults() {
-  std::vector<std::unique_ptr<cudf::packed_columns>> freed;
+void CudfDestinationQueue::deleteResults() {
   for (auto i = 0; i < queue_.size(); ++i) {
     if (queue_[i] == nullptr) {
       VELOX_CHECK_EQ(i, queue_.size() - 1, "null marker found in the middle");
       break;
     }
-    freed.push_back(std::move(queue_[i]));
   }
   queue_.clear();
-  return freed;
 }
 
 CudfDataAvailable CudfDestinationQueue::getAndClearNotify() {
@@ -136,7 +132,7 @@ std::string CudfDestinationQueue::toString() {
 
 CudfOutputQueue::CudfOutputQueue(
     std::shared_ptr<exec::Task> task,
-    int numDestinations,
+    uint32_t numDestinations,
     uint32_t numDrivers)
     : task_(task), numDrivers_(numDrivers) {
   // create a queue for each destination.
@@ -150,7 +146,7 @@ CudfOutputQueue::CudfOutputQueue(
 
 bool CudfOutputQueue::initialize(
     std::shared_ptr<exec::Task> task,
-    int numDestinations,
+    uint32_t numDestinations,
     uint32_t numDrivers) {
   std::lock_guard<std::mutex> l(mutex_);
   if (task_) {
@@ -327,7 +323,7 @@ bool CudfOutputQueue::isFinishedLocked() {
   return true;
 }
 
-bool CudfOutputQueue::deleteResults(int destination) {
+void CudfOutputQueue::deleteResults(int destination) {
   bool isFinished;
   CudfDataAvailable dataAvailable;
   {
@@ -336,9 +332,9 @@ bool CudfOutputQueue::deleteResults(int destination) {
     auto* queue = queues_[destination].get();
     if (queue == nullptr) {
       VLOG(1) << "Extra delete received for destination " << destination;
-      return false;
+      return;
     }
-    std::move(queue->deleteResults());
+    queue->deleteResults();
     dataAvailable = queue->getAndClearNotify();
     queue->finish();
     VELOX_CHECK_LT(destination, finishedQueueStats_.size());
@@ -353,7 +349,6 @@ bool CudfOutputQueue::deleteResults(int destination) {
   if (isFinished) {
     task_->setAllOutputConsumed();
   }
-  return isFinished;
 }
 
 void CudfOutputQueue::terminate() {

@@ -22,11 +22,17 @@
 
 namespace facebook::velox::cudf_exchange {
 
-/// Abstract base class for a cudf queue manager.
 class CudfOutputQueueManager {
  public:
   /// Factory method to retrieve a reference to the output queue manager.
   static std::shared_ptr<CudfOutputQueueManager> getInstanceRef();
+
+  // no constructor to prevent direct instantiation.
+  CudfOutputQueueManager() = default;
+  // no copy constructor.
+  CudfOutputQueueManager(const CudfOutputQueueManager&) = delete;
+  // no copy assignment.
+  CudfOutputQueueManager& operator=(const CudfOutputQueueManager&) = delete;
 
   /// @brief Initializes a task and creates the corresponding output queues that
   /// are associated with this task.
@@ -86,14 +92,6 @@ class CudfOutputQueueManager {
   std::optional<exec::OutputBuffer::Stats> stats(const std::string& taskId);
 
  private:
-  // private constructor to prevent direct instantiation.
-  CudfOutputQueueManager() = default;
-
-  // no copy constructor.
-  CudfOutputQueueManager(const CudfOutputQueueManager&) = delete;
-  // no copy assignment.
-  CudfOutputQueueManager& operator=(const CudfOutputQueueManager&) = delete;
-
   // Retrieves the queue for a task if it exists.
   // Returns NULL if task not found.
   std::shared_ptr<CudfOutputQueue> getQueueIfExists(const std::string& taskId);

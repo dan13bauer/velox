@@ -166,12 +166,12 @@ class CudfExchangeSource
   /// @brief Waits for metadata and installs the onMetadata callback.
   void getMetadata();
 
-  /// @brief Called by the transport layer when data is availab;e
+  /// @brief Called by the transport layer when data is available
   /// @param status indication by transport layer of transfer status
   /// @param arg the serialized form of the metadata
   void onMetadata(ucs_status_t status, std::shared_ptr<void> arg);
 
-  /// @brief Called by the transport layer when data is availab;e
+  /// @brief Called by the transport layer when data is available
   /// @param status indication by transport layer of transfer status
   /// @param arg
   void onData(ucs_status_t status, std::shared_ptr<void> arg);

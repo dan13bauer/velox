@@ -93,8 +93,8 @@ class CudfDestinationQueue {
   /// returned.
   [[nodiscard]] Data getData(CudfDataAvailableCallback notify);
 
-  /// Removes all remaining data from the queue and returns the removed data.
-  std::vector<std::unique_ptr<cudf::packed_columns>> deleteResults();
+  /// Removes all remaining data from the queue.
+  void deleteResults();
 
   /// Returns and clears the notify callback, if any, along with arguments for
   /// the callback.
@@ -133,7 +133,7 @@ class CudfOutputQueue {
   /// @param numDrivers The initial number of drivers.
   CudfOutputQueue(
       std::shared_ptr<exec::Task> task,
-      int numDestinations,
+      uint32_t numDestinations,
       uint32_t numDrivers);
 
   /// @brief initializes an unitialized queue. This is needed in order to
@@ -145,7 +145,7 @@ class CudfOutputQueue {
   /// already initialized.
   bool initialize(
       std::shared_ptr<exec::Task> task,
-      int numDestinations,
+      uint32_t numDestinations,
       uint32_t numDrivers);
 
   core::PartitionedOutputNode::Kind kind() const {
@@ -189,10 +189,8 @@ class CudfOutputQueue {
   bool isFinishedLocked();
 
   /// @brief Deletes all queued data and makes all subsequent getData requests
-  /// for 'destination' return empty results. Returns true if all destinations
-  /// are deleted, meaning that the buffer is fully consumed and the producer
-  /// can be marked finished and the buffers freed.
-  bool deleteResults(int destination);
+  /// for 'destination' return empty results.
+  void deleteResults(int destination);
 
   /// Continues any possibly waiting producers. Called when the producer task
   /// has an error or is cancelled.

@@ -46,7 +46,7 @@ class Communicator {
   friend Acceptor;
 
  public:
-  const ucxx::AmReceiverCallbackOwnerType kAmCallbackOwner = "communicator";
+  const ucxx::AmReceiverCallbackOwnerType kAmCallbackOwner = "velox";
   const ucxx::AmReceiverCallbackIdType kAmCallbackId = 123;
 
   static std::shared_ptr<Communicator> initAndGet(uint16_t port);

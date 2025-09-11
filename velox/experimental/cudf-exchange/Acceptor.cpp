@@ -30,10 +30,10 @@ void Acceptor::cStyleAMCallback(
       request->isCompleted(), "AMCallback called with incomplete request!");
   auto buffer =
       std::dynamic_pointer_cast<ucxx::Buffer>(request->getRecvBuffer());
-  VELOX_CHECK(
-      buffer->getSize() == sizeof(HandshakeMsg),
-      "AMCallback: unexpected size of handshake.");
   HandshakeMsg* handshakePtr = reinterpret_cast<HandshakeMsg*>(buffer->data());
+  VELOX_CHECK(
+      handshakePtr != nullptr,
+      "AMCallback: could not cast to HandhsakeMsg.");
 
   // Create a exchangeServer based on the information received in the initial
   // handshake.
