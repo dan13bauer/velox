@@ -216,15 +216,6 @@ void CudfExchangeSource::sendHandshake() {
           std::placeholders::_1,
           std::placeholders::_2),
       handshakeReq);
-
-  request_->checkError();
-  auto s = request_->getStatus();
-  if (s != UCS_INPROGRESS && s != UCS_OK) {
-    VLOG(0) << "Error in sendHandshake " << ucs_status_string(s)
-            << " failed for task: " << partitionKey_.toString();
-    setState(ReceiverState::Done);
-    communicator_->addToWorkQueue(getSelfPtr());
-  }
 }
 
 void CudfExchangeSource::onHandshake(
@@ -268,13 +259,6 @@ void CudfExchangeSource::getMetadata() {
           std::placeholders::_1,
           std::placeholders::_2),
       metadataReq);
-
-  request_->checkError();
-  auto s = request_->getStatus();
-  if (s != UCS_INPROGRESS && s != UCS_OK) {
-    VLOG(3) << "Error in getMetadata, receive metadata " << ucs_status_string(s)
-            << " failed for task: " << partitionKey_.toString();
-  }
 }
 
 void CudfExchangeSource::onMetadata(
@@ -364,15 +348,6 @@ void CudfExchangeSource::onMetadata(
             std::placeholders::_2),
         ptr // DataAndMetadata
     );
-
-    request_->checkError();
-    auto s = request_->getStatus();
-    if (s != UCS_INPROGRESS && s != UCS_OK) {
-      VLOG(0) << "Error in onMetadata, receive data " << ucs_status_string(s)
-              << " failed for task: " << partitionKey_.toString();
-      setState(ReceiverState::Done);
-      communicator_->addToWorkQueue(getSelfPtr());
-    }
   }
 }
 

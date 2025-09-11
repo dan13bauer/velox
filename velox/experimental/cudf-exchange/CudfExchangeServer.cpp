@@ -69,10 +69,7 @@ void CudfExchangeServer::process() {
                     << this->partitionKey_.toString();
             std::lock_guard<std::recursive_mutex> lock(this->dataMutex_);
             VELOX_CHECK(
-                dataPtr_ == nullptr, "Data pointer exists: Illegal state!");
-            VLOG(3)
-                << "Assigning dataPtr_ in getData callback. dataptr_ != nullptr: "
-                << (data != nullptr);
+                this->dataPtr_ == nullptr, "Data pointer exists: Illegal state!");
             this->dataPtr_ = std::move(data);
             this->setState(ServerState::DataReady);
             this->communicator_->addToWorkQueue(getSelfPtr());
@@ -145,7 +142,7 @@ void CudfExchangeServer::sendData() {
 
   auto [serializedMetadata, serMetaSize] = metadataMsg->serialize();
 
-  // send metadata, no callback needed.
+  // send metadata.
   uint64_t metadataTag =
       getMetadataTag(this->partitionKeyHash_, this->sequenceNumber_);
   metaRequest_ = endpointRef_->endpoint_->tagSend(
@@ -153,21 +150,19 @@ void CudfExchangeServer::sendData() {
       serMetaSize,
       ucxx::Tag{metadataTag},
       false,
-      [tid = partitionKey_.toString(), metadataTag](
+      [tid = partitionKey_.toString(), metadataTag, this](
           ucs_status_t status, std::shared_ptr<void> arg) {
-        VLOG(3) << "metadata successfully sent to " << tid
-                << " with tag: " << std::hex << metadataTag;
+            if (status == UCS_OK) {
+              VLOG(3) << "metadata successfully sent to " << tid
+                      << " with tag: " << std::hex << metadataTag;
+            } else {
+              VLOG(0) << "Error in sendData, send metadata " << ucs_status_string(status)
+                      << " failed for task: " << tid;
+              this->setState(ServerState::Done);
+              this->communicator_->addToWorkQueue(getSelfPtr());
+            }
       },
       serializedMetadata);
-
-  metaRequest_->checkError();
-  auto s = metaRequest_->getStatus();
-  if (s != UCS_INPROGRESS && s != UCS_OK) {
-    VLOG(0) << "Error in sendData, send metadata " << ucs_status_string(s)
-            << " failed for task: " << partitionKey_.toString();
-    setState(ServerState::Done);
-    communicator_->addToWorkQueue(getSelfPtr());
-  }
 
   // send the data chunk (if any)
   {
@@ -194,16 +189,6 @@ void CudfExchangeServer::sendData() {
               this,
               std::placeholders::_1,
               std::placeholders::_2));
-
-      dataRequest_->checkError();
-      s = dataRequest_->getStatus();
-      if (s != UCS_INPROGRESS && s != UCS_OK) {
-        VLOG(0) << "Error in sendData, send rmm::buffer "
-                << ucs_status_string(s)
-                << " failed for task: " << partitionKey_.toString();
-        setState(ServerState::Done);
-        communicator_->addToWorkQueue(getSelfPtr());
-      }
     } else {
       // Data pointer is null, so no more data will be coming.
       VLOG(3) << "Finished transferring partition for task "
