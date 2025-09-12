@@ -61,12 +61,10 @@ class CudfDestinationQueue {
 
     // what has been queued
     int64_t bytesQueued{0};
-    int64_t rowsQueued{0};
     int64_t packedColumnsQueued{0};
 
     // what has been dequeued
     int64_t bytesSent{0};
-    int64_t rowsSent{0};
     int64_t packedColumnsSent{0};
   };
 
@@ -206,10 +204,17 @@ class CudfOutputQueue {
   exec::OutputBuffer::Stats stats();
 
  private:
+  // Percentage of maxSize below which a blocked producer should
+  // be unblocked.
+  static constexpr int32_t kContinuePct = 90;
+
   // Methods that update the statistics.
   void updateStatsWithEnqueuedLocked(int64_t bytes, int64_t rows);
 
-  void updateStatsWithFreedLocked(int64_t bytes);
+  // updates the counters and returns promises if the queuedBytes_ counter falls
+  // below the continueSize_ low water mark. These promises then need to be realized
+  // outside the lock.
+  void updateStatsWithFreedLocked(int64_t bytes, int64_t numPackedCols, std::vector<ContinuePromise>& promises);
 
   void updateTotalQueuedBytesMsLocked();
 
@@ -231,6 +236,13 @@ class CudfOutputQueue {
   // Reference to the task that owns this CudfQueue.
   std::shared_ptr<exec::Task> task_{nullptr};
 
+  /// If 'queuedBytes_' > 'maxSize_', each producer is blocked after adding
+  /// data.
+  uint64_t maxSize_;
+  // When 'queuedBytes_' goes below 'continueSize_', blocked producers are
+  // resumed.
+  uint64_t continueSize_;
+
   // Total number of drivers expected to produce results. This number will
   // decrease in the end of grouped execution, when we understand the real
   // number of producer drivers (depending on the number of split groups).
@@ -251,11 +263,13 @@ class CudfOutputQueue {
   // the queue is finished and deleted.
   std::vector<CudfDestinationQueue::Stats> finishedQueueStats_;
 
-
   // keep track of the number of drivers that have finished.
   uint32_t numFinished_{0};
 
   bool atEnd_ = false;
+
+  // promises when buffer reached capacity and blocked further enqueueing.
+  std::vector<ContinuePromise> promises_;
 
   // actual data in 'queues_'
   int64_t queuedBytes_{0};

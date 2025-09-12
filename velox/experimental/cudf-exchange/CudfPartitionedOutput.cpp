@@ -85,9 +85,11 @@ void CudfPartitionedOutput::addInput(RowVectorPtr input) {
   VELOX_NVTX_OPERATOR_FUNC_RANGE();
   auto cudfVector = std::dynamic_pointer_cast<CudfVector>(input);
   VELOX_CHECK(cudfVector, "Input must be a CudfVector");
+  VELOX_CHECK(!future_.valid() || future_.hasValue(), "addInput with outstanding future!");
   auto stream = cudfVector->stream();
 
   cudf::table_view tableView;
+  bool blocked;
   if (remap_.empty()) {
     // input and output column order is the same.
     tableView = cudfVector->getTableView();
@@ -98,9 +100,9 @@ void CudfPartitionedOutput::addInput(RowVectorPtr input) {
 
   if (numPartitions_ > 1) {
     if (partitionKeyIndices_.size() > 0 || spec_ == "gather") {
-      hashPartition(tableView, cudfVector->stream());
+      blocked = hashPartition(tableView, cudfVector->stream());
     } else {
-      equalPartition(tableView, cudfVector->stream());
+      blocked = equalPartition(tableView, cudfVector->stream());
     }
   } else {
     // Single partition case. No need to hash, assume queue zero
@@ -115,30 +117,35 @@ void CudfPartitionedOutput::addInput(RowVectorPtr input) {
     std::unique_ptr<cudf::packed_columns> packedColsPtr =
         std::make_unique<cudf::packed_columns>(
             std::move(packedCols.metadata), std::move(packedCols.gpu_data));    
-    bool res = sharedQueueManager()->enqueue(
+    blocked = sharedQueueManager()->enqueue(
         this->taskId(),
         0,
         std::move(packedColsPtr),
         tableView.num_rows(),
-        nullptr);
-    // FIXME Will return true if queue is full: ignore for now
+        &future_);
+
     VLOG(3) << "enqueued cudf vector with "
-            << tableView.num_rows() << " rows";
+            << tableView.num_rows() << " rows into partition 0 for task " << this->taskId();
   }
   // record the statistics.
   {
     auto lockedStats = stats_.wlock();
     lockedStats->addOutputVector(input->estimateFlatSize(), input->size());
   }
+  blockingReason_ = blocked ? exec::BlockingReason::kWaitForConsumer 
+                : exec::BlockingReason::kNotBlocked;        
 }
 
 exec::BlockingReason CudfPartitionedOutput::isBlocked(ContinueFuture* future) {
-  // As we currently are ignoring running out of memory we are never blocked
+  if (blockingReason_ != exec::BlockingReason::kNotBlocked) {
+    *future = std::move(future_);
+    blockingReason_ = exec::BlockingReason::kNotBlocked;
+    return exec::BlockingReason::kWaitForConsumer;
+  }
   return exec::BlockingReason::kNotBlocked;
 }
 
 RowVectorPtr CudfPartitionedOutput::getOutput() {
-  VLOG(2) << "CudfPartitionedOutput::getOutput()";
   if (finished_) {
     return nullptr;
   }
@@ -151,7 +158,6 @@ RowVectorPtr CudfPartitionedOutput::getOutput() {
 }
 
 bool CudfPartitionedOutput::isFinished() {
-  VLOG(2) << "CudfPartitionedOutput::isFinished(): " << finished_;
   return finished_;
 }
 
@@ -215,7 +221,7 @@ void CudfPartitionedOutput::initPartitionKeys(
   }
 }
 
-void CudfPartitionedOutput::hashPartition(cudf::table_view tableView, rmm::cuda_stream_view stream) {
+bool CudfPartitionedOutput::hashPartition(cudf::table_view tableView, rmm::cuda_stream_view stream) {
   VLOG(3) << "Hashing and partitioning into " << numPartitions_ << " chunks";
 
   // Use cudf hash partitioning
@@ -238,11 +244,11 @@ void CudfPartitionedOutput::hashPartition(cudf::table_view tableView, rmm::cuda_
   // Erase first element since it's always 0 and we don't need it.
   partitionOffsets.erase(partitionOffsets.begin());
 
-  splitAndEnqueue(
+  return splitAndEnqueue(
       partitionedTable->view(), partitionOffsets, stream);
 }
 
-void CudfPartitionedOutput::equalPartition(cudf::table_view tableView, rmm::cuda_stream_view stream) {
+bool CudfPartitionedOutput::equalPartition(cudf::table_view tableView, rmm::cuda_stream_view stream) {
   VLOG(3) << "Splitting into " << numPartitions_ << " chunks";
   std::vector<cudf::size_type> offsets;
   cudf::size_type size = tableView.num_rows();
@@ -250,17 +256,19 @@ void CudfPartitionedOutput::equalPartition(cudf::table_view tableView, rmm::cuda
     cudf::size_type idx = size / (numPartitions_ / (double)i);
     offsets.push_back(idx);
   }
-  splitAndEnqueue(tableView, offsets, stream);
+  return splitAndEnqueue(tableView, offsets, stream);
 }
 
-void CudfPartitionedOutput::splitAndEnqueue(
+bool CudfPartitionedOutput::splitAndEnqueue(
     cudf::table_view tableView,
     std::vector<cudf::size_type> offsets,
     rmm::cuda_stream_view stream) {
+  bool blocked = false;
   auto contiguousTables = cudf::contiguous_split(tableView, offsets, stream);
 
   VELOX_CHECK_EQ(
       offsets.size() + 1, numPartitions_, "mismatch in numPartitions_");
+  ContinueFuture* future = &future_;
   for (int i = 0; i < numPartitions_; ++i) {
     auto const& partitionTable = contiguousTables[i];
     auto packedColsPtr = std::make_unique<cudf::packed_columns>(
@@ -274,16 +282,19 @@ void CudfPartitionedOutput::splitAndEnqueue(
 
     // enqueue partition data on Cudf Output Buffer
     VLOG(3) << "Enqueued " << partitionTable.table.num_rows()
-            << " rows into partition " << i;
-    bool res = sharedQueueManager()->enqueue(
+            << " rows into partition " << i << " for task " << this->taskId();
+    blocked = blocked || sharedQueueManager()->enqueue(
         this->taskId(),
         i,
         std::move(packedColsPtr),
         partitionTable.table.num_rows(),
-        nullptr);
-
-    // FIXME Will return false if queue is full: ignore for now
+        future);
+    if (blocked) {
+      // The future_ is set for the first destination queue that blocks.
+      future = nullptr; 
+    }
   }
+  return blocked;
 }
 
 } // namespace facebook::velox::cudf_exchange
