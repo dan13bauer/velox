@@ -138,7 +138,6 @@ std::shared_ptr<CudfOutputQueue> CudfOutputQueueManager::getQueue(
   std::optional<exec::OutputBuffer::Stats> CudfOutputQueueManager::stats(const std::string& taskId) {
     auto queue = getQueueIfExists(taskId);
     if (queue != nullptr) {
-      VLOG(1) << "-=-=- CudfOutputQueueManager::stats called";
       return queue->stats();
     }
     return std::nullopt;
