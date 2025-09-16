@@ -78,8 +78,6 @@ class CudfExchangeServer
   /// @param newState the new state of the CudfExchangeServer.
   void setState(ServerState newState) {
     state_.store(newState, std::memory_order_seq_cst);
-    VLOG(3) << "Task " << partitionKey_.toString()
-            << " setting to state: " << getStateAsString();
   }
 
   /// @brief Returns the state.

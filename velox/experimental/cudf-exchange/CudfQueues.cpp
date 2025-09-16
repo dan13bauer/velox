@@ -250,9 +250,9 @@ void CudfOutputQueue::getData(
         std::vector<int64_t> remainingBytes
       ) {
         std::vector<ContinuePromise> promises;        
-        auto bytes = data ? data->gpu_data->size() : 0L;
+        int64_t bytes = data ? data->gpu_data->size() : -1L;
         notify(std::move(data), std::move(remainingBytes));
-        if (bytes > 0L) {
+        if (bytes >= 0L) {
           std::lock_guard<std::mutex> l(mutex_);
           this->updateStatsWithFreedLocked(bytes, 1L, promises);
         }
