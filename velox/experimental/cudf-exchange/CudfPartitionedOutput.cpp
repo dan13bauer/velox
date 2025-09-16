@@ -123,9 +123,6 @@ void CudfPartitionedOutput::addInput(RowVectorPtr input) {
         std::move(packedColsPtr),
         tableView.num_rows(),
         &future_);
-
-    VLOG(3) << "enqueued cudf vector with "
-            << tableView.num_rows() << " rows into partition 0 for task " << this->taskId();
   }
   // record the statistics.
   {
@@ -133,7 +130,7 @@ void CudfPartitionedOutput::addInput(RowVectorPtr input) {
     lockedStats->addOutputVector(input->estimateFlatSize(), input->size());
   }
   blockingReason_ = blocked ? exec::BlockingReason::kWaitForConsumer 
-                : exec::BlockingReason::kNotBlocked;        
+                : exec::BlockingReason::kNotBlocked;
 }
 
 exec::BlockingReason CudfPartitionedOutput::isBlocked(ContinueFuture* future) {
@@ -271,24 +268,23 @@ bool CudfPartitionedOutput::splitAndEnqueue(
   ContinueFuture* future = &future_;
   for (int i = 0; i < numPartitions_; ++i) {
     auto const& partitionTable = contiguousTables[i];
-    auto packedColsPtr = std::make_unique<cudf::packed_columns>(
-        std::move(contiguousTables[i].data.metadata),
-        std::move(contiguousTables[i].data.gpu_data));
-
     if (partitionTable.table.num_rows() == 0) {
       // Skip empty partitions.
       continue;
     }
 
+    auto packedColsPtr = std::make_unique<cudf::packed_columns>(
+        std::move(contiguousTables[i].data.metadata),
+        std::move(contiguousTables[i].data.gpu_data));
+
     // enqueue partition data on Cudf Output Buffer
-    VLOG(3) << "Enqueued " << partitionTable.table.num_rows()
-            << " rows into partition " << i << " for task " << this->taskId();
-    blocked = blocked || sharedQueueManager()->enqueue(
+    bool tb = sharedQueueManager()->enqueue(
         this->taskId(),
         i,
         std::move(packedColsPtr),
         partitionTable.table.num_rows(),
         future);
+    blocked = tb || blocked;
     if (blocked) {
       // The future_ is set for the first destination queue that blocks.
       future = nullptr; 
