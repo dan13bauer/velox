@@ -150,7 +150,6 @@ CudfOutputQueue::CudfOutputQueue(
     // create the destination queues inside the vector using emplace_back.
     queues_.emplace_back(std::make_unique<CudfDestinationQueue>());
   }
-  finishedQueueStats_.resize(numDestinations);
 }
 
 bool CudfOutputQueue::initialize(
@@ -171,7 +170,6 @@ bool CudfOutputQueue::initialize(
     // create the destination queues inside the vector using emplace_back.
     queues_.emplace_back(std::make_unique<CudfDestinationQueue>());
   }
-  finishedQueueStats_.resize(numDestinations);
   return true;
 }
 
@@ -367,8 +365,6 @@ void CudfOutputQueue::deleteResults(int destination) {
     queue->deleteResults();
     dataAvailable = queue->getAndClearNotify();
     queue->finish();
-    VELOX_CHECK_LT(destination, finishedQueueStats_.size());
-    finishedQueueStats_[destination] = queues_[destination]->stats();
     queues_[destination] = nullptr;
     isFinished = isFinishedLocked();
     // update CudfOutputQueue stats
@@ -394,51 +390,10 @@ void CudfOutputQueue::terminate() {
     // release the outstanding promises.
   }
 }
-namespace {
-  // Find out how many queues hold 80% of the data. Useful to identify skew.
-int32_t countTopQueues(
-    const std::vector<CudfDestinationQueue::Stats>& queueStats,
-    int64_t totalBytes) {
-  std::vector<int64_t> queueSizes;
-  queueSizes.reserve(queueStats.size());
-  for (auto i = 0; i < queueStats.size(); ++i) {
-    const auto& stats = queueStats[i];
-    queueSizes.push_back(stats.bytesQueued + stats.bytesSent);
-  }
-
-  // Sort descending.
-  std::sort(queueSizes.begin(), queueSizes.end(), std::greater<int64_t>());
-
-  const auto limit = totalBytes * 0.8;
-  int32_t numQueues = 0;
-  int32_t runningTotal = 0;
-  for (auto size : queueSizes) {
-    runningTotal += size;
-    numQueues++;
-
-    if (runningTotal >= limit) {
-      break;
-    }
-  }
-
-  return numQueues;
-}
-
-}
 
 exec::OutputBuffer::Stats CudfOutputQueue::stats() {
     std::lock_guard<std::mutex> l(mutex_);
   std::vector<CudfDestinationQueue::Stats> queueStats;
-  VELOX_CHECK_EQ(queues_.size(), finishedQueueStats_.size());
-  queueStats.resize(queues_.size());
-  for (auto i = 0; i < queues_.size(); ++i) {
-    auto queue = queues_[i].get();
-    if (queue != nullptr) {
-      queueStats[i] = queue->stats();
-    } else {
-      queueStats[i] = finishedQueueStats_[i];
-    }
-  }
 
   updateTotalQueuedBytesMsLocked();
 
@@ -453,7 +408,7 @@ exec::OutputBuffer::Stats CudfOutputQueue::stats() {
       totalRowsSent_,
       totalPackedColumnsSent_,
       getAverageQueueTimeMsLocked(),
-      countTopQueues(queueStats, totalBytesSent_),
+      0 /* FIXME: compute num top buffers. */,
       { /* FIXME: transition queueStats to exec::DestinationBuffer::Stats */});
   return stats;
 }

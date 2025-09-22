@@ -258,11 +258,6 @@ class CudfOutputQueue {
   // One buffer per destination.
   std::vector<std::unique_ptr<CudfDestinationQueue>> queues_;
 
-  // The sizes of queues_ and finishedQueueStats_ are the same, but
-  // finishedQueueStats_[i] is set if and only if queues_[i] is null as
-  // the queue is finished and deleted.
-  std::vector<CudfDestinationQueue::Stats> finishedQueueStats_;
-
   // keep track of the number of drivers that have finished.
   uint32_t numFinished_{0};
 
