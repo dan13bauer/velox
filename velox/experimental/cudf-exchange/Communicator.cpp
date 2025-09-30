@@ -30,6 +30,9 @@ std::shared_ptr<Communicator> Communicator::instancePtr_ = nullptr;
 
 /* static */
 std::shared_ptr<Communicator> Communicator::initAndGet(uint16_t port) {
+  if (!FLAGS_velox_cudf_exchange) {
+    return nullptr;
+  }
   std::call_once(onceFlag, [&] {
     instancePtr_ = std::shared_ptr<Communicator>(new Communicator());
     instancePtr_->port_ = port;
@@ -55,6 +58,15 @@ std::shared_ptr<Communicator> Communicator::getInstance() {
   // cast the argument back to our instance variable:
   Communicator* instance = static_cast<Communicator*>(arg);
   instance->listenerCallback(conn_request);
+}
+
+Communicator::~Communicator() {
+  listener_.reset();
+  auto req = worker_->flush();
+  worker_->progressWorkerEvent(100);
+  worker_.reset();
+  context_.reset();
+  VLOG(3) << "Communicator destructed";
 }
 
 /// @brief Run doesn't return until stop() is called.
@@ -94,15 +106,16 @@ void Communicator::run() {
       worker_->progressWorkerEvent(0);
     }
   }
+  VLOG(3) << "Communicator stopping.";
 }
 
 /// @brief Stops the communicator, called from an outside thread.
 void Communicator::stop() {
+  running_.store(false);
   VLOG(3) << "In Communicator::stop "
           << " elements_.size(): " << elements_.size()
           << " endpoints_.size(): " << endpoints_.size()
           << " workQueue_._size(): " << workQueue_.size();
-  running_.store(false);
 }
 
 void Communicator::registerCommElement(std::shared_ptr<CommElement> comms) {
