@@ -52,8 +52,10 @@ std::shared_ptr<CudfExchangeSource> CudfExchangeSource::create(
   // For the time being, there's an ugly hack that just increases the port by 3.
   VLOG(3) << " Creating CudfExchangeSource " << url;
   const std::string host = uri.host();
-  int port = uri.port() + 3;
   std::shared_ptr<Communicator> communicator = Communicator::getInstance();
+  uint16_t offset = communicator->getPortOffset();
+  int port = uri.port() + offset;
+
   auto key = extractTaskAndDestinationId(uri.path());
   auto source = std::shared_ptr<CudfExchangeSource>(
       new CudfExchangeSource(communicator, host, port, key, queue));

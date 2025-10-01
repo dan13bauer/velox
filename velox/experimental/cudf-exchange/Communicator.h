@@ -53,7 +53,7 @@ class Communicator {
   const ucxx::AmReceiverCallbackOwnerType kAmCallbackOwner = "velox";
   const ucxx::AmReceiverCallbackIdType kAmCallbackId = 123;
 
-  static std::shared_ptr<Communicator> initAndGet(uint16_t port);
+  static std::shared_ptr<Communicator> initAndGet(uint16_t port,uint16_t offset=3);
 
   /// @brief Method to get the Communicator reference
   static std::shared_ptr<Communicator> getInstance();
@@ -97,6 +97,22 @@ class Communicator {
   /// the endpoint has become stale since the other side has disappeared.
   void removeEndpointRef(std::shared_ptr<EndpointRef> ep);
 
+  /// @brief the port that the CudfExchangeServer will us
+  /// @return the port
+
+  uint16_t getPort() {
+    return port_;
+  }
+
+  /// @brief the offset that the CudfExchangeServer is from the HttpExchangeServer
+  /// This allows a client to determine the port to use to do a CudfExchange given the
+  /// task URL on the remote worker. It is a hack but allows us not to have change the coordinator code
+
+  uint16_t getPortOffset () {
+    return portOffset_;
+  }
+
+
  private:
   Communicator() =
       default; // Private constructor to prevent direct instantiation
@@ -119,6 +135,7 @@ class Communicator {
   std::shared_ptr<ucxx::Worker> worker_;
   std::shared_ptr<ucxx::Listener> listener_;
   uint16_t port_;
+  uint16_t portOffset_;
   std::atomic<bool> running_;
   Acceptor acceptor_;
 
