@@ -183,6 +183,10 @@ void Communicator::removeEndpointRef(std::shared_ptr<EndpointRef> ep) {
   VLOG(3) << "- Communicator::removeEndpointRef";
 }
 
+  const std::string& Communicator::getCoordinatorUrl() {
+    return coordinatorURL_;
+  }
+
 /// @brief The callback method that is invoked when a client connects.
 void Communicator::listenerCallback(ucp_conn_request_h conn_request) {
   char ip_str[INET6_ADDRSTRLEN];

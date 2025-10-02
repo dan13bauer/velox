@@ -97,6 +97,9 @@ class Communicator {
   /// the endpoint has become stale since the other side has disappeared.
   void removeEndpointRef(std::shared_ptr<EndpointRef> ep);
 
+  // Returns the URL of the coordinator.
+  const std::string& getCoordinatorUrl();
+
  private:
   Communicator() =
       default; // Private constructor to prevent direct instantiation

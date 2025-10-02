@@ -1,0 +1,68 @@
+#pragma once
+
+#include "velox/exec/ExchangeClient.h"
+#include "velox/experimental/cudf-exchange/CudfExchangeClient.h"
+#include <folly/Uri.h>
+
+
+using namespace facebook::velox::exec;
+
+namespace facebook::velox::cudf_exchange {
+
+  // Define the return types from the two types of exchange clients as a variant
+  using SerPageVector =
+      std::vector<std::unique_ptr<facebook::velox::exec::SerializedPage>>;
+  using PackedColPtr = std::unique_ptr<cudf::packed_columns>;
+  using ResultVariant = std::variant<SerPageVector, PackedColPtr>;
+
+  // The exchange client facade encapsulates both the cudf exchange client and the
+  // http exchange client.
+  class ExchangeClientFacade {
+   public:
+    ExchangeClientFacade(
+        std::shared_ptr<CudfExchangeClient> cudfExchangeClient,
+        std::shared_ptr<ExchangeClient> httpExchangeClient);
+
+    // one of the below activate methods must be called first before any of the
+    // facade methods can be called.
+
+    // activate cudf exchange and wire up the function pointers.
+    void activateCudfExchangeClient();
+
+    // activate http exchange and wire up the function pointers.
+    void activateHttpExchangeClient();
+
+    // The facaded methods.
+    void addRemoteTaskId(const std::string& remoteTaskId);
+    void noMoreRemoteTasks();
+
+    // Depending on the underlying client, a different return type is used.
+    ResultVariant next(
+        int consumerId,
+        uint32_t maxBytes,
+        bool* atEnd,
+        facebook::velox::ContinueFuture* future);
+
+    void close();
+    folly::F14FastMap<std::string, facebook::velox::RuntimeMetric> stats();
+
+    std::shared_ptr<CudfExchangeClient> cudfExchangeClient_;
+    std::shared_ptr<ExchangeClient> httpExchangeClient_;
+    const folly::Uri kCoordinatorUri_;
+
+    bool usesHttp_{false};
+    bool usesCudf_{false};
+
+    std::function<void(const std::string&)> addRemoteTaskId_;
+    std::function<void()> noMoreRemoteTasks_;
+    std::function<
+        ResultVariant(int, uint32_t, bool*, facebook::velox::ContinueFuture*)>
+        next_;
+    std::function<
+        folly::F14FastMap<std::string, facebook::velox::RuntimeMetric>()>
+        stats_;
+    std::function<void()> close_;
+  };
+
+
+}

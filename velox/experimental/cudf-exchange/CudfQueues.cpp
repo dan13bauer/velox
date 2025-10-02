@@ -31,7 +31,7 @@ void CudfDestinationQueue::Stats::recordDequeue(
     const int64_t size = data->gpu_data->size();
 
     bytesQueued -= size;
-    VELOX_DCHECK_GE(bytesBuffered, 0, "bytesQueued must be non-negative");
+    VELOX_DCHECK_GE(bytesQueued, 0, "bytesQueued must be non-negative");
     --packedColumnsQueued;
     VELOX_DCHECK_GE(packedColumnsQueued, 0, "packedColumnsQueued must be non-negative");
 
