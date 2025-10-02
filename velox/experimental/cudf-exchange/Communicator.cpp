@@ -29,13 +29,14 @@ std::once_flag Communicator::onceFlag;
 std::shared_ptr<Communicator> Communicator::instancePtr_ = nullptr;
 
 /* static */
-std::shared_ptr<Communicator> Communicator::initAndGet(uint16_t port) {
+std::shared_ptr<Communicator> Communicator::initAndGet(uint16_t port, std::string coordinatorURL) {
   if (!FLAGS_velox_cudf_exchange) {
     return nullptr;
   }
   std::call_once(onceFlag, [&] {
     instancePtr_ = std::shared_ptr<Communicator>(new Communicator());
     instancePtr_->port_ = port;
+    instancePtr_->coordinatorURL_ = coordinatorURL;
   });
   VELOX_CHECK(
       instancePtr_->port_ == port,
