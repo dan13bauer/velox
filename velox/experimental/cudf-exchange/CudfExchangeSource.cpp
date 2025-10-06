@@ -64,6 +64,8 @@ std::shared_ptr<CudfExchangeSource> CudfExchangeSource::create(
 }
 
 void CudfExchangeSource::process() {
+
+  VLOG(3) << "+ CudfExchangeSource::process " << queue_->isInError();
   switch (state_) {
     case ReceiverState::Created: {
       // Get the endpoint.
@@ -260,6 +262,7 @@ void CudfExchangeSource::getMetadata() {
       metadataReq);
 }
 
+
 void CudfExchangeSource::onMetadata(
     ucs_status_t status,
     std::shared_ptr<void> arg) {
@@ -302,7 +305,7 @@ void CudfExchangeSource::onMetadata(
       return;
     }
 
-    // Now allocate memory for the CudaVector
+    // Now allocate memory for the <Cuda>Vector
     // Get a stream from the global stream pool
     auto stream =
         facebook::velox::cudf_velox::cudfGlobalStreamPool().get_stream();
@@ -310,16 +313,14 @@ void CudfExchangeSource::onMetadata(
       ptr->dataBuf = std::make_unique<rmm::device_buffer>(
           ptr->metadata.dataSizeBytes, stream);
     } catch (const rmm::bad_alloc& e) {
-      VLOG(0) << "!!! RMM bad_alloc: " << e.what();
-      setState(ReceiverState::Done);
-      communicator_->addToWorkQueue(getSelfPtr());
-      return;
-    } catch (const rmm::cuda_error& e) {
-      VLOG(0) << "!!! General allocation exception: " << e.what();
-      setState(ReceiverState::Done);
-      communicator_->addToWorkQueue(getSelfPtr());
+      VLOG(0) << "*** RMM  failed to allocate: " << e.what();
+      setState(ReceiverState::Done); // Should we have a specific Failed state ?
+      //communicator_->addToWorkQueue(getSelfPtr());
+      close(); // I think this is the end
+      queue_->setError("Failed to alloc GPU memory"); // Let the operator know via the queue
       return;
     }
+    
 
     // sync after allocating.
     stream.synchronize();
@@ -352,7 +353,7 @@ void CudfExchangeSource::onMetadata(
 void CudfExchangeSource::onData(
     ucs_status_t status,
     std::shared_ptr<void> arg) {
-  VLOG(3) << "+ onDdata " << ucs_status_string(status);
+  VLOG(3) << "+ onData " << ucs_status_string(status);
 
   if (status != UCS_OK) {
     std::string errorMsg = fmt::format(

@@ -97,7 +97,7 @@ class CudfExchangeSource
 
   std::string toString() {
     std::stringstream out;
-    out << "[ExchangeSource " << partitionKey_.toString() << "]";
+    out << "[ExchangeSource " << partitionKey_.toString() << "(" << queue_->isInError() << ")]";
     return out.str();
   }
 
