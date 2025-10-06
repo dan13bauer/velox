@@ -167,7 +167,7 @@ std::shared_ptr<EndpointRef> Communicator::assocEndpointRef(
 }
 
 void Communicator::removeEndpointRef(std::shared_ptr<EndpointRef> ep) {
-  VLOG(3) << "+ Communicator::removeEndpointRef";
+  VLOG(3) << "+ Communicator::removeEndpointRef for " << Communicator::getInstance()->port_;
 
   if (ep->endpoint_ && ep->endpoint_->isAlive()) {
     VLOG(3) << "In Communicator::removeEndpointRef call closeBlocking";
