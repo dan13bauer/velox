@@ -100,8 +100,11 @@ void CudfExchangeSource::process() {
       break;
     case ReceiverState::Done:
       close();
-      // unregister.
-      communicator_->unregister(getSelfPtr());
+      // unregister endpoint.
+      if (endpointRef_) {
+        endpointRef_->removeCommElem(getSelfPtr());
+        endpointRef_=nullptr;
+      }
       break;
   }
 }
@@ -115,10 +118,6 @@ void CudfExchangeSource::close() {
   VLOG(1) << "CudfExchangeSource::close called.";
   VLOG(1) << fmt::format("closing task: {}", partitionKey_.toString());
   VLOG(3) << "Close receiver to remote " << partitionKey_.toString() << ".";
-  if (endpointRef_) {
-    endpointRef_->removeCommElem(getSelfPtr());
-    endpointRef_=nullptr;
-  }
   communicator_->unregister(getSelfPtr());
 }
 
