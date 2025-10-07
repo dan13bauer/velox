@@ -171,7 +171,13 @@ std::shared_ptr<EndpointRef> Communicator::assocEndpointRef(
 }
 
 void Communicator::removeEndpointRef(std::shared_ptr<EndpointRef> ep) {
-  VLOG(3) << "+ Communicator::removeEndpointRef for " << Communicator::getInstance()->port_;
+  
+  
+  VLOG(3) << "In Communicator::removeEndpointRef for Communicator with port = " << Communicator::getInstance()->port_;
+  std::string worker_info = ep->endpoint_->getWorker()->getInfo();
+  VLOG(3) << "Remote end point has closed associated with worker " << worker_info;
+  
+
 
   if (ep->endpoint_ && ep->endpoint_->isAlive()) {
     VLOG(3) << "In Communicator::removeEndpointRef call closeBlocking";
