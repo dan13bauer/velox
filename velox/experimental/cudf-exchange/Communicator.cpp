@@ -93,18 +93,22 @@ void Communicator::run() {
   worker_->registerAmReceiverCallback(info, &Acceptor::cStyleAMCallback);
 
   VLOG(3) << "Communicator running.";
-
   running_.store(true);
   while (running_) {
-    // wait for progress.
-    worker_->progressWorkerEvent(0);
-
-    // process the work queue. Make sure that communication is progressed
-    // after each call to a comms element, otherwise we will deadlock.
-    while (!workQueue_.empty()) {
-      auto comms = workQueue_.pop();
-      comms->process();
+    try {
+      // wait for progress.
       worker_->progressWorkerEvent(0);
+
+      // process the work queue. Make sure that communication is progressed
+      // after each call to a comms element, otherwise we will deadlock.
+      while (!workQueue_.empty()) {
+        auto comms = workQueue_.pop();
+        comms->process();
+        worker_->progressWorkerEvent(0);
+      }
+    } catch (ucxx::IOError& e) {
+      std::cerr << "In Communicator main loop UCXX Exception: " << e.what() << std::endl;
+      throw e;
     }
   }
   VLOG(3) << "Communicator stopping.";
