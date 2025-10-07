@@ -363,6 +363,9 @@ bool CompileState::compile() {
           exchangeClientFacadeByTaskAndPlanNode_.emplace(key, client);
         } else {
           client = clientIter->second;
+          // prevent closing of HttpExchangeClient when ExchangeOperator is
+          // destructed after being replaced by the CombinedCudfHttpExchange
+          exchangeOp->exchangeClient_.reset();
         }
         replaceOp.push_back(
             std::make_unique<CombinedCudfHttpExchange>(id, ctx, planNode, client));

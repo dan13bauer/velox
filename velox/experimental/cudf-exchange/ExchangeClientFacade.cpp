@@ -62,18 +62,38 @@ void ExchangeClientFacade::addRemoteTaskId(
   folly::Uri uri(remoteTaskId);
   const std::string host = uri.host();
   int port = uri.port();
-  if (isSameHost(host, kCoordinatorUri_.host()) &&
-      (port == kCoordinatorUri_.port())) {
-    VLOG(3) << "Activating HTTP exchange client for remote task id: " << remoteTaskId;
-    activateHttpExchangeClient();
-  } else {
-    VLOG(3) << "Activating Cudf exchange client for remote task id: " << remoteTaskId;
-    activateCudfExchangeClient();
+  // DNS name resolution outside lock.
+  bool remoteIsCoordinator = (isSameHost(host, kCoordinatorUri_.host()) &&
+      (port == kCoordinatorUri_.port()));
+  std::vector<ContinuePromise> promises;
+  {
+    std::lock_guard<std::mutex> l(mutex_);
+    if (remoteIsCoordinator) {
+      VLOG(3) << "Activating HTTP exchange client for remote task id: " << remoteTaskId;
+      activateHttpExchangeClient();
+    } else {
+      VLOG(3) << "Activating Cudf exchange client for remote task id: " << remoteTaskId;
+      activateCudfExchangeClient();
+    }
+    addRemoteTaskId_(remoteTaskId);
+    promises.reserve(promises_.size());
+    auto it = promises_.begin();
+    while (it != promises_.end()) {
+      promises.push_back(std::move(it->second));
+      it = promises_.erase(it);
+    }
+    VELOX_CHECK(promises_.empty());
   }
-  addRemoteTaskId_(remoteTaskId);
+  // outside of lock: wake up exchange client facades that have been waiting
+  // for the initial split.
+  for (auto& promise : promises) {
+    promise.setValue();
+  }
+
 }
 
 void ExchangeClientFacade::noMoreRemoteTasks() {
+  std::lock_guard<std::mutex> l(mutex_);
   VELOX_CHECK(noMoreRemoteTasks_, "noMoreRemoteTasks called but no client set!");
   noMoreRemoteTasks_();
 }
@@ -84,23 +104,57 @@ ResultVariant ExchangeClientFacade::next(
     uint32_t maxBytes,
     bool* atEnd,
     facebook::velox::ContinueFuture* future) {
-  if (!usesCudf_ && !usesHttp_) {
-    // not using any client yet - return empty result and no valid future.
-    ResultVariant emptyResult;
-    return emptyResult;
+  ContinuePromise stalePromise = ContinuePromise::makeEmpty();
+  ResultVariant result; // initializes to an empty result.
+  {
+    std::lock_guard<std::mutex> l(mutex_);
+    if (!usesCudf_ && !usesHttp_) {
+      // not using any client, need to wait for the first split
+      // to resolve the client. Initialize the future.
+      addPromiseLocked(consumerId, future, &stalePromise);
+    } else {
+      result = next_(consumerId, maxBytes, atEnd, future);
+    }
   }
-  return next_(consumerId, maxBytes, atEnd, future);
+  // Outside of lock: complete the stale promise (if any)
+  if (stalePromise.valid()) {
+    stalePromise.setValue();
+  }
+  return result;
 }
 
 void ExchangeClientFacade::close() {
-  VELOX_CHECK(close_, "close called but no client set!");
-  close_();
+  std::vector<ContinuePromise> promises;
+  {
+    std::lock_guard<std::mutex> l(mutex_);
+    VELOX_CHECK(close_, "close called but no client set!");
+    promises = clearAllPromisesLocked();
+    close_();
+  }
+  clearPromises(promises);
 }
 
 folly::F14FastMap<std::string, facebook::velox::RuntimeMetric>
 ExchangeClientFacade::stats() {
+  std::lock_guard<std::mutex> l(mutex_);
   VELOX_CHECK(stats_, "stats called but no client set!");
   return stats_();
+}
+
+void ExchangeClientFacade::addPromiseLocked(
+    int consumerId,
+    ContinueFuture* future,
+    ContinuePromise* stalePromise) {
+  ContinuePromise promise{"ExchangeClientFacade::waitForSplit"};
+  *future = promise.getSemiFuture();
+  auto it = promises_.find(consumerId);
+  if (it != promises_.end()) {
+    // resolve stale promises outside the lock to avoid broken promises
+    *stalePromise = std::move(it->second);
+    it->second = std::move(promise);
+  } else {
+    promises_[consumerId] = std::move(promise);
+  }
 }
 
 

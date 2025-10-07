@@ -174,7 +174,6 @@ BlockingReason CombinedCudfHttpExchange::isBlocked(ContinueFuture* future) {
   // Get splits from the task if no splits are outstanding.
   if (!splitFuture_.valid()) {
     getSplits(&splitFuture_);
-  } else {
   }
 
   ContinueFuture dataFuture = ContinueFuture::makeEmpty();
@@ -190,26 +189,13 @@ BlockingReason CombinedCudfHttpExchange::isBlocked(ContinueFuture* future) {
     return BlockingReason::kNotBlocked;
   }
 
-  // exchangeClient_->next only returns a data future after the first split
-  // has been processed. At this point, the operator either waits for a split,
-  // or for data.
-  VELOX_CHECK(
-      splitFuture_.valid() || dataFuture.valid(),
-      "Illegal state, no data, no outstanding splits, no outstanding data, not at end");
-
-  if (splitFuture_.valid() && dataFuture.valid()) {
+  if (splitFuture_.valid()) {
     // Combine the futures and block until data becomes available or more splits
     // arrive.
     std::vector<ContinueFuture> futures;
     futures.push_back(std::move(splitFuture_));
     futures.push_back(std::move(dataFuture));
     *future = folly::collectAny(futures).unit();
-    return BlockingReason::kWaitForSplit;
-  }
-
-  // wait for split only.
-  if (splitFuture_.valid()) {
-    *future = std::move(splitFuture_);
     return BlockingReason::kWaitForSplit;
   }
 

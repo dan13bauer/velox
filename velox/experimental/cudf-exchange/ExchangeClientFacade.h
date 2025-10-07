@@ -44,6 +44,37 @@ namespace facebook::velox::cudf_exchange {
         facebook::velox::ContinueFuture* future);
 
     void close();
+
+    void addPromiseLocked(
+        int consumerId,
+        ContinueFuture* future,
+        ContinuePromise* stalePromise);
+
+    std::vector<ContinuePromise> clearAllPromisesLocked() {
+        std::vector<ContinuePromise> promises(promises_.size());
+        auto it = promises_.begin();
+        while (it != promises_.end()) {
+        promises.push_back(std::move(it->second));
+        it = promises_.erase(it);
+        }
+        VELOX_CHECK(promises_.empty());
+        return promises;
+    }
+
+    static void clearPromises(std::vector<ContinuePromise>& promises) {
+        for (auto& promise : promises) {
+        promise.setValue();
+        }
+    }
+
+
+    std::mutex mutex_;
+
+    // When multiple exchange operators are present, the none-primary ones
+    // need to wait until the first split arrives, using below map.
+    folly::F14FastMap<int, ContinuePromise> promises_;
+
+
     folly::F14FastMap<std::string, facebook::velox::RuntimeMetric> stats();
 
     std::shared_ptr<CudfExchangeClient> cudfExchangeClient_;
