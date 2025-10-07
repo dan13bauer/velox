@@ -89,6 +89,10 @@ void CudfExchangeServer::process() {
       break;
     case ServerState::Done:
       close();
+      if (endpointRef_) {
+        endpointRef_->removeCommElem(getSelfPtr());
+        endpointRef_ = nullptr;
+      }
       break;
   };
 }
@@ -100,10 +104,6 @@ void CudfExchangeServer::close() {
     return; // already closed.
   }
   VLOG(3) << "Close CudfExchangeServer to remote " << partitionKey_.toString();
-  if (endpointRef_) {
-    endpointRef_->removeCommElem(getSelfPtr());
-    endpointRef_ = nullptr;
-  }
   communicator_->unregister(getSelfPtr());
 }
 
