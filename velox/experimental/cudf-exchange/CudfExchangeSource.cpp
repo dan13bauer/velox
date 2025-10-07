@@ -243,7 +243,7 @@ void CudfExchangeSource::onHandshake(
         ucs_status_string(status));
     VLOG(0) << errorMsg;
     setState(ReceiverState::Done);
-      queue_->setError("Failed to Connect top worker"); // Let the operator know via the queue
+      queue_->setError("Failed to Connect to worker"); // Let the operator know via the queue
   } else {
     VLOG(3) << toString() << "+ onHandshake " << ucs_status_string(status);
     setState(ReceiverState::ReadyToReceive);
@@ -318,7 +318,7 @@ void CudfExchangeSource::onMetadata(
       return;
     }
 
-    // Now allocate memory for the <Cuda>Vector
+    // Now allocate memory for the CudaVector
     // Get a stream from the global stream pool
     auto stream =
         facebook::velox::cudf_velox::cudfGlobalStreamPool().get_stream();
@@ -329,7 +329,7 @@ void CudfExchangeSource::onMetadata(
       VLOG(0) << "*** RMM  failed to allocate: " << e.what();
       setState(ReceiverState::Done); // Should we have a specific Failed state ?
       //communicator_->addToWorkQueue(getSelfPtr());
-      close(); // I think this is the end
+      close(); // This is the end, should we close here or let the operator close us ?
       queue_->setError("Failed to alloc GPU memory"); // Let the operator know via the queue
  
       return;
