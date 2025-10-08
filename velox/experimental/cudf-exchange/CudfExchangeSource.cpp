@@ -65,7 +65,7 @@ std::shared_ptr<CudfExchangeSource> CudfExchangeSource::create(
 
 void CudfExchangeSource::process() {
 
-  if (closed_.load() == true) {
+  if (closed_) {
     // Driver thread called closed 
     cleanUp();
     return;
