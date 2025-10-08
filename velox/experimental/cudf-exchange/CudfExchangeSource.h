@@ -187,7 +187,7 @@ class CudfExchangeSource
     return state_.load(std::memory_order_seq_cst);
   }
 
-  /// @brief Remove the state associated with the sopurce called by the state-machine
+  /// @brief Remove the state associated with the source called by the state-machine
    void cleanUp();
 
   /// @brief Sets the state to "desired" if and only if the current

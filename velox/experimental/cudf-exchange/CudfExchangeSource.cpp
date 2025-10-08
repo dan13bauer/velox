@@ -131,6 +131,11 @@ void CudfExchangeSource::cleanUp() {
 }
 
 void CudfExchangeSource::close() {
+
+  // This is called by the driver thread so we need ti be careful to 
+  // indicate to the process thread that we are closing and 
+  // let it to the actual cleaning up
+  
   bool expected = false;
   bool desired = true;  
   if (!closed_.compare_exchange_strong(expected, desired)) {
@@ -358,7 +363,10 @@ void CudfExchangeSource::onMetadata(
     VLOG(3) << toString() << " waiting for data for chunk: " << sequenceNumber_
             << " using tag: " << std::hex << dataTag << std::dec;
 
-    setStateIf(ReceiverState::WaitingForMetadata,ReceiverState::WaitingForData);
+    if (! setStateIf(ReceiverState::WaitingForMetadata,ReceiverState::WaitingForData)) {
+      VLOG(1) << "onMetadata Invalid previous state ";
+      return;
+    }
     request_ = endpointRef_->endpoint_->tagRecv(
         ptr->dataBuf->data(),
         ptr->metadata.dataSizeBytes,
