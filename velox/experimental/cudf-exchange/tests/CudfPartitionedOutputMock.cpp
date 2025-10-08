@@ -1,0 +1,65 @@
+/*
+ * Copyright (c) Facebook, Inc. and its affiliates.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+#include "velox/experimental/cudf-exchange/tests/CudfPartitionedOutputMock.h"
+#include "velox/experimental/cudf-exchange/tests/CudfTestHelpers.h"
+
+namespace facebook::velox::cudf_exchange {
+
+CudfPartitionedOutputMock::CudfPartitionedOutputMock(
+    const std::string& taskId,
+    const size_t numPartitions,
+    const uint32_t numDataChunks,
+    const size_t numRowsPerChunk)
+    : queueManager_(CudfOutputQueueManager::getInstanceRef()),
+      taskId_(taskId),
+      numPartitions_(numPartitions),
+      numDataChunks_(numDataChunks),
+      numRowsPerChunk_(numRowsPerChunk) {}
+
+void CudfPartitionedOutputMock::run() {
+  bool blocked;
+  ContinueFuture future;
+  // create numPartitions_ x numDataChunks_ data chunks and
+  // push it into the destination queues identified by the taskId.
+  auto stream = rmm::cuda_stream_default;
+  for (size_t partition = 0; partition < numPartitions_; ++partition) {
+    for (uint32_t dataChunk = 0; dataChunk < numDataChunks_; ++dataChunk) {
+      // create a data chunk with numRowsPerChunk_ rows
+      // and push it into the destination queue identified by the taskId.
+      auto packedColumns = makePackedColumns(numRowsPerChunk_, stream);
+      // Sync the stream since UCXX/UCX is not stream oriented and without
+      // syncing, data could get lost. Syncing here is  easy but not the most
+      // efficient. A better approach is to create an event and pass it along
+      // the data through the queue and synchronize on the event before calling
+      // into UCXX.
+      stream.synchronize();
+      blocked = queueManager_->enqueue(
+          taskId_,
+          partition,
+          std::move(packedColumns),
+          numRowsPerChunk_,
+          &future);
+      if (blocked) {
+        // wait until the queue becomes non-full.
+        future.wait();
+      }
+    }
+  }
+  // tell the queue manager that we are done.
+  queueManager_->noMoreData(taskId_);
+}
+
+} // namespace facebook::velox::cudf_exchange

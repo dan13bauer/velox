@@ -11,19 +11,26 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-add_executable(velox_cudf_queue_mgr_test CudfOutputQueueManagerTest.cpp
-                                         Main.cpp)
+
+add_executable(
+  cudf_exchange_test
+  CudfOutputQueueManagerTest.cpp
+  CudfExchangeTest.cpp
+  Main.cpp
+  CudfTestHelpers.cpp
+  CudfPartitionedOutputMock.cpp
+  SinkDriverMock.cpp)
 
 add_test(
-  NAME velox_cudf_queue_mgr_test
-  COMMAND velox_cudf_queue_mgr_test
+  NAME cudf_exchange_test
+  COMMAND cudf_exchange_test
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
-set_tests_properties(velox_cudf_queue_mgr_test PROPERTIES LABELS cuda_driver
-                                                          TIMEOUT 3000)
+set_tests_properties(cudf_exchange_test PROPERTIES LABELS cuda_driver TIMEOUT
+                                                   3000)
 
 target_link_libraries(
-  velox_cudf_queue_mgr_test
+  cudf_exchange_test
   velox_cudf_exchange
   velox_cudf_exec
   velox_exec
@@ -35,83 +42,3 @@ target_link_libraries(
   Folly::folly
   fmt::fmt
   ucxx::ucxx)
-
-add_executable(1brc_server 1brc_server.cpp)
-target_compile_options(1brc_server PRIVATE -Wno-missing-field-initializers)
-
-add_executable(1brc_client 1brc_client.cpp common.cpp TableWithNames.cpp)
-target_compile_options(1brc_client PRIVATE -Wno-missing-field-initializers)
-
-target_link_libraries(
-  1brc_server
-  ucxx::ucxx
-  velox_cudf_exchange
-  velox_aggregates
-  velox_type
-  velox_vector
-  velox_vector_test_lib
-  velox_exec
-  velox_exec_test_lib
-  velox_tpch_connector
-  velox_memory
-  velox_dwio_parquet_reader
-  velox_cudf_parquet_connector
-  velox_dwio_text_writer
-  velox_dwio_text_writer_register
-  velox_cudf_exec)
-
-target_link_libraries(
-  1brc_client
-  ucxx::ucxx
-  velox_cudf_exchange
-  velox_aggregates
-  velox_type
-  velox_vector
-  velox_vector_test_lib
-  velox_exec
-  velox_exec_test_lib
-  velox_tpch_connector
-  velox_memory
-  velox_dwio_parquet_reader
-  velox_cudf_parquet_connector
-  velox_dwio_text_writer
-  velox_dwio_text_writer_register
-  velox_cudf_exec)
-
-add_executable(exchange_srv_tst ExchangeServerMain.cpp)
-target_compile_options(exchange_srv_tst PRIVATE -Wno-missing-field-initializers)
-add_executable(exchange_client_tst ExchangeClientMain.cpp common.cpp
-                                   TableWithNames.cpp)
-target_compile_options(exchange_client_tst
-                       PRIVATE -Wno-missing-field-initializers)
-
-target_link_libraries(
-  exchange_srv_tst
-  velox_cudf_exchange
-  velox_cudf_exec
-  velox_exec
-  velox_exec_test_lib
-  velox_test_util
-  Folly::folly
-  fmt::fmt
-  ucxx::ucxx)
-
-target_link_libraries(
-  exchange_client_tst
-  velox_cudf_exchange
-  velox_cudf_exec
-  velox_exec
-  velox_exec_test_lib
-  velox_test_util
-  Folly::folly
-  fmt::fmt
-  ucxx::ucxx
-  gflags)
-
-add_custom_target(exchange_tests)
-add_dependencies(
-  exchange_tests
-  exchange_srv_tst
-  exchange_client_tst
-  1brc_server
-  1brc_client)
