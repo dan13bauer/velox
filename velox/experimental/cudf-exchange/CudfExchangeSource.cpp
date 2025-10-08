@@ -101,10 +101,28 @@ void CudfExchangeSource::process() {
       // Waiting for data is handled by an upcall from UCXX. Nothing to do.
       break;
     case ReceiverState::Done:
-      close();
-      // unregister.
-      communicator_->unregister(getSelfPtr());
+      // We need to call clean-up in this thread to remove any state
+      cleanUp();
       break;
+
+  }
+}
+
+void CudfExchangeSource::cleanUp() {
+  uint32_t value = static_cast<uint32_t>(getState());
+  VLOG(3) << "In CudfExchangeSource::cleanUp state == " << value;
+
+  if (getState() == ReceiverState::WaitingForData ||
+      getState() == ReceiverState::WaitingForMetadata) {
+    // The Task has failed and we may need to cancel outstanding requests
+
+    VELOX_CHECK_NOT_NULL(request_);
+    request_->cancel();
+  }
+
+   if (endpointRef_) {
+    endpointRef_->removeCommElem(getSelfPtr());
+    endpointRef_=nullptr;
   }
 }
 
@@ -119,21 +137,9 @@ void CudfExchangeSource::close() {
   VLOG(1) << fmt::format("closing task: {}", partitionKey_.toString());
   VLOG(3) << "Close receiver to remote " << partitionKey_.toString() << ".";
 
-  /*uint32_t value = static_cast<uint32_t>(getState());
-  VLOG(3) << "In CudfExchangeSource::close state == " << value;
-
-  if (getState() == ReceiverState::WaitingForData || getState() == ReceiverState::WaitingForMetadata) {
-      // The Taks has failed and we may need to cancel outstanding requests
-
-      VELOX_CHECK_NOT_NULL(request_);
-      request_->cancel();
-  }*/
-
-  if (endpointRef_) {
-    endpointRef_->removeCommElem(getSelfPtr());
-    endpointRef_=nullptr;
-  }
-  communicator_->unregister(getSelfPtr());
+  //  Let the Communicator progress thread do the actual clean-up
+  communicator_->addToWorkQueue(getSelfPtr());
+  setState(ReceiverState::Done);
 }
 
 folly::F14FastMap<std::string, int64_t> CudfExchangeSource::stats() const {
@@ -243,7 +249,7 @@ void CudfExchangeSource::onHandshake(
         ucs_status_string(status));
     VLOG(0) << errorMsg;
     setState(ReceiverState::Done);
-      queue_->setError("Failed to Connect to worker"); // Let the operator know via the queue
+    queue_->setError("Failed to Connect to worker"); // Let the operator know via the queue
   } else {
     VLOG(3) << toString() << "+ onHandshake " << ucs_status_string(status);
     setState(ReceiverState::ReadyToReceive);
@@ -327,11 +333,9 @@ void CudfExchangeSource::onMetadata(
           ptr->metadata.dataSizeBytes, stream);
     } catch (const rmm::bad_alloc& e) {
       VLOG(0) << "*** RMM  failed to allocate: " << e.what();
-      setState(ReceiverState::Done); // Should we have a specific Failed state ?
-      //communicator_->addToWorkQueue(getSelfPtr());
-      close(); // This is the end, should we close here or let the operator close us ?
       queue_->setError("Failed to alloc GPU memory"); // Let the operator know via the queue
- 
+      setState(ReceiverState::Done); // Should we have a specific Failed state ?
+      communicator_->addToWorkQueue(getSelfPtr());
       return;
     }
     
