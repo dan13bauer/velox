@@ -97,7 +97,7 @@ class CudfExchangeSource
 
   std::string toString() {
     std::stringstream out;
-    out << "[ExchangeSource " << partitionKey_.toString() << "]";
+    out << "[ExchangeSource " << partitionKey_.toString() << "(" << queue_->isInError() << ")]";
     return out.str();
   }
 
@@ -186,6 +186,9 @@ class CudfExchangeSource
   ReceiverState getState() {
     return state_.load(std::memory_order_seq_cst);
   }
+
+  /// @brief Remove the state associated with the source called by the state-machine
+   void cleanUp();
 
   /// @brief Sets the state to "desired" if and only if the current
   /// state is "expected".

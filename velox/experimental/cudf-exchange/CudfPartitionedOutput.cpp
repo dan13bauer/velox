@@ -86,6 +86,7 @@ void CudfPartitionedOutput::addInput(RowVectorPtr input) {
   auto cudfVector = std::dynamic_pointer_cast<CudfVector>(input);
   VELOX_CHECK(cudfVector, "Input must be a CudfVector");
   VELOX_CHECK(!future_.valid() || future_.hasValue(), "addInput with outstanding future!");
+  try {
   auto stream = cudfVector->stream();
 
   cudf::table_view tableView;
@@ -131,6 +132,17 @@ void CudfPartitionedOutput::addInput(RowVectorPtr input) {
   }
   blockingReason_ = blocked ? exec::BlockingReason::kWaitForConsumer 
                 : exec::BlockingReason::kNotBlocked;
+  
+  
+
+  }
+  catch (const rmm::bad_alloc& e) {
+  VLOG(1) << "In CudfPartitionedOutput caught memory alloc error, removing all memory in output queues";
+  for (int i = 0; i < numPartitions_; i++) {
+    sharedQueueManager()->deleteResults(this->taskId(), i);
+  }
+  throw; // Let the driver know we have failed
+}
 }
 
 exec::BlockingReason CudfPartitionedOutput::isBlocked(ContinueFuture* future) {

@@ -93,18 +93,22 @@ void Communicator::run() {
   worker_->registerAmReceiverCallback(info, &Acceptor::cStyleAMCallback);
 
   VLOG(3) << "Communicator running.";
-
   running_.store(true);
   while (running_) {
-    // wait for progress.
-    worker_->progressWorkerEvent(0);
-
-    // process the work queue. Make sure that communication is progressed
-    // after each call to a comms element, otherwise we will deadlock.
-    while (!workQueue_.empty()) {
-      auto comms = workQueue_.pop();
-      comms->process();
+    try {
+      // wait for progress.
       worker_->progressWorkerEvent(0);
+
+      // process the work queue. Make sure that communication is progressed
+      // after each call to a comms element, otherwise we will deadlock.
+      while (!workQueue_.empty()) {
+        auto comms = workQueue_.pop();
+        comms->process();
+        worker_->progressWorkerEvent(0);
+      }
+    } catch (ucxx::IOError& e) {
+      std::cerr << "In Communicator main loop UCXX Exception: " << e.what() << std::endl;
+      throw e;
     }
   }
   VLOG(3) << "Communicator stopping.";
@@ -167,7 +171,13 @@ std::shared_ptr<EndpointRef> Communicator::assocEndpointRef(
 }
 
 void Communicator::removeEndpointRef(std::shared_ptr<EndpointRef> ep) {
-  VLOG(3) << "+ Communicator::removeEndpointRef";
+  
+  
+  VLOG(3) << "In Communicator::removeEndpointRef for Communicator with port = " << Communicator::getInstance()->port_;
+  std::string worker_info = ep->endpoint_->getWorker()->getInfo();
+  //VLOG(3) << "Remote end point has closed associated with worker " << worker_info;
+  
+
 
   if (ep->endpoint_ && ep->endpoint_->isAlive()) {
     VLOG(3) << "In Communicator::removeEndpointRef call closeBlocking";

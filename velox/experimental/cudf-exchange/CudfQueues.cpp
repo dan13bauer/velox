@@ -194,6 +194,7 @@ bool CudfOutputQueue::enqueue(
     int32_t numRows,
     ContinueFuture* future) {
   VELOX_CHECK_NOT_NULL(data);
+  VELOX_CHECK_NOT_NULL(task_);
   VELOX_CHECK(
       task_->isRunning(), "Task is terminated, cannot add data to output.");
   std::vector<CudfDataAvailable> dataAvailableCallbacks;
