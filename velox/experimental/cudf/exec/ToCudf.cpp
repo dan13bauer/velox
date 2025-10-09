@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+#include "velox/experimental/cudf-exchange/CombinedCudfHttpExchange.h"
+#include "velox/experimental/cudf-exchange/CudfExchangeClient.h"
+#include "velox/experimental/cudf-exchange/CudfPartitionedOutput.h"
+#include "velox/experimental/cudf-exchange/ExchangeClientFacade.h"
 #include "velox/experimental/cudf/exec/CudfConversion.h"
 #include "velox/experimental/cudf/exec/CudfFilterProject.h"
 #include "velox/experimental/cudf/exec/CudfHashAggregation.h"
@@ -25,14 +29,18 @@
 #include "velox/experimental/cudf/exec/ToCudf.h"
 #include "velox/experimental/cudf/exec/Utilities.h"
 
+#include "velox/exec/CallbackSink.h"
 #include "velox/exec/Driver.h"
+#include "velox/exec/Exchange.h"
 #include "velox/exec/FilterProject.h"
 #include "velox/exec/HashAggregation.h"
 #include "velox/exec/HashBuild.h"
 #include "velox/exec/HashProbe.h"
 #include "velox/exec/Limit.h"
+#include "velox/exec/Merge.h"
 #include "velox/exec/Operator.h"
 #include "velox/exec/OrderBy.h"
+#include "velox/exec/PartitionedOutput.h"
 #include "velox/exec/TableScan.h"
 
 #include <cudf/detail/nvtx/ranges.hpp>
@@ -45,6 +53,9 @@ DEFINE_bool(velox_cudf_enabled, true, "Enable cuDF-Velox acceleration");
 DEFINE_string(velox_cudf_memory_resource, "async", "Memory resource for cuDF");
 DEFINE_bool(velox_cudf_debug, false, "Enable debug printing");
 DEFINE_bool(velox_cudf_table_scan, true, "Enable cuDF table scan");
+DEFINE_bool(velox_cudf_exchange, true, "Enable cuDF exchange");
+
+using namespace facebook::velox::cudf_exchange;
 
 namespace facebook::velox::cudf_velox {
 
@@ -58,6 +69,7 @@ bool isAnyOf(const Base* p) {
 } // namespace
 
 bool CompileState::compile() {
+  VLOG(3) << "+ CompileState::compile";
   auto operators = driver_.operators();
 
   if (FLAGS_velox_cudf_debug) {
@@ -126,9 +138,45 @@ bool CompileState::compile() {
     return true;
   };
 
+  auto isPartitionedOutputSupported = [getPlanNode](const exec::Operator* op) {
+    // SRO The PlanNode isn't set for the CallbackSink ! Error in Velox ?
+    if (isAnyOf<exec::CallbackSink>(op))
+      return false;
+
+    if (!CudfOptions::getInstance().cudfExchange) {
+      return false;
+    }
+    auto planNode =
+        std::dynamic_pointer_cast<const core::PartitionedOutputNode>(
+            getPlanNode(op->planNodeId()));
+
+    if (!planNode) {
+      return false;
+    }
+    if (planNode->isRootFragment() &&
+        !CudfOptions::getInstance().shouldTransformLastOutput()) {
+      return false;
+    }
+    return true;
+  };
+
+  auto isExchangeSupported = [](const exec::Operator* op) {
+    return CudfOptions::getInstance().cudfExchange &&
+        isAnyOf<exec::Exchange>(op);
+  };
+
+  auto isMergeExchangeSupported = [](const exec::Operator* op) {
+    return CudfOptions::getInstance().cudfExchange &&
+        isAnyOf<exec::MergeExchange>(op);
+  };
+
   auto isSupportedGpuOperator =
-      [isFilterProjectSupported, isJoinSupported, isTableScanSupported](
-          const exec::Operator* op) {
+      [isFilterProjectSupported,
+       isJoinSupported,
+       isTableScanSupported,
+       isPartitionedOutputSupported,
+       isExchangeSupported,
+       isMergeExchangeSupported](const exec::Operator* op) {
         return isAnyOf<
                    exec::OrderBy,
                    exec::HashAggregation,
@@ -136,36 +184,45 @@ bool CompileState::compile() {
                    exec::LocalPartition,
                    exec::LocalExchange>(op) ||
             isFilterProjectSupported(op) || isJoinSupported(op) ||
-            isTableScanSupported(op);
+            isTableScanSupported(op) || isPartitionedOutputSupported(op) ||
+            isExchangeSupported(op) || isMergeExchangeSupported(op);
       };
 
   std::vector<bool> isSupportedGpuOperators(operators.size());
+
   std::transform(
       operators.begin(),
       operators.end(),
       isSupportedGpuOperators.begin(),
       isSupportedGpuOperator);
-  auto acceptsGpuInput = [isFilterProjectSupported,
-                          isJoinSupported](const exec::Operator* op) {
-    return isAnyOf<
-               exec::OrderBy,
-               exec::HashAggregation,
-               exec::Limit,
-               exec::LocalPartition>(op) ||
-        isFilterProjectSupported(op) || isJoinSupported(op);
-  };
-  auto producesGpuOutput = [isFilterProjectSupported,
-                            isJoinSupported,
-                            isTableScanSupported](const exec::Operator* op) {
-    return isAnyOf<
-               exec::OrderBy,
-               exec::HashAggregation,
-               exec::Limit,
-               exec::LocalExchange>(op) ||
-        isFilterProjectSupported(op) ||
-        (isAnyOf<exec::HashProbe>(op) && isJoinSupported(op)) ||
-        (isTableScanSupported(op));
-  };
+
+  auto acceptsGpuInput =
+      [isFilterProjectSupported, isJoinSupported, isPartitionedOutputSupported](
+          const exec::Operator* op) {
+        return isAnyOf<
+                   exec::OrderBy,
+                   exec::HashAggregation,
+                   exec::Limit,
+                   exec::LocalPartition>(op) ||
+            isPartitionedOutputSupported(op) || isFilterProjectSupported(op) ||
+            isJoinSupported(op);
+      };
+  auto producesGpuOutput =
+      [isFilterProjectSupported,
+       isJoinSupported,
+       isTableScanSupported,
+       isExchangeSupported,
+       isMergeExchangeSupported](const exec::Operator* op) {
+        return isAnyOf<
+                   exec::OrderBy,
+                   exec::HashAggregation,
+                   exec::Limit,
+                   exec::LocalExchange>(op) ||
+            isFilterProjectSupported(op) || isExchangeSupported(op) ||
+            isMergeExchangeSupported(op) ||
+            (isAnyOf<exec::HashProbe>(op) && isJoinSupported(op)) ||
+            (isTableScanSupported(op));
+      };
 
   int32_t operatorsOffset = 0;
   for (int32_t operatorIndex = 0; operatorIndex < operators.size();
@@ -220,7 +277,6 @@ bool CompileState::compile() {
         // To-Velox (optional)
       }
     } else if (auto orderByOp = dynamic_cast<exec::OrderBy*>(oper)) {
-      auto id = orderByOp->operatorId();
       auto planNode = std::dynamic_pointer_cast<const core::OrderByNode>(
           getPlanNode(orderByOp->planNodeId()));
       VELOX_CHECK(planNode != nullptr);
@@ -264,8 +320,84 @@ bool CompileState::compile() {
     } else if (
         auto localExchangeOp = dynamic_cast<exec::LocalExchange*>(oper)) {
       keepOperator = 1;
+    } else if (
+        auto partitionOp = dynamic_cast<exec::PartitionedOutput*>(oper)) {
+      auto planNode =
+          std::dynamic_pointer_cast<const core::PartitionedOutputNode>(
+              getPlanNode(partitionOp->planNodeId()));
+      VELOX_CHECK(planNode != nullptr);
+      if ((!CudfOptions::getInstance().cudfExchange) ||
+          (planNode->isRootFragment())) {
+        keepOperator = 1;
+      } else {
+        replaceOp.push_back(std::make_unique<CudfPartitionedOutput>(
+            id, ctx, planNode, partitionOp->eagerFlush_));
+        replaceOp.back()->initialize();
+      }
+    } else if (auto exchangeOp = dynamic_cast<exec::Exchange*>(oper)) {
+      auto planNode = std::dynamic_pointer_cast<const core::ExchangeNode>(
+          getPlanNode(oper->planNodeId()));
+      VELOX_CHECK(planNode != nullptr);
+      if (!CudfOptions::getInstance().cudfExchange) {
+        keepOperator = 1;
+      } else {
+        // Get or create the ExchangeClientFacade, using parameters from the
+        // Velox exchange client.
+        auto key = TaskPlanNodeKey(oper->taskId(), oper->planNodeId());
+        auto clientIter = exchangeClientFacadeByTaskAndPlanNode_.find(key);
+        std::shared_ptr<ExchangeClientFacade> client = nullptr;
+        if (clientIter == exchangeClientFacadeByTaskAndPlanNode_.end()) {
+          // The following std::move transfers the ownership of the
+          // HttpExchangeClient to the facade, preventing that it is closed when
+          // the ExchangeOperator is destructed after being replace by the
+          // CombinedCudfHttpExchange.
+          auto veloxExchangeClient = std::move(exchangeOp->exchangeClient_);
+          VELOX_CHECK_NOT_NULL(
+              veloxExchangeClient, "Velox exchange client can't be null.");
+          // create new cudfExchangeClient
+          auto cudfClient = std::make_shared<CudfExchangeClient>(
+              oper->taskId(),
+              veloxExchangeClient->destination_,
+              veloxExchangeClient->numberOfConsumers_,
+              veloxExchangeClient->executor_);
+          client = std::make_shared<ExchangeClientFacade>(
+              std::move(cudfClient), std::move(veloxExchangeClient));
+          TaskPlanNodeKey key(oper->taskId(), oper->planNodeId());
+          exchangeClientFacadeByTaskAndPlanNode_.emplace(key, client);
+        } else {
+          client = clientIter->second;
+          // prevent closing of HttpExchangeClient when ExchangeOperator is
+          // destructed after being replaced by the CombinedCudfHttpExchange
+          exchangeOp->exchangeClient_.reset();
+        }
+        replaceOp.push_back(std::make_unique<CombinedCudfHttpExchange>(
+            id, ctx, planNode, client));
+        replaceOp.back()->initialize();
+      }
+    } else if (
+        auto localExchangeOp = dynamic_cast<exec::LocalExchange*>(oper)) {
+      keepOperator = 1;
+    } else if (
+        auto mergeExchangeOp = dynamic_cast<exec::MergeExchange*>(oper)) {
+      if (!CudfOptions::getInstance().cudfExchange) {
+        keepOperator = 1;
+      } else {
+        auto planNode =
+            std::dynamic_pointer_cast<const core::MergeExchangeNode>(
+                getPlanNode(oper->planNodeId()));
+        VELOX_CHECK(planNode != nullptr);
+        // create a CombinedCudfHttpExchange operator for the merge exchange.
+        // Pass a nullptr to force the CombinedCudfHttpExchange op to create its
+        // own, private CudfExchangeClient.
+        replaceOp.push_back(std::make_unique<CombinedCudfHttpExchange>(
+            id, ctx, planNode, nullptr));
+        replaceOp.back()->initialize();
+        // Add an order-by node. SortingKeys and SortOrders will be taken from
+        // the MergeExchangeNode.
+        replaceOp.push_back(std::make_unique<CudfOrderBy>(id, ctx, planNode));
+        replaceOp.back()->initialize();
+      }
     }
-
     if (producesGpuOutput(oper) and
         (nextOperatorIsNotGpu or isLastOperatorOfTask)) {
       auto planNode = getPlanNode(oper->planNodeId());
@@ -295,6 +427,7 @@ bool CompileState::compile() {
     }
   }
 
+  VLOG(3) << "- CompileState::compile";
   return replacementsMade;
 }
 
