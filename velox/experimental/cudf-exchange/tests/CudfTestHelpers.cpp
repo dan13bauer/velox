@@ -15,6 +15,11 @@
  */
 #include "velox/experimental/cudf-exchange/tests/CudfTestHelpers.h"
 
+#include <cudf/strings/strings_column_view.hpp>
+#include <cudf/strings/detail/utilities.hpp>
+#include <cudf/column/column_factories.hpp>
+#include <cudf/column/column.hpp>
+
 using namespace facebook::velox;
 using namespace facebook::velox::exec;
 using namespace facebook::velox::core;
@@ -46,9 +51,14 @@ std::shared_ptr<Task> createSourceTask(
   auto planFragment =
       exec::test::PlanBuilder().values({rowVector}).planFragment();
 
+ std::shared_ptr<folly::Executor> executor(
+      std::make_shared<folly::CPUThreadPoolExecutor>(
+          std::thread::hardware_concurrency()));
+
+
   std::unordered_map<std::string, std::string> configSettings;
   auto queryCtx = core::QueryCtx::create(
-      nullptr, core::QueryConfig(std::move(configSettings)));
+      executor.get(), core::QueryConfig(std::move(configSettings)));
 
   auto task = Task::create(
       taskId,
@@ -83,25 +93,144 @@ std::shared_ptr<facebook::velox::exec::Task> createExchangeTask(
   return task;
 }
 
+
+template <typename T>
+std::unique_ptr<cudf::column> make_numeric_column_from_vector(
+    const std::vector<T>& host_values,
+    rmm::cuda_stream_view stream = cudf::get_default_stream(),
+    rmm::mr::device_memory_resource* mr = rmm::mr::get_current_device_resource())
+{
+    size_t num_rows = host_values.size();
+
+    // Allocate a device buffer of the correct size
+    rmm::device_buffer data(num_rows * sizeof(T), stream, mr);
+
+    // Copy host -> device
+    cudaMemcpyAsync(
+        data.data(),
+        host_values.data(),
+        num_rows * sizeof(T),
+        cudaMemcpyHostToDevice,
+        stream.value());
+
+    // Build the cudf::column from the device buffer
+    return std::make_unique<cudf::column>(
+        cudf::data_type{cudf::type_to_id<T>()}, // e.g. cudf::type_id::FLOAT64
+        num_rows,
+        std::move(data),
+        rmm::device_buffer{},  // no null mask
+        0);                    // no nulls
+}
+
+
+// Creates device buffer with concatenated string bytes from host vector
+rmm::device_buffer make_chars_buffer_from_host(
+    const std::vector<std::string>& host_strings,
+    rmm::cuda_stream_view stream = cudf::get_default_stream(),
+    rmm::mr::device_memory_resource* mr = rmm::mr::get_current_device_resource())
+{
+    // Compute total bytes needed
+    size_t total_bytes = 0;
+    for (auto const& s : host_strings)
+        total_bytes += s.size();
+
+    // Allocate device buffer of appropriate size
+    rmm::device_buffer chars_buffer(total_bytes, stream, mr);
+
+    // Copy host string data into one contiguous host buffer first
+    std::vector<char> host_concat;
+    host_concat.reserve(total_bytes);
+    for (auto const& s : host_strings)
+        host_concat.insert(host_concat.end(), s.begin(), s.end());
+
+    // Copy host -> device
+    cudaMemcpyAsync(
+        chars_buffer.data(),
+        host_concat.data(),
+        total_bytes,
+        cudaMemcpyHostToDevice,
+        stream.value());
+
+    return chars_buffer;
+}
+
+std::unique_ptr<cudf::column> make_strings_column_from_host(
+    const std::vector<std::string>& host_strings)
+{
+    auto num_rows = host_strings.size();
+
+    // --- Create offsets array ---
+    std::vector<int32_t> h_offsets(num_rows + 1);
+    h_offsets[0] = 0;
+    for (size_t i = 0; i < num_rows; ++i)
+        h_offsets[i + 1] = h_offsets[i] + static_cast<int32_t>(host_strings[i].size());
+
+    // Copy offsets to device
+    auto offsets_col = cudf::make_numeric_column(
+        cudf::data_type{cudf::type_id::INT32},
+        num_rows + 1,
+        cudf::mask_state::UNALLOCATED);
+
+    cudaMemcpy(
+        offsets_col->mutable_view().data<int32_t>(),
+        h_offsets.data(),
+        sizeof(int32_t) * (num_rows + 1),
+        cudaMemcpyHostToDevice);
+
+    // --- Create chars buffer ---
+    auto chars_buffer = make_chars_buffer_from_host(host_strings);
+
+    // --- Build strings column ---
+    return cudf::make_strings_column(
+        num_rows,
+        std::move(offsets_col),
+        std::move(chars_buffer),
+        0,                      // null_count
+        rmm::device_buffer{});  // null mask
+}
+
 std::unique_ptr<cudf::packed_columns> makePackedColumns(
     std::size_t numRows,
+   facebook::velox::RowTypePtr rowType,
     rmm::cuda_stream_view stream) {
   // Create two numeric columns using cudf::make_numeric_column
-  auto col1 = cudf::make_numeric_column(
-      cudf::data_type{cudf::type_id::INT32},
-      numRows,
-      cudf::mask_state::UNALLOCATED);
-  auto col2 = cudf::make_numeric_column(
-      cudf::data_type{cudf::type_id::FLOAT64},
-      numRows,
-      cudf::mask_state::UNALLOCATED);
 
-  // Table will contain arbitrary values.
-
-  // Build cudf::table
   std::vector<std::unique_ptr<cudf::column>> columns;
-  columns.push_back(std::move(col1));
-  columns.push_back(std::move(col2));
+
+  for (size_t i = 0; i < rowType->size(); ++i) {
+    const std::string& name = rowType->nameOf(i);
+    const auto& type = rowType->childAt(i);
+
+    cudf::type_id cudfType;
+    std::unique_ptr<cudf::column> col;
+
+    switch (type->kind()) {
+      case TypeKind::INTEGER: {
+        cudfType = cudf::type_id::INT32;
+        std::vector<uint32_t> values(numRows);
+        col = make_numeric_column_from_vector(values);
+        break;
+      }
+      case TypeKind::DOUBLE: {
+        cudfType = cudf::type_id::FLOAT64;
+        std::vector<float> values(numRows);
+        col = make_numeric_column_from_vector(values);
+
+        break;
+      }
+      case TypeKind::VARCHAR: {
+        std::vector<std::string> myStrings(numRows);
+        col= make_strings_column_from_host(myStrings);
+        break;
+      }
+      default:
+        VLOG(0) << "Unhandled type " << type->kind();
+        break;
+    }
+
+    columns.push_back(std::move(col));
+  }
+
   auto table = std::make_unique<cudf::table>(std::move(columns));
 
   cudf::packed_columns packed = cudf::pack(table->view(), stream);
@@ -109,5 +238,8 @@ std::unique_ptr<cudf::packed_columns> makePackedColumns(
   return std::unique_ptr<cudf::packed_columns>(new cudf::packed_columns(
       std::move(packed.metadata), std::move(packed.gpu_data)));
 }
+
+
+
 
 } // namespace facebook::velox::cudf_exchange

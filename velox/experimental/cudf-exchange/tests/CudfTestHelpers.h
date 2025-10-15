@@ -29,8 +29,8 @@
 
 namespace facebook::velox::cudf_exchange {
 
-const std::vector<std::string> kTestColumnNames = {"c0", "c1"};
-const std::vector<TypePtr> kTestColumnTypes = {INTEGER(), DOUBLE()};
+const std::vector<std::string> kTestColumnNames = {"c0", "c1","c2"};
+const std::vector<TypePtr> kTestColumnTypes = {INTEGER(), DOUBLE(),VARCHAR()};
 const facebook::velox::RowTypePtr kTestRowType =
     ROW(kTestColumnNames, kTestColumnTypes);
 
@@ -73,6 +73,8 @@ std::shared_ptr<facebook::velox::exec::Task> createExchangeTask(
 ///
 std::unique_ptr<cudf::packed_columns> makePackedColumns(
     std::size_t numRows,
+    facebook::velox::RowTypePtr rowType,
     rmm::cuda_stream_view stream);
+
 
 } // namespace facebook::velox::cudf_exchange
