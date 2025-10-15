@@ -65,7 +65,7 @@ class CudfOutputQueueManagerTest : public testing::Test {
   std::unique_ptr<cudf::packed_columns> makePackedColumns(std::size_t numRows) {
     rmm::cuda_stream_view stream = rmm::cuda_stream_default;
     auto cols =
-        facebook::velox::cudf_exchange::makePackedColumns(numRows, stream);
+        facebook::velox::cudf_exchange::makePackedColumns(numRows,kTestRowType,stream);
     stream.synchronize();
     return cols;
   }
