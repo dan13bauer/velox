@@ -52,7 +52,7 @@ class CudfExchangeTest : public testing::Test {
   void SetUp() override {
     VLOG(0) << "setup, creating pool, communicator, etc..";
     queueManager_ = CudfOutputQueueManager::getInstanceRef();
-    pool_ = facebook::velox::memory::memoryManager()->addLeafPool();
+    pool_ = facebook::velox::memory::memoryManager()->addLeafPool("CudfTestMemoryPool");
     ContinueFuture future;
     communicator_ = facebook::velox::cudf_exchange::Communicator::initAndGet(
         kCommunicatorPort, std::string(kUnusedCoordinatorUrl), &future);
@@ -67,11 +67,12 @@ class CudfExchangeTest : public testing::Test {
   }
 
   void TearDown() override {
-    VLOG(0) << "Teardown, destroying everything.";
+    VLOG(0) << "+ Teardown, destroying everything.";
     communicator_->stop();
     communicator_.reset();
     communicatorThread_->join();
     communicatorThread_.reset();
+    VLOG(0) << "- Teardown, destroying everything.";
   }
 
   exec::Split remoteSplit(const std::string& taskId, int partitionId) {
@@ -134,6 +135,9 @@ TEST_F(CudfExchangeTest, basicTest) {
 
   size_t expectedRows = numChunks * numRowsPerChunk;
   size_t effectiveRows = sinkDriver.numRows();
+
+  // Remove the srcTask from the queue manager, so queue get freed
+  queueManager_->removeTask(srcTaskId);
 
   GTEST_ASSERT_EQ(expectedRows, effectiveRows);
 }
