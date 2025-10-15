@@ -39,7 +39,7 @@ void CudfPartitionedOutputMock::run() {
     for (uint32_t dataChunk = 0; dataChunk < numDataChunks_; ++dataChunk) {
       // create a data chunk with numRowsPerChunk_ rows
       // and push it into the destination queue identified by the taskId.
-      auto packedColumns = makePackedColumns(numRowsPerChunk_, stream);
+      auto packedColumns = makePackedColumns(numRowsPerChunk_, kTestRowType, stream);
       // Sync the stream since UCXX/UCX is not stream oriented and without
       // syncing, data could get lost. Syncing here is  easy but not the most
       // efficient. A better approach is to create an event and pass it along
