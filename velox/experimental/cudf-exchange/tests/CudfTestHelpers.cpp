@@ -189,12 +189,60 @@ std::unique_ptr<cudf::column> make_strings_column_from_host(
         rmm::device_buffer{});  // null mask
 }
 
+
+std::unique_ptr<cudf::packed_columns> makeFilledPackedColumns(
+    std::size_t numRows,
+    std::shared_ptr<CudfTestData> dataToSend,
+    rmm::cuda_stream_view stream) {
+// Create packed columns with default value
+  std::vector<std::unique_ptr<cudf::column>> columns;
+
+
+  facebook::velox::RowTypePtr rowType = CudfTestData::kTestRowType;
+
+  for (size_t i = 0; i < rowType->size(); ++i) {
+    const std::string& name = rowType->nameOf(i);
+    const auto& type = rowType->childAt(i);
+
+    cudf::type_id cudfType;
+    std::unique_ptr<cudf::column> col;
+
+    switch (type->kind()) {
+      case TypeKind::INTEGER: {
+        cudfType = cudf::type_id::INT32;
+        col = make_numeric_column_from_vector(*dataToSend->getIntegers());
+        break;
+      }
+      case TypeKind::DOUBLE: {
+        cudfType = cudf::type_id::FLOAT64;
+        col = make_numeric_column_from_vector(*dataToSend->getDoubles());
+
+        break;
+      }
+      case TypeKind::VARCHAR: {
+        col= make_strings_column_from_host(*dataToSend->getStrings());
+        break;
+      }
+      default:
+        VLOG(0) << "Unhandled type " << type->kind();
+        break;
+    }
+
+    columns.push_back(std::move(col));
+  }
+ auto table = std::make_unique<cudf::table>(std::move(columns));
+
+  cudf::packed_columns packed = cudf::pack(table->view(), stream);
+
+  return std::unique_ptr<cudf::packed_columns>(new cudf::packed_columns(
+      std::move(packed.metadata), std::move(packed.gpu_data)));
+}
+
 std::unique_ptr<cudf::packed_columns> makePackedColumns(
     std::size_t numRows,
    facebook::velox::RowTypePtr rowType,
     rmm::cuda_stream_view stream) {
-  // Create two numeric columns using cudf::make_numeric_column
-
+  // Create packed columns with default value
   std::vector<std::unique_ptr<cudf::column>> columns;
 
   for (size_t i = 0; i < rowType->size(); ++i) {
