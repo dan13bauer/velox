@@ -22,12 +22,14 @@ CudfPartitionedOutputMock::CudfPartitionedOutputMock(
     const std::string& taskId,
     const size_t numPartitions,
     const uint32_t numDataChunks,
-    const size_t numRowsPerChunk)
+    const size_t numRowsPerChunk,
+  std::shared_ptr<CudfTestData> dataToSend)
     : queueManager_(CudfOutputQueueManager::getInstanceRef()),
       taskId_(taskId),
       numPartitions_(numPartitions),
       numDataChunks_(numDataChunks),
-      numRowsPerChunk_(numRowsPerChunk) {}
+      numRowsPerChunk_(numRowsPerChunk),
+      dataToSend_(dataToSend){}
 
 void CudfPartitionedOutputMock::run() {
   bool blocked;
@@ -39,7 +41,14 @@ void CudfPartitionedOutputMock::run() {
     for (uint32_t dataChunk = 0; dataChunk < numDataChunks_; ++dataChunk) {
       // create a data chunk with numRowsPerChunk_ rows
       // and push it into the destination queue identified by the taskId.
-      auto packedColumns = makePackedColumns(numRowsPerChunk_, kTestRowType, stream);
+
+      std::unique_ptr<cudf::packed_columns> packedColumns;
+      if (dataToSend_ == nullptr) {
+        packedColumns = makePackedColumns(numRowsPerChunk_, CudfTestData::kTestRowType, stream);
+      }
+      else {
+        packedColumns = makeFilledPackedColumns(numRowsPerChunk_, dataToSend_, stream);
+      }
       // Sync the stream since UCXX/UCX is not stream oriented and without
       // syncing, data could get lost. Syncing here is  easy but not the most
       // efficient. A better approach is to create an event and pass it along
@@ -61,5 +70,9 @@ void CudfPartitionedOutputMock::run() {
   // tell the queue manager that we are done.
   queueManager_->noMoreData(taskId_);
 }
+
+
+
+
 
 } // namespace facebook::velox::cudf_exchange

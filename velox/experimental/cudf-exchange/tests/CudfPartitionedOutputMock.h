@@ -16,6 +16,8 @@
 #pragma once
 
 #include "velox/experimental/cudf-exchange/CudfOutputQueueManager.h"
+#include "velox/experimental/cudf-exchange/tests/CudfTestData.h"
+
 
 namespace facebook::velox::cudf_exchange {
 
@@ -27,18 +29,20 @@ class CudfPartitionedOutputMock {
       const std::string& taskId,
       const size_t numPartitions,
       const uint32_t numDataChunks,
-      const size_t numRowsPerChunk);
+      const size_t numRowsPerChunk,
+      std::shared_ptr<CudfTestData> dataToSend = nullptr);
 
   /// @brief creates numPartitions_ x numDataChunks_ data chunks and
   /// pushes it into the destination queues identified by the taskId.
   void run();
-
+ 
  private:
   const std::shared_ptr<CudfOutputQueueManager> queueManager_;
   const std::string taskId_;
   const size_t numPartitions_;
   const uint32_t numDataChunks_;
   const size_t numRowsPerChunk_;
+  const std::shared_ptr<CudfTestData> dataToSend_;
 };
 
 } // namespace facebook::velox::cudf_exchange
