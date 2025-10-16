@@ -26,6 +26,7 @@
 #include "velox/core/QueryCtx.h"
 #include "velox/exec/Task.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
+#include "velox/experimental/cudf-exchange/tests/CudfTestData.h"
 
 namespace facebook::velox::cudf_exchange {
 
@@ -74,6 +75,11 @@ std::shared_ptr<facebook::velox::exec::Task> createExchangeTask(
 std::unique_ptr<cudf::packed_columns> makePackedColumns(
     std::size_t numRows,
     facebook::velox::RowTypePtr rowType,
+    rmm::cuda_stream_view stream);
+
+std::unique_ptr<cudf::packed_columns> makeFilledPackedColumns(
+    std::size_t numRows,
+    std::shared_ptr<CudfTestData> dataToSend,
     rmm::cuda_stream_view stream);
 
 
