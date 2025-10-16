@@ -31,6 +31,8 @@
 #include "velox/experimental/cudf-exchange/tests/CudfPartitionedOutputMock.h"
 #include "velox/experimental/cudf-exchange/tests/CudfTestHelpers.h"
 #include "velox/experimental/cudf-exchange/tests/SinkDriverMock.h"
+#include "velox/experimental/cudf-exchange/tests/CudfTestData.h"
+
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec;
@@ -92,7 +94,7 @@ class CudfExchangeTest : public testing::Test {
 };
 
 TEST_F(CudfExchangeTest, basicTest) {
-  VLOG(3) << "Basic test.";
+  VLOG(3) << "+ CudfExchangeTest::basicTest";
   size_t numPartitons = 1;
   int numDrivers = 1;
   // Basic test implementation
@@ -105,6 +107,7 @@ TEST_F(CudfExchangeTest, basicTest) {
 
   uint32_t numChunks = 10;
   size_t numRowsPerChunk = 1000;
+
   auto sourceMock = std::make_shared<CudfPartitionedOutputMock>(
       srcTaskId, numDrivers, numChunks, numRowsPerChunk);
 
@@ -139,7 +142,75 @@ TEST_F(CudfExchangeTest, basicTest) {
   // Remove the srcTask from the queue manager, so queue get freed
   queueManager_->removeTask(srcTaskId);
 
+  VLOG(3) << "- CudfExchangeTest::basicTest";
   GTEST_ASSERT_EQ(expectedRows, effectiveRows);
+}
+
+TEST_F(CudfExchangeTest, dataTest) {
+ 
+  VLOG(3) << "+ CudfExchangeTest::dataTest";
+ 
+
+  size_t numRowsPerChunk = 10;
+  int strLength = 5;
+  std::shared_ptr<CudfTestData> data = std::make_shared<CudfTestData>();
+  data->initialize(numRowsPerChunk,strLength, strLength*2);
+  auto strings = data->getStrings();
+  auto integers = data->getIntegers();
+  auto doubles = data->getDoubles();
+
+  for (int i = 0; i < numRowsPerChunk;i++) {
+        VLOG(3) << "String: " << strings->at(i) << " Integer: " << integers->at(i) <<  " Double: " << doubles->at(i);
+    }
+
+  size_t numPartitons = 1;
+  int numDrivers = 1;
+  // Basic test implementation
+  const std::string srcTaskId = "sourceTask";
+  auto srcTask = createSourceTask(srcTaskId, pool_, kTestRowType);
+
+  // tell the queue manager that a new source task with one driver
+  // and one partition exists.
+  queueManager_->initializeTask(srcTask, numPartitons, numDrivers);
+
+  uint32_t numChunks = 10;
+    
+  auto sourceMock = std::make_shared<CudfPartitionedOutputMock>(
+      srcTaskId, numDrivers, numChunks, numRowsPerChunk,data);
+
+  const std::string sinkTaskId = "sinkTask";
+  int partitionId = 0;
+  core::PlanNodeId exchangeNodeId;
+  auto sinkTask =
+      createExchangeTask(sinkTaskId, kTestRowType, partitionId, exchangeNodeId);
+
+  int driverId = 0;
+  SinkDriverMock sinkDriver(sinkTask, driverId, nullptr, 1, data);
+
+  // create a remote split and add it to the sink driver mock.
+  std::vector<facebook::velox::exec::Split> splits;
+  splits.emplace_back(remoteSplit(srcTaskId, partitionId));
+  sinkDriver.addSplits(splits);
+
+  // Start the mocks.
+  VLOG(3) << "Starting source task";
+  std::thread sourceThread(&CudfPartitionedOutputMock::run, sourceMock.get());
+  VLOG(3) << "Starting sink task";
+  std::thread sinkThread(&SinkDriverMock::run, &sinkDriver);
+
+  sourceThread.join();
+  VLOG(3) << "Source task done.";
+  sinkThread.join();
+  VLOG(3) << "Sink task done.";
+
+  size_t expectedRows = numChunks * numRowsPerChunk;
+  size_t effectiveRows = sinkDriver.numRows();
+
+  // Remove the srcTask from the queue manager, so queue get freed
+  queueManager_->removeTask(srcTaskId);
+
+  VLOG(3) << "- CudfExchangeTest::basicTest";
+  GTEST_ASSERT_EQ(sinkDriver.dataIsValid(),true);
 }
 
 // Add more test cases as needed
