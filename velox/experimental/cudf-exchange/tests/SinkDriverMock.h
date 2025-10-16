@@ -18,6 +18,7 @@
 #include "velox/exec/Driver.h"
 #include "velox/experimental/cudf-exchange/HybridExchange.h"
 #include "velox/experimental/cudf-exchange/tests/CudfTestHelpers.h"
+#include "velox/experimental/cudf-exchange/tests/CudfTestData.h"
 
 using namespace facebook::velox::exec;
 
@@ -49,7 +50,8 @@ class SinkDriverMock {
       std::shared_ptr<facebook::velox::exec::Task> task,
       int driverId,
       std::shared_ptr<ExchangeClientFacade> exchangeClient = nullptr,
-      int32_t numberOfConsumers = 1);
+      int32_t numberOfConsumers = 1,
+     std::shared_ptr<CudfTestData> dataToSend = nullptr);
 
   /// @brief Executes the exchange operator until it finishes receiving all data
   /// from the upstream.
@@ -65,13 +67,22 @@ class SinkDriverMock {
     return numRows_;
   }
 
+  bool dataIsValid() { return dataValidFlag_;}
+
  private:
+
+  /// @brief checks if the received table corresponds to that sent, sets dataValidFlag_=false if not
+  /// @param tab 
+  void updateDataValidity(const cudf::table_view& tab);
+
+  bool dataValidFlag_ = true;
   std::shared_ptr<facebook::velox::exec::Task> task_;
   int driverId_;
   DriverCtx driverCtx_;
   std::shared_ptr<ExchangeClientFacade> exchangeClient_;
   std::unique_ptr<HybridExchange> hybridExchange_;
   uint64_t numRows_;
+  const std::shared_ptr<CudfTestData> dataToSend_;
 };
 
 } // namespace facebook::velox::cudf_exchange

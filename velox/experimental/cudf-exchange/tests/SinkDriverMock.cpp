@@ -24,10 +24,12 @@ SinkDriverMock::SinkDriverMock(
     std::shared_ptr<facebook::velox::exec::Task> task,
     int driverId,
     std::shared_ptr<ExchangeClientFacade> exchangeClient,
-    int32_t numberOfConsumers)
+    int32_t numberOfConsumers,
+    std::shared_ptr<CudfTestData> dataToSend)
     : task_{std::move(task)},
       driverCtx_{task_, driverId, kPipelineId, kUngroupedGroupId, kPartitionId},
-      numRows_{0} {
+      numRows_{0},
+      dataToSend_(dataToSend){
   if (!exchangeClient) {
     VELOX_CHECK(
         driverId == 0,
@@ -48,6 +50,33 @@ SinkDriverMock::SinkDriverMock(
       operatorId, &driverCtx_, planNode, exchangeClient_);
 }
 
+void SinkDriverMock::updateDataValidity(const cudf::table_view& tab) {
+  
+  // Should make the test more dynamic, just deal with integer field
+  cudf::column_view col = tab.column(0);
+  std::cout << "First column data type: " << cudf::type_to_name(col.type())
+            << "\n";
+
+  std::shared_ptr<std::vector<uint32_t>> integers = dataToSend_->getIntegers();
+
+  for (int i = 0; i < dataToSend_->getNumRows(); i++) {
+    uint32_t val;
+  cudaMemcpy(
+      &val,
+      col.head<uint32_t>() + i, // pointer to n-th GPU element
+      sizeof(uint32_t),
+      cudaMemcpyDeviceToHost);
+  
+  if (integers->at(i) != val) {
+    VLOG(0) << "Error " << integers->at(i) << " != " << val;
+    dataValidFlag_ = false;
+  }
+
+  
+}
+
+}
+
 void SinkDriverMock::run() {
   while (true) {
     ContinueFuture future;
@@ -62,6 +91,7 @@ void SinkDriverMock::run() {
             std::dynamic_pointer_cast<facebook::velox::cudf_velox::CudfVector>(
                 res);
         numRows_ += cudfRes->getTableView().num_rows();
+        if (dataToSend_) updateDataValidity(cudfRes->getTableView());
       }
     }
     if (hybridExchange_->isFinished()) {
@@ -83,3 +113,4 @@ void SinkDriverMock::addSplits(
 }
 
 } // namespace facebook::velox::cudf_exchange
+ 
