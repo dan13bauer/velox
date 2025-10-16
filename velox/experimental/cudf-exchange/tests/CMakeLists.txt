@@ -18,6 +18,7 @@ add_executable(
   CudfExchangeTest.cpp
   Main.cpp
   CudfTestHelpers.cpp
+  CudfTestData.cpp
   CudfPartitionedOutputMock.cpp
   SinkDriverMock.cpp)
 
