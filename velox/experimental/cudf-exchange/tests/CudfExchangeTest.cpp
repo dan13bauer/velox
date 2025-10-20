@@ -29,10 +29,9 @@
 #include "velox/experimental/cudf-exchange/Communicator.h"
 #include "velox/experimental/cudf-exchange/CudfOutputQueueManager.h"
 #include "velox/experimental/cudf-exchange/tests/CudfPartitionedOutputMock.h"
+#include "velox/experimental/cudf-exchange/tests/CudfTestData.h"
 #include "velox/experimental/cudf-exchange/tests/CudfTestHelpers.h"
 #include "velox/experimental/cudf-exchange/tests/SinkDriverMock.h"
-#include "velox/experimental/cudf-exchange/tests/CudfTestData.h"
-
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec;
@@ -46,15 +45,15 @@ class CudfExchangeTest : public testing::Test {
   static constexpr auto kUnusedCoordinatorUrl =
       std::string_view("http://localhost:12345/bla");
 
-  static void SetUpTestCase() {
-    VLOG(0) << "setup test case.";
-    memory::MemoryManager::testingSetInstance(memory::MemoryManager::Options{});
-  }
+  static std::shared_ptr<CudfOutputQueueManager> queueManager_;
+  static std::shared_ptr<std::thread> communicatorThread_;
+  static std::shared_ptr<Communicator> communicator_;
 
-  void SetUp() override {
-    VLOG(0) << "setup, creating pool, communicator, etc..";
+  static void SetUpTestCase() {
+    VLOG(0) << "setup test case, creating queue manager, communicator, etc..";
+    memory::MemoryManager::testingSetInstance(memory::MemoryManager::Options{});
+
     queueManager_ = CudfOutputQueueManager::getInstanceRef();
-    pool_ = facebook::velox::memory::memoryManager()->addLeafPool("CudfTestMemoryPool");
     ContinueFuture future;
     communicator_ = facebook::velox::cudf_exchange::Communicator::initAndGet(
         kCommunicatorPort, std::string(kUnusedCoordinatorUrl), &future);
@@ -68,13 +67,17 @@ class CudfExchangeTest : public testing::Test {
     future.wait();
   }
 
-  void TearDown() override {
-    VLOG(0) << "+ Teardown, destroying everything.";
+  static void TearDownTestCase() {
     communicator_->stop();
     communicator_.reset();
     communicatorThread_->join();
     communicatorThread_.reset();
-    VLOG(0) << "- Teardown, destroying everything.";
+  }
+
+  void SetUp() override {
+    VLOG(0) << "creating pool";
+    pool_ = facebook::velox::memory::memoryManager()->addLeafPool(
+        "CudfTestMemoryPool");
   }
 
   exec::Split remoteSplit(const std::string& taskId, int partitionId) {
@@ -87,10 +90,6 @@ class CudfExchangeTest : public testing::Test {
   }
 
   std::shared_ptr<facebook::velox::memory::MemoryPool> pool_;
-
-  std::shared_ptr<CudfOutputQueueManager> queueManager_;
-  std::shared_ptr<std::thread> communicatorThread_;
-  std::shared_ptr<Communicator> communicator_;
 };
 
 TEST_F(CudfExchangeTest, basicTest) {
@@ -139,29 +138,29 @@ TEST_F(CudfExchangeTest, basicTest) {
   size_t expectedRows = numChunks * numRowsPerChunk;
   size_t effectiveRows = sinkDriver.numRows();
 
+  GTEST_ASSERT_EQ(expectedRows, effectiveRows);
+
   // Remove the srcTask from the queue manager, so queue get freed
   queueManager_->removeTask(srcTaskId);
 
   VLOG(3) << "- CudfExchangeTest::basicTest";
-  GTEST_ASSERT_EQ(expectedRows, effectiveRows);
 }
 
 TEST_F(CudfExchangeTest, dataTest) {
- 
   VLOG(3) << "+ CudfExchangeTest::dataTest";
- 
 
   size_t numRowsPerChunk = 10;
   int strLength = 5;
   std::shared_ptr<CudfTestData> data = std::make_shared<CudfTestData>();
-  data->initialize(numRowsPerChunk,strLength, strLength*2);
+  data->initialize(numRowsPerChunk, strLength, strLength * 2);
   auto strings = data->getStrings();
   auto integers = data->getIntegers();
   auto doubles = data->getDoubles();
 
-  for (int i = 0; i < numRowsPerChunk;i++) {
-        VLOG(3) << "String: " << strings->at(i) << " Integer: " << integers->at(i) <<  " Double: " << doubles->at(i);
-    }
+  for (int i = 0; i < numRowsPerChunk; i++) {
+    VLOG(3) << "String: " << strings->at(i) << " Integer: " << integers->at(i)
+            << " Double: " << doubles->at(i);
+  }
 
   size_t numPartitons = 1;
   int numDrivers = 1;
@@ -174,9 +173,9 @@ TEST_F(CudfExchangeTest, dataTest) {
   queueManager_->initializeTask(srcTask, numPartitons, numDrivers);
 
   uint32_t numChunks = 10;
-    
+
   auto sourceMock = std::make_shared<CudfPartitionedOutputMock>(
-      srcTaskId, numDrivers, numChunks, numRowsPerChunk,data);
+      srcTaskId, numDrivers, numChunks, numRowsPerChunk, data);
 
   const std::string sinkTaskId = "sinkTask";
   int partitionId = 0;
@@ -210,12 +209,16 @@ TEST_F(CudfExchangeTest, dataTest) {
   queueManager_->removeTask(srcTaskId);
 
   VLOG(3) << "- CudfExchangeTest::basicTest";
-  GTEST_ASSERT_EQ(sinkDriver.dataIsValid(),true);
+  GTEST_ASSERT_EQ(sinkDriver.dataIsValid(), true);
 }
 
 // Add more test cases as needed
 // TEST_F(CudfExchangeTest, yourTestName) {
 //   // Your test implementation
 // }
+
+std::shared_ptr<CudfOutputQueueManager> CudfExchangeTest::queueManager_;
+std::shared_ptr<std::thread> CudfExchangeTest::communicatorThread_;
+std::shared_ptr<Communicator> CudfExchangeTest::communicator_;
 
 } // namespace facebook::velox::cudf_exchange

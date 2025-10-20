@@ -127,6 +127,9 @@ void CudfExchangeSource::cleanUp() {
     endpointRef_->removeCommElem(getSelfPtr());
     endpointRef_ = nullptr;
   }
+  if (communicator_) {
+    communicator_->unregister(getSelfPtr());
+  }
 }
 
 void CudfExchangeSource::close() {
