@@ -30,10 +30,10 @@
 
 namespace facebook::velox::cudf_exchange {
 
-const std::vector<std::string> kTestColumnNames = {"c0", "c1","c2"};
+/*const std::vector<std::string> kTestColumnNames = {"c0", "c1","c2"};
 const std::vector<TypePtr> kTestColumnTypes = {INTEGER(), DOUBLE(),VARCHAR()};
 const facebook::velox::RowTypePtr kTestRowType =
-    ROW(kTestColumnNames, kTestColumnTypes);
+    ROW(kTestColumnNames, kTestColumnTypes);*/
 
 /// @brief Helper function to create a source Task for testing purposes.
 /// Creates a simple task associated with a plan fragment that consists of a

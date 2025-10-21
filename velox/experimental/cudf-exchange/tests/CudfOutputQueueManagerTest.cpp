@@ -56,7 +56,7 @@ class CudfOutputQueueManagerTest : public testing::Test {
       queueManager_->removeTask(taskId);
     }
 
-    auto task = createSourceTask(taskId, pool_, kTestRowType);
+    auto task = createSourceTask(taskId, pool_, CudfTestData::kTestRowType);
 
     queueManager_->initializeTask(task, numDestinations, numDrivers);
     return task;
@@ -65,7 +65,7 @@ class CudfOutputQueueManagerTest : public testing::Test {
   std::unique_ptr<cudf::packed_columns> makePackedColumns(std::size_t numRows) {
     rmm::cuda_stream_view stream = rmm::cuda_stream_default;
     auto cols =
-        facebook::velox::cudf_exchange::makePackedColumns(numRows,kTestRowType,stream);
+        facebook::velox::cudf_exchange::makePackedColumns(numRows,CudfTestData::kTestRowType,stream);
     stream.synchronize();
     return cols;
   }
