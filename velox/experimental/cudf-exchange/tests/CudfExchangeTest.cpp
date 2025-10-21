@@ -96,17 +96,19 @@ TEST_F(CudfExchangeTest, basicTest) {
   VLOG(3) << "+ CudfExchangeTest::basicTest";
   size_t numPartitions = 1;
   int numDrivers = 1;
+  uint32_t numChunks = 10;
+  size_t numRowsPerChunk = 1000;
+
   // Basic test implementation
   const std::string srcTaskId = "sourceTask";
-  auto srcTask = createSourceTask(srcTaskId, pool_, kTestRowType);
+  auto srcTask = createSourceTask(srcTaskId, pool_, CudfTestData::kTestRowType);
 
   // tell the queue manager that a new source task with one driver
   // and one partition exists.
   queueManager_->initializeTask(srcTask, numPartitions, numDrivers);
 
-  uint32_t numChunks = 10;
-  size_t numRowsPerChunk = 1000;
-
+  // Mock the CudfPartitionedOutput operator, it will produce numChunks of data each containing 
+  // numRowsPerChunk of empty data
   auto sourceMock = std::make_shared<CudfPartitionedOutputMock>(
       srcTaskId, numDrivers, numChunks, numRowsPerChunk);
 
@@ -114,7 +116,7 @@ TEST_F(CudfExchangeTest, basicTest) {
   int partitionId = 0;
   core::PlanNodeId exchangeNodeId;
   auto sinkTask =
-      createExchangeTask(sinkTaskId, kTestRowType, partitionId, exchangeNodeId);
+      createExchangeTask(sinkTaskId, CudfTestData::kTestRowType, partitionId, exchangeNodeId);
 
   int driverId = 0;
   SinkDriverMock sinkDriver(sinkTask, driverId);
@@ -149,8 +151,12 @@ TEST_F(CudfExchangeTest, basicTest) {
 TEST_F(CudfExchangeTest, dataTest) {
   VLOG(3) << "+ CudfExchangeTest::dataTest";
 
+  size_t numPartitions = 1;
+  int numDrivers = 1;
   size_t numRowsPerChunk = 10;
+  uint32_t numChunks = 10;
   int strLength = 5;
+
   std::shared_ptr<CudfTestData> data = std::make_shared<CudfTestData>();
   data->initialize(numRowsPerChunk, strLength, strLength * 2);
   auto strings = data->getStrings();
@@ -162,18 +168,19 @@ TEST_F(CudfExchangeTest, dataTest) {
             << " Double: " << doubles->at(i);
   }
 
-  size_t numPartitions = 1;
-  int numDrivers = 1;
   // Basic test implementation
   const std::string srcTaskId = "sourceTask";
-  auto srcTask = createSourceTask(srcTaskId, pool_, kTestRowType);
+  auto srcTask = createSourceTask(srcTaskId, pool_, CudfTestData::kTestRowType);
 
   // tell the queue manager that a new source task with one driver
   // and one partition exists.
   queueManager_->initializeTask(srcTask, numPartitions, numDrivers);
 
-  uint32_t numChunks = 10;
+ 
 
+  // Mock the CudfPartitionedOutput operator, it will produce numChunks of data each containing 
+  // numRowsPerChunk of data copied from the CudfTestData object data 
+  
   auto sourceMock = std::make_shared<CudfPartitionedOutputMock>(
       srcTaskId, numDrivers, numChunks, numRowsPerChunk, data);
 
@@ -181,7 +188,7 @@ TEST_F(CudfExchangeTest, dataTest) {
   int partitionId = 0;
   core::PlanNodeId exchangeNodeId;
   auto sinkTask =
-      createExchangeTask(sinkTaskId, kTestRowType, partitionId, exchangeNodeId);
+      createExchangeTask(sinkTaskId, CudfTestData::kTestRowType, partitionId, exchangeNodeId);
 
   int driverId = 0;
   SinkDriverMock sinkDriver(sinkTask, driverId, nullptr, 1, data);
@@ -225,7 +232,7 @@ TEST_F(CudfExchangeTest, multiUpstreamTasksTest) {
   // Create n upstream tasks.
   for (int i = 0; i < numUpstreamTasks; i++) {
     const std::string srcTaskId = "sourceTask" + std::to_string(i);
-    auto srcTask = createSourceTask(srcTaskId, pool_, kTestRowType);
+    auto srcTask = createSourceTask(srcTaskId, pool_, CudfTestData::kTestRowType);
 
     // tell the queue manager that a new source task with one driver
     // and one partition exists.
@@ -239,7 +246,7 @@ TEST_F(CudfExchangeTest, multiUpstreamTasksTest) {
   int partitionId = 0;
   core::PlanNodeId exchangeNodeId;
   auto sinkTask =
-      createExchangeTask(sinkTaskId, kTestRowType, partitionId, exchangeNodeId);
+      createExchangeTask(sinkTaskId, CudfTestData::kTestRowType, partitionId, exchangeNodeId);
 
   int driverId = 0;
   SinkDriverMock sinkDriver(sinkTask, driverId);
