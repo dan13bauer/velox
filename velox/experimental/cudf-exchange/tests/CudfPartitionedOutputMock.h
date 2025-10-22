@@ -18,31 +18,41 @@
 #include "velox/experimental/cudf-exchange/CudfOutputQueueManager.h"
 #include "velox/experimental/cudf-exchange/tests/CudfTestData.h"
 
-
 namespace facebook::velox::cudf_exchange {
 
-/// @brief Mocks the cudf partitioned output operator by
-/// pushing data into a set of partitions.
+/// @brief Mocks one or more cudf partitioned output operators. Each
+/// operator pushes data into a set of partitions.
+/// The operators run in separate threads, one thread per driver.
 class CudfPartitionedOutputMock {
  public:
   CudfPartitionedOutputMock(
       const std::string& taskId,
+      const uint32_t numDrivers,
       const size_t numPartitions,
       const uint32_t numDataChunks,
       const size_t numRowsPerChunk,
       std::shared_ptr<CudfTestData> dataToSend = nullptr);
 
-  /// @brief creates numPartitions_ x numDataChunks_ data chunks and
-  /// pushes it into the destination queues identified by the taskId.
+  /// @brief Created the driver threads and pushes data into the task's output
+  /// queue.
   void run();
- 
+
+  /// @brief Wait for all threads to complete.
+  void joinThreads();
+
  private:
+  // creates numPartitions_ x numDataChunks_ data chunks and
+  // pushes it into the destination queues identified by the taskId.
+  void publishDataChunks();
+
   const std::shared_ptr<CudfOutputQueueManager> queueManager_;
   const std::string taskId_;
+  const uint32_t numDrivers_;
   const size_t numPartitions_;
   const uint32_t numDataChunks_;
   const size_t numRowsPerChunk_;
   const std::shared_ptr<CudfTestData> dataToSend_;
+  std::vector<std::thread> threads_;
 };
 
 } // namespace facebook::velox::cudf_exchange

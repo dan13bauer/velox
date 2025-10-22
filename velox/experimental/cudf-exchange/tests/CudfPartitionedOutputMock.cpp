@@ -20,18 +20,34 @@ namespace facebook::velox::cudf_exchange {
 
 CudfPartitionedOutputMock::CudfPartitionedOutputMock(
     const std::string& taskId,
+    const uint32_t numDrivers,
     const size_t numPartitions,
     const uint32_t numDataChunks,
     const size_t numRowsPerChunk,
-  std::shared_ptr<CudfTestData> dataToSend)
+    std::shared_ptr<CudfTestData> dataToSend)
     : queueManager_(CudfOutputQueueManager::getInstanceRef()),
       taskId_(taskId),
+      numDrivers_(numDrivers),
       numPartitions_(numPartitions),
       numDataChunks_(numDataChunks),
       numRowsPerChunk_(numRowsPerChunk),
-      dataToSend_(dataToSend){}
+      dataToSend_(dataToSend) {}
 
 void CudfPartitionedOutputMock::run() {
+  threads_.clear();
+  for (int32_t driver = 0; driver < numDrivers_; ++driver) {
+    threads_.emplace_back(&CudfPartitionedOutputMock::publishDataChunks, this);
+  }
+}
+
+void CudfPartitionedOutputMock::joinThreads() {
+  for (auto& thread : threads_) {
+    thread.join();
+  }
+  threads_.clear();
+}
+
+void CudfPartitionedOutputMock::publishDataChunks() {
   bool blocked;
   ContinueFuture future;
   // create numPartitions_ x numDataChunks_ data chunks and
@@ -44,10 +60,11 @@ void CudfPartitionedOutputMock::run() {
 
       std::unique_ptr<cudf::packed_columns> packedColumns;
       if (dataToSend_ == nullptr) {
-        packedColumns = makePackedColumns(numRowsPerChunk_, CudfTestData::kTestRowType, stream);
-      }
-      else {
-        packedColumns = makeFilledPackedColumns(numRowsPerChunk_, dataToSend_, stream);
+        packedColumns = makePackedColumns(
+            numRowsPerChunk_, CudfTestData::kTestRowType, stream);
+      } else {
+        packedColumns =
+            makeFilledPackedColumns(numRowsPerChunk_, dataToSend_, stream);
       }
       // Sync the stream since UCXX/UCX is not stream oriented and without
       // syncing, data could get lost. Syncing here is  easy but not the most
@@ -70,9 +87,5 @@ void CudfPartitionedOutputMock::run() {
   // tell the queue manager that we are done.
   queueManager_->noMoreData(taskId_);
 }
-
-
-
-
 
 } // namespace facebook::velox::cudf_exchange
