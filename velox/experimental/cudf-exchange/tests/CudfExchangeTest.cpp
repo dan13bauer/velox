@@ -219,7 +219,7 @@ TEST_P(CudfExchangeTest, dataTest) {
   // Remove the srcTask from the queue manager, so queue get freed
   queueManager_->removeTask(srcTaskId);
 
-  VLOG(3) << "- CudfExchangeTest::basicTest";
+  VLOG(3) << "- CudfExchangeTest::dataTest";
   GTEST_ASSERT_EQ(sinkDriver.dataIsValid(), true);
 }
 
