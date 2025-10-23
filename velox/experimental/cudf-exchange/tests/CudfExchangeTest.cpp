@@ -160,6 +160,7 @@ TEST_P(CudfExchangeTest, dataTest) {
 
  
   int numDrivers = GetParam();
+  size_t numPartitions = 1;
   size_t numRowsPerChunk = 1000 * 1000 * 100;
   uint32_t numChunks = 1;
   int strLength = 5;
@@ -171,7 +172,7 @@ TEST_P(CudfExchangeTest, dataTest) {
   auto doubles = data->getDoubles();
 
   for (int i = 0; i < numRowsPerChunk; i++) {
-    VLOG(3) << "String: " << strings->at(i) << " Integer: " << integers->at(i)
+    VLOG(4) << "In dataTest Generated data String: " << strings->at(i) << " Integer: " << integers->at(i)
             << " Double: " << doubles->at(i);
   }
 
