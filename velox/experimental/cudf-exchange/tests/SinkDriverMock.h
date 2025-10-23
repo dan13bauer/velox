@@ -72,7 +72,7 @@ class SinkDriverMock {
  private:
 
   /// @brief checks if the received table corresponds to that sent, sets dataValidFlag_=false if not
-  /// @param tab 
+  /// @param tab the received table from the exchange
   void updateDataValidity(const cudf::table_view& tab);
 
   bool dataValidFlag_ = true;

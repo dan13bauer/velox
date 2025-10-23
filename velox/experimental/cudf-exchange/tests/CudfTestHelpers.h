@@ -28,6 +28,9 @@
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/experimental/cudf-exchange/tests/CudfTestData.h"
 
+#include <cudf/strings/strings_column_view.hpp>
+#include <cudf/binaryop.hpp>
+
 namespace facebook::velox::cudf_exchange {
 
 /*const std::vector<std::string> kTestColumnNames = {"c0", "c1","c2"};
@@ -81,6 +84,33 @@ std::unique_ptr<cudf::packed_columns> makeFilledPackedColumns(
     std::size_t numRows,
     std::shared_ptr<CudfTestData> dataToSend,
     rmm::cuda_stream_view stream);
+
+/// @brief testing utility for dumping the contents of a string column.
+/// @param str_column_view The string column view to be dumped.
+/// @param stream The cuda stream.
+std::vector<std::string> getStringCol(
+    const cudf::strings_column_view& str_column_view,
+    cudf::size_type max_rows,
+    rmm::cuda_stream_view stream);
+
+/// @brief Template function for retrieving the contents of a fixed-size column.                                                                                                               
+/// @param column_view The column view to be dumped.                                                                                                                                           
+/// @param max_rows The maximum number of rows to be retrieved.                                                                                                                                
+/// @param stream The cude stream.                                                                                                                                                             
+
+template <typename T>
+std::vector<T> getColVector(const cudf::column_view& column_view,
+                            cudf::size_type max_rows,
+                            rmm::cuda_stream_view stream) {
+    max_rows = column_view.size() < max_rows ? column_view.size() : max_rows;
+    const T* ptr_data = column_view.template data<T>();
+    auto host_vec = cudf::detail::make_host_vector_async(cudf::device_span<T const>(ptr_data, max_rows), stream);
+    std::vector<T> vec(max_rows);
+    std::copy(host_vec.begin(), host_vec.end(), vec.begin());
+    return vec;
+}
+
+
 
 
 } // namespace facebook::velox::cudf_exchange

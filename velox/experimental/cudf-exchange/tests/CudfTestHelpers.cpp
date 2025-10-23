@@ -287,6 +287,37 @@ std::unique_ptr<cudf::packed_columns> makePackedColumns(
       std::move(packed.metadata), std::move(packed.gpu_data)));
 }
 
+std::vector<std::string> getStringCol(
+    const cudf::strings_column_view& str_column_view,
+    cudf::size_type max_rows,
+    rmm::cuda_stream_view stream) {
+  max_rows =
+      str_column_view.size() < max_rows ? str_column_view.size() : max_rows;
+  auto offset_view = str_column_view.offsets();
+  const cudf::size_type* ptr_offsets_data =
+      offset_view.template data<cudf::size_type>();
+  auto const h_offsets = cudf::detail::make_host_vector_async(
+      cudf::device_span<cudf::size_type const>(ptr_offsets_data, max_rows + 1),
+      stream);
+  const cudf::size_type* host_offsets = h_offsets.data();
+
+  auto const total_num_bytes = std::distance(
+      str_column_view.chars_begin(stream), str_column_view.chars_end(stream));
+  char const* ptr_all_bytes = str_column_view.chars_begin(stream);
+  // copy the bytes to host
+  auto const h_bytes = cudf::detail::make_host_vector_async(
+      cudf::device_span<char const>(ptr_all_bytes, total_num_bytes), stream);
+  const char* str_ptr = h_bytes.data();
+
+  std::vector<std::string> str_vec;
+  for (cudf::size_type i = 0; i < max_rows; ++i) {
+    std::string str(str_ptr + host_offsets[i], str_ptr + host_offsets[i + 1]);
+    str_vec.push_back(str);
+  }
+  return str_vec; // rely on the compiler's Return-Value-Optimization to avoid a
+                  // vector copy.
+}
+
 
 
 
