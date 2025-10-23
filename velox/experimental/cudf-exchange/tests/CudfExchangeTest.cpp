@@ -153,8 +153,8 @@ TEST_F(CudfExchangeTest, dataTest) {
 
   size_t numPartitions = 1;
   int numDrivers = 1;
-  size_t numRowsPerChunk = 10;
-  uint32_t numChunks = 10;
+  size_t numRowsPerChunk = 1000 * 1000 * 100;
+  uint32_t numChunks = 1;
   int strLength = 5;
 
   std::shared_ptr<CudfTestData> data = std::make_shared<CudfTestData>();
