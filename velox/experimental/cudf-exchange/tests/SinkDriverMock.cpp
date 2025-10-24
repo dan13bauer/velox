@@ -36,29 +36,24 @@ SinkDriverMock::SinkDriverMock(
       numDrivers_{numDrivers},
       numRows_{0},
       numBytes_{0},
-      dataToSend_(dataToSend){
-  if (!exchangeClient) {
-    VELOX_CHECK(
-        driverId == 0,
-        "Only driverId 0 is allowed to create a sink driver without an exchange client");
-    // create a new exchange client facade. Since this test doesn't use
-    // HTTP exchange, the facade will only use a cudf exchange client.
-    // create new cudfExchangeClient
-    auto cudfClient = std::make_shared<CudfExchangeClient>(
-        task_->taskId(), task_->destination(), numberOfConsumers);
-    exchangeClient_ = std::make_shared<ExchangeClientFacade>(
-        std::move(cudfClient), nullptr); // no HTTP client.
-  } else {
-    exchangeClient_ = exchangeClient;
-  }
+      dataToSend_(dataToSend) {
+  // create a new exchange client facade. Since this test doesn't use
+  // HTTP exchange, the facade will only use a cudf exchange client.
+  // create new cudfExchangeClient
+  auto cudfClient = std::make_shared<CudfExchangeClient>(
+      task_->taskId(), task_->destination(), numDrivers_);
+  exchangeClient_ = std::make_shared<ExchangeClientFacade>(
+      std::move(cudfClient), nullptr); // no HTTP client.
   uint32_t operatorId = 0;
   auto planNode = task_->planFragment().planNode;
   // create the set of exchange operators.
   for (uint32_t driverId = 0; driverId < numDrivers; ++driverId) {
-    driverCtxs_.emplace_back(std::make_shared<DriverCtx>(
-        task_, driverId, kPipelineId, kUngroupedGroupId, kPartitionId));
-    hybridExchanges_.emplace_back(std::make_unique<HybridExchange>(
-        operatorId, driverCtxs_.back().get(), planNode, exchangeClient_));
+    driverCtxs_.emplace_back(
+        std::make_shared<DriverCtx>(
+            task_, driverId, kPipelineId, kUngroupedGroupId, kPartitionId));
+    hybridExchanges_.emplace_back(
+        std::make_unique<HybridExchange>(
+            operatorId, driverCtxs_.back().get(), planNode, exchangeClient_));
   }
 }
 
@@ -133,15 +128,10 @@ void SinkDriverMock::receiveAllData(HybridExchange* hybridExchange) {
             std::dynamic_pointer_cast<facebook::velox::cudf_velox::CudfVector>(
                 res);
         numBytes_.fetch_add(cudfRes->estimateFlatSize());
-        std::cout << "NUM BYTES == " << numBytes_.load() << std::endl;
         numRows_ += cudfRes->getTableView().num_rows();
         // If we have Reference data check the received data is the same
-<<<<<<< HEAD
-        //if (dataToSend_) updateDataValidity(cudfRes->getTableView());
-=======
         if (dataToSend_)
           updateDataValidity(cudfRes->getTableView());
->>>>>>> 6be85c0ba191212705d51f926ea43b7c397228b5
       }
     }
     if (hybridExchange->isFinished()) {

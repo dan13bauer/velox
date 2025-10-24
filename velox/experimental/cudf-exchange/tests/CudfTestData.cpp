@@ -29,6 +29,9 @@ void CudfTestData::initialize(
     const size_t numRows,
     const size_t minStringLength,
     const size_t maxStringLength) {
+  VLOG(3) << "+ CudfTestData::initialize numRows:" << numRows
+          << " stringLength:[" << minStringLength << ".." << maxStringLength
+          << "]";
   numRows_ = numRows;
   strings_ = std::make_shared<std::vector<std::string>>();
   integers_ = std::make_shared<std::vector<uint32_t>>();
@@ -40,33 +43,17 @@ void CudfTestData::initialize(
       minStringLength, maxStringLength); // Range [x, y] inclusive
   std::hash<std::string> hasher; // Create a hash function object for strings
 
-  void
-  CudfTestData::initialize(const size_t numRows, const size_t minStringLength, const size_t maxStringLength) {
+  for (int i = 0; i < numRows_; i++) {
+    int strLength = dist(gen);
+    std::string str = genRandomStr(strLength);
+    double hashValue = hasher(str);
 
-    VLOG(3) << "+ CudfTestData::initialize numRows:" << numRows << " stringLength:[" << minStringLength << ".." << maxStringLength << "]";
-    numRows_ = numRows;
-    strings_ = std::make_shared<std::vector<std::string>>();
-    integers_ = std::make_shared<std::vector<uint32_t>>();
-    doubles_ = std::make_shared<std::vector<float>>();
-
-    std::random_device rd;   // Non-deterministic random seed
-    std::mt19937 gen(rd());  // Mersenne Twister engine
-    std::uniform_int_distribution<> dist(minStringLength, maxStringLength); // Range [x, y] inclusive
-    std::hash<std::string> hasher;  // Create a hash function object for strings
-
-   
-    for (int i =0; i < numRows_;i++ ) {
-        int strLength = dist(gen);
-        std::string str = genRandomStr(strLength);
-        double hashValue = hasher(str);
-  
-        strings_->push_back(str);
-        integers_->push_back(strLength);
-        doubles_->push_back(hashValue);
-    }
-
-     VLOG(3) << "- CudfTestData::initialize";
+    strings_->push_back(str);
+    integers_->push_back(strLength);
+    doubles_->push_back(hashValue);
   }
+
+  VLOG(3) << "- CudfTestData::initialize";
 }
 
 std::string CudfTestData::genRandomStr(const size_t len) {

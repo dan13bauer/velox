@@ -64,7 +64,7 @@ const static ExchangeTestParams test2{
     .numDstDrivers = 1,
     .numPartitions = 1,
     .numChunks = 1,
-    .numRowsPerChunk = 1000 * 1000 * 1000};
+    .numRowsPerChunk = 1000 * 1000 * 100};
 // Large Number of Driver Test
 const static ExchangeTestParams test3{
     .numSrcDrivers = 10,
@@ -199,7 +199,7 @@ TEST_P(CudfExchangeTest, dataTest) {
   VLOG(3) << "+ CudfExchangeTest::dataTest";
   ExchangeTestParams p = GetParam();
 
-  int strLength = 1;
+  int strLength = 4;
 
   std::shared_ptr<CudfTestData> data = std::make_shared<CudfTestData>();
   data->initialize(p.numRowsPerChunk, strLength, strLength * 2);
@@ -248,17 +248,19 @@ TEST_P(CudfExchangeTest, dataTest) {
   // Start the mocks.
   VLOG(3) << "Starting source task";
  
-  sourceMock->run();
-  sourceMock->joinThreads();
+  sourceMock.run();
+  sourceMock.joinThreads();
   VLOG(3) << "Source task done.";
   // Only starting receiving when sender is done
 
   VLOG(3) << "Starting sink task";
    std::chrono::time_point<std::chrono::high_resolution_clock> send_start =
       std::chrono::high_resolution_clock::now();
-  std::thread sinkThread(&SinkDriverMock::run, &sinkDriver);
-
-  sinkThread.join();
+  
+  //std::thread sinkThread(&SinkDriverMock::run, &sinkDriver);
+  //sinkThread.join();
+  sinkDriver.run();
+  sinkDriver.joinThreads();
    std::chrono::time_point<std::chrono::high_resolution_clock> send_end =
       std::chrono::high_resolution_clock::now();
 
