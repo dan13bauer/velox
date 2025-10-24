@@ -15,30 +15,25 @@
  */
 #include "velox/experimental/cudf-exchange/tests/SinkDriverMock.h"
 
-
-#include <cudf/strings/strings_column_view.hpp>
-#include <cudf/table/table_view.hpp>
-#include <cudf/unary.hpp>
 #include <cudf/binaryop.hpp>
 #include <cudf/column/column_factories.hpp>
 #include <cudf/column/column_view.hpp>
 #include <cudf/concatenate.hpp>
-
+#include <cudf/strings/strings_column_view.hpp>
+#include <cudf/table/table_view.hpp>
+#include <cudf/unary.hpp>
 
 namespace facebook::velox::cudf_exchange {
-
 
 constexpr int kPipelineId = 0;
 constexpr uint32_t kPartitionId = 0; // not used in tests.
 
 SinkDriverMock::SinkDriverMock(
     std::shared_ptr<facebook::velox::exec::Task> task,
-    int driverId,
-    std::shared_ptr<ExchangeClientFacade> exchangeClient,
-    int32_t numberOfConsumers,
+    uint32_t numDrivers,
     std::shared_ptr<CudfTestData> dataToSend)
     : task_{std::move(task)},
-      driverCtx_{task_, driverId, kPipelineId, kUngroupedGroupId, kPartitionId},
+      numDrivers_{numDrivers},
       numRows_{0},
       numBytes_{0},
       dataToSend_(dataToSend){
@@ -58,8 +53,13 @@ SinkDriverMock::SinkDriverMock(
   }
   uint32_t operatorId = 0;
   auto planNode = task_->planFragment().planNode;
-  hybridExchange_ = std::make_unique<HybridExchange>(
-      operatorId, &driverCtx_, planNode, exchangeClient_);
+  // create the set of exchange operators.
+  for (uint32_t driverId = 0; driverId < numDrivers; ++driverId) {
+    driverCtxs_.emplace_back(std::make_shared<DriverCtx>(
+        task_, driverId, kPipelineId, kUngroupedGroupId, kPartitionId));
+    hybridExchanges_.emplace_back(std::make_unique<HybridExchange>(
+        operatorId, driverCtxs_.back().get(), planNode, exchangeClient_));
+  }
 }
 
 void SinkDriverMock::updateDataValidity(const cudf::table_view& tab) {
@@ -67,7 +67,7 @@ void SinkDriverMock::updateDataValidity(const cudf::table_view& tab) {
   // string]
 
   int num_columns = tab.num_columns();
-  int num_rows= dataToSend_->getNumRows();
+  int num_rows = dataToSend_->getNumRows();
 
   VELOX_CHECK_EQ(num_columns, CudfTestData::kTestColumnTypes.size());
 
@@ -79,16 +79,20 @@ void SinkDriverMock::updateDataValidity(const cudf::table_view& tab) {
   // Get the Reference data
   std::shared_ptr<std::vector<uint32_t>> integers = dataToSend_->getIntegers();
   std::shared_ptr<std::vector<float>> doubles = dataToSend_->getDoubles();
-  const std::shared_ptr<std::vector<std::string>>& strings = dataToSend_->getStrings();
+  const std::shared_ptr<std::vector<std::string>>& strings =
+      dataToSend_->getStrings();
 
   // Get the Received data: assume in a fixed order
   cudf::column_view iCol = tab.column(0);
   cudf::column_view dCol = tab.column(1);
   cudf::strings_column_view sCol{tab.column(2)};
   rmm::cuda_stream_pool stream_pool(32);
-  const std::vector<std::string>& col_strings = getStringCol(sCol, num_rows,stream_pool.get_stream());
-  std::vector<uint32_t>  col_integers = getColVector<uint32_t>(iCol,num_rows,stream_pool.get_stream());
-  std::vector<float>  col_doubles = getColVector<float>(dCol,num_rows,stream_pool.get_stream());
+  const std::vector<std::string>& col_strings =
+      getStringCol(sCol, num_rows, stream_pool.get_stream());
+  std::vector<uint32_t> col_integers =
+      getColVector<uint32_t>(iCol, num_rows, stream_pool.get_stream());
+  std::vector<float> col_doubles =
+      getColVector<float>(dCol, num_rows, stream_pool.get_stream());
   // Com pare Reference with Received
   for (int i = 0; i < num_rows; i++) {
     if (integers->at(i) != col_integers.at(i)) {
@@ -100,7 +104,7 @@ void SinkDriverMock::updateDataValidity(const cudf::table_view& tab) {
       dataValidFlag_ = false;
     }
 
-  if (strings->at(i) != col_strings.at(i)) {
+    if (strings->at(i) != col_strings.at(i)) {
       VLOG(0) << "Error " << strings->at(i) << " != " << col_strings.at(i);
       dataValidFlag_ = false;
     }
@@ -108,14 +112,22 @@ void SinkDriverMock::updateDataValidity(const cudf::table_view& tab) {
 }
 
 void SinkDriverMock::run() {
+  threads_.clear();
+  for (int32_t driver = 0; driver < numDrivers_; ++driver) {
+    threads_.emplace_back(
+        &SinkDriverMock::receiveAllData, this, hybridExchanges_[driver].get());
+  }
+}
+
+void SinkDriverMock::receiveAllData(HybridExchange* hybridExchange) {
   while (true) {
     ContinueFuture future;
-    auto blocked = hybridExchange_->isBlocked(&future);
+    auto blocked = hybridExchange->isBlocked(&future);
     if (blocked != BlockingReason::kNotBlocked) {
       future.wait();
     } else {
       // not blocked.
-      RowVectorPtr res = hybridExchange_->getOutput();
+      RowVectorPtr res = hybridExchange->getOutput();
       if (res) {
         facebook::velox::cudf_velox::CudfVectorPtr cudfRes =
             std::dynamic_pointer_cast<facebook::velox::cudf_velox::CudfVector>(
@@ -124,14 +136,26 @@ void SinkDriverMock::run() {
         std::cout << "NUM BYTES == " << numBytes_.load() << std::endl;
         numRows_ += cudfRes->getTableView().num_rows();
         // If we have Reference data check the received data is the same
+<<<<<<< HEAD
         //if (dataToSend_) updateDataValidity(cudfRes->getTableView());
+=======
+        if (dataToSend_)
+          updateDataValidity(cudfRes->getTableView());
+>>>>>>> 6be85c0ba191212705d51f926ea43b7c397228b5
       }
     }
-    if (hybridExchange_->isFinished()) {
+    if (hybridExchange->isFinished()) {
       break;
     }
   }
-  hybridExchange_->close();
+  hybridExchange->close();
+}
+
+void SinkDriverMock::joinThreads() {
+  for (auto& thread : threads_) {
+    thread.join();
+  }
+  threads_.clear();
 }
 
 void SinkDriverMock::addSplits(
@@ -146,4 +170,3 @@ void SinkDriverMock::addSplits(
 }
 
 } // namespace facebook::velox::cudf_exchange
- 

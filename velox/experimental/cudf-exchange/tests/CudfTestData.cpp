@@ -14,19 +14,31 @@
  * limitations under the License.
  */
 
- #include "velox/experimental/cudf-exchange/tests/CudfTestData.h"
- #include <random>
- #include <functional>
+#include "velox/experimental/cudf-exchange/tests/CudfTestData.h"
+#include <functional>
+#include <random>
 
+namespace facebook::velox::cudf_exchange {
 
- namespace facebook::velox::cudf_exchange {
+static const char alphanum[] =
+    "0123456789"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "abcdefghijklmnopqrstuvwxyz";
 
-     static const char alphanum[] =
-        "0123456789"
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        "abcdefghijklmnopqrstuvwxyz";
+void CudfTestData::initialize(
+    const size_t numRows,
+    const size_t minStringLength,
+    const size_t maxStringLength) {
+  numRows_ = numRows;
+  strings_ = std::make_shared<std::vector<std::string>>();
+  integers_ = std::make_shared<std::vector<uint32_t>>();
+  doubles_ = std::make_shared<std::vector<float>>();
 
- 
+  std::random_device rd; // Non-deterministic random seed
+  std::mt19937 gen(rd()); // Mersenne Twister engine
+  std::uniform_int_distribution<> dist(
+      minStringLength, maxStringLength); // Range [x, y] inclusive
+  std::hash<std::string> hasher; // Create a hash function object for strings
 
   void
   CudfTestData::initialize(const size_t numRows, const size_t minStringLength, const size_t maxStringLength) {
@@ -55,15 +67,15 @@
 
      VLOG(3) << "- CudfTestData::initialize";
   }
-
-  std::string CudfTestData::genRandomStr(const size_t len) {
-   
-   std::string  rStr;
-   rStr.reserve(len);
-    for (int i = 0; i < len; ++i) {
-        rStr += alphanum[rand() % (sizeof(alphanum) - 1)];
-    }
-    return rStr;
-  }
-
 }
+
+std::string CudfTestData::genRandomStr(const size_t len) {
+  std::string rStr;
+  rStr.reserve(len);
+  for (int i = 0; i < len; ++i) {
+    rStr += alphanum[rand() % (sizeof(alphanum) - 1)];
+  }
+  return rStr;
+}
+
+} // namespace facebook::velox::cudf_exchange

@@ -16,45 +16,47 @@
 
 #pragma once
 
-
 #include <stddef.h>
 
 #include <memory>
-#include <vector>
 #include <string>
+#include <vector>
 #include "velox/type/Type.h"
 
-
 namespace facebook::velox::cudf_exchange {
-    
-
 
 class CudfTestData {
-
  public:
-    inline static const std::vector<std::string> kTestColumnNames = {"c0", "c1","c2"};
-    inline const static std::vector<TypePtr> kTestColumnTypes = {INTEGER(), DOUBLE(),VARCHAR()};
-   inline const static facebook::velox::RowTypePtr kTestRowType =
-    ROW(kTestColumnNames, kTestColumnTypes);
+  inline static const std::vector<std::string> kTestColumnNames = {
+      "c0",
+      "c1",
+      "c2"};
+  inline const static std::vector<TypePtr> kTestColumnTypes = {
+      INTEGER(),
+      DOUBLE(),
+      VARCHAR()};
+  inline const static facebook::velox::RowTypePtr kTestRowType =
+      ROW(kTestColumnNames, kTestColumnTypes);
 
+  CudfTestData() = default;
+  void initialize(const size_t numRows, const size_t minStringLength) {
+    initialize(numRows, minStringLength, minStringLength);
+  }
 
-
- CudfTestData() = default;
- void initialize(const size_t numRows, const size_t minStringLength) {
-    initialize(numRows, minStringLength,minStringLength);
- }
-
- void initialize(const size_t numRows, const size_t minStringLength, const size_t maxStringLength);
+  void initialize(
+      const size_t numRows,
+      const size_t minStringLength,
+      const size_t maxStringLength);
 
   std::shared_ptr<std::vector<std::string>> getStrings() {
     return strings_;
   }
 
-   std::shared_ptr<std::vector<uint32_t>> getIntegers() {
+  std::shared_ptr<std::vector<uint32_t>> getIntegers() {
     return integers_;
   }
 
-    std::shared_ptr<std::vector<float>> getDoubles() {
+  std::shared_ptr<std::vector<float>> getDoubles() {
     return doubles_;
   }
 
@@ -63,7 +65,7 @@ class CudfTestData {
   }
 
  protected:
-   std::string genRandomStr(const size_t len);
+  std::string genRandomStr(const size_t len);
 
   std::shared_ptr<std::vector<std::string>> strings_;
   std::shared_ptr<std::vector<uint32_t>> integers_;

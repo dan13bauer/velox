@@ -17,8 +17,8 @@
 
 #include "velox/exec/Driver.h"
 #include "velox/experimental/cudf-exchange/HybridExchange.h"
-#include "velox/experimental/cudf-exchange/tests/CudfTestHelpers.h"
 #include "velox/experimental/cudf-exchange/tests/CudfTestData.h"
+#include "velox/experimental/cudf-exchange/tests/CudfTestHelpers.h"
 
 using namespace facebook::velox::exec;
 
@@ -37,25 +37,20 @@ class SinkDriverMock {
   /// exchange operator instance and drive it until is is finished or an error
   /// occurs.
   /// @param task A pointer to the sink task.
-  /// @param driverId The driverId, must be 0 for the first driver, 1 for the
-  /// 2nd driver of this task etc. When driverId > 0, then the exchange client
-  /// must be provided.
-  /// @param exchangeClient The exchange client to use. If this is a nullptr,
-  /// then an exchange client for the partition indicated in the task and the
-  /// number of upstream consumers given by numberOfConsumers will be
-  /// constructed.
-  /// @param numberOfConsumers The number of upstream tasks that provide data
-  /// for this given task/partition.
+  /// @param numDrivers The number of drivers used in running the exchange
+  /// operators.
   SinkDriverMock(
       std::shared_ptr<facebook::velox::exec::Task> task,
-      int driverId,
-      std::shared_ptr<ExchangeClientFacade> exchangeClient = nullptr,
-      int32_t numberOfConsumers = 1,
-     std::shared_ptr<CudfTestData> dataToSend = nullptr);
+      uint32_t numDrivers = 1,
+      std::shared_ptr<CudfTestData> dataToSend = nullptr);
 
   /// @brief Executes the exchange operator until it finishes receiving all data
   /// from the upstream.
   void run();
+
+  /// @brief Waits until all threads executing the exchange operators have
+  /// terminated.
+  void joinThreads();
 
   /// @brief Adds the set of splits to the task, from where they will be picked
   /// up by the exchange operator to initiate connections to the upstream task.
@@ -75,20 +70,26 @@ class SinkDriverMock {
   bool dataIsValid() { return dataValidFlag_;}
 
  private:
+  // Drives a single hybrid exchange operator until all data has been received.
+  void receiveAllData(HybridExchange* hybridExchange);
 
-  /// @brief checks if the received table corresponds to that sent, sets dataValidFlag_=false if not
-  /// @param tab the received table from the exchange
+  /// @brief checks if the received table corresponds to that sent, sets
+  /// dataValidFlag_=false if not
+  /// @param tab
   void updateDataValidity(const cudf::table_view& tab);
 
   bool dataValidFlag_ = true;
   std::shared_ptr<facebook::velox::exec::Task> task_;
-  int driverId_;
-  DriverCtx driverCtx_;
   std::shared_ptr<ExchangeClientFacade> exchangeClient_;
-  std::unique_ptr<HybridExchange> hybridExchange_;
-  uint64_t numRows_;
-  std::atomic<uint64_t> numBytes_{0};
+
+  std::vector<std::shared_ptr<DriverCtx>> driverCtxs_;
+  std::vector<std::unique_ptr<HybridExchange>> hybridExchanges_;
+  uint32_t numDrivers_;
+  std::atomic<uint64_t> numRows_;
+   std::atomic<uint64_t> numBytes_{0};
+
   const std::shared_ptr<CudfTestData> dataToSend_;
+  std::vector<std::thread> threads_;
 };
 
 } // namespace facebook::velox::cudf_exchange
