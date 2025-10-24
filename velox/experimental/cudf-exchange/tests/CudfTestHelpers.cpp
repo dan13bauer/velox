@@ -56,7 +56,8 @@ std::shared_ptr<Task> createSourceTask(
           std::thread::hardware_concurrency()));
 
 
-  std::unordered_map<std::string, std::string> configSettings;
+  std::unordered_map<std::string, std::string> configSettings {{velox::core::QueryConfig::kMaxOutputBufferSize, "42949672960"}};
+ 
   auto queryCtx = core::QueryCtx::create(
       executor.get(), core::QueryConfig(std::move(configSettings)));
 
