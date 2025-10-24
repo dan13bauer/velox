@@ -67,6 +67,11 @@ class SinkDriverMock {
     return numRows_;
   }
 
+  /// @brief Returns the number of bytes read by "run".
+  uint64_t numBytes() const {
+    return numBytes_.load();
+  }
+
   bool dataIsValid() { return dataValidFlag_;}
 
  private:
@@ -82,6 +87,7 @@ class SinkDriverMock {
   std::shared_ptr<ExchangeClientFacade> exchangeClient_;
   std::unique_ptr<HybridExchange> hybridExchange_;
   uint64_t numRows_;
+  std::atomic<uint64_t> numBytes_{0};
   const std::shared_ptr<CudfTestData> dataToSend_;
 };
 

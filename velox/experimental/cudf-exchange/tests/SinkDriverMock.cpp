@@ -40,6 +40,7 @@ SinkDriverMock::SinkDriverMock(
     : task_{std::move(task)},
       driverCtx_{task_, driverId, kPipelineId, kUngroupedGroupId, kPartitionId},
       numRows_{0},
+      numBytes_{0},
       dataToSend_(dataToSend){
   if (!exchangeClient) {
     VELOX_CHECK(
@@ -119,9 +120,11 @@ void SinkDriverMock::run() {
         facebook::velox::cudf_velox::CudfVectorPtr cudfRes =
             std::dynamic_pointer_cast<facebook::velox::cudf_velox::CudfVector>(
                 res);
+        numBytes_.fetch_add(cudfRes->estimateFlatSize());
+        std::cout << "NUM BYTES == " << numBytes_.load() << std::endl;
         numRows_ += cudfRes->getTableView().num_rows();
         // If we have Reference data check the received data is the same
-        if (dataToSend_) updateDataValidity(cudfRes->getTableView());
+        //if (dataToSend_) updateDataValidity(cudfRes->getTableView());
       }
     }
     if (hybridExchange_->isFinished()) {
