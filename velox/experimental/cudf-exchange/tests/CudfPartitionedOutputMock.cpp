@@ -54,7 +54,9 @@ void CudfPartitionedOutputMock::publishDataChunks() {
   // push it into the destination queues identified by the taskId.
   auto stream = rmm::cuda_stream_default;
   for (size_t partition = 0; partition < numPartitions_; ++partition) {
+    
     for (uint32_t dataChunk = 0; dataChunk < numDataChunks_; ++dataChunk) {
+      VLOG(3) << "In CudfPartitionedOutputMock::publishDataChunks writing to partition " << partition << " chunk " << dataChunk;
       // create a data chunk with numRowsPerChunk_ rows
       // and push it into the destination queue identified by the taskId.
 
