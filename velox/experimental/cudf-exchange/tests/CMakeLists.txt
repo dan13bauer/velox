@@ -43,3 +43,83 @@ target_link_libraries(
   Folly::folly
   fmt::fmt
   ucxx::ucxx)
+
+add_executable(1brc_server 1brc_server.cpp)
+target_compile_options(1brc_server PRIVATE -Wno-missing-field-initializers)
+
+add_executable(1brc_client 1brc_client.cpp common.cpp TableWithNames.cpp)
+target_compile_options(1brc_client PRIVATE -Wno-missing-field-initializers)
+
+target_link_libraries(
+  1brc_server
+  ucxx::ucxx
+  velox_cudf_exchange
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_dwio_parquet_reader
+  velox_cudf_parquet_connector
+  velox_dwio_text_writer
+  velox_dwio_text_writer_register
+  velox_cudf_exec)
+
+target_link_libraries(
+  1brc_client
+  ucxx::ucxx
+  velox_cudf_exchange
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_dwio_parquet_reader
+  velox_cudf_parquet_connector
+  velox_dwio_text_writer
+  velox_dwio_text_writer_register
+  velox_cudf_exec)
+
+add_executable(exchange_srv_tst ExchangeServerMain.cpp)
+target_compile_options(exchange_srv_tst PRIVATE -Wno-missing-field-initializers)
+add_executable(exchange_client_tst ExchangeClientMain.cpp common.cpp
+                                   TableWithNames.cpp)
+target_compile_options(exchange_client_tst
+                       PRIVATE -Wno-missing-field-initializers)
+
+target_link_libraries(
+  exchange_srv_tst
+  velox_cudf_exchange
+  velox_cudf_exec
+  velox_exec
+  velox_exec_test_lib
+  velox_test_util
+  Folly::folly
+  fmt::fmt
+  ucxx::ucxx)
+
+target_link_libraries(
+  exchange_client_tst
+  velox_cudf_exchange
+  velox_cudf_exec
+  velox_exec
+  velox_exec_test_lib
+  velox_test_util
+  Folly::folly
+  fmt::fmt
+  ucxx::ucxx
+  gflags)
+
+add_custom_target(exchange_tests)
+add_dependencies(
+  exchange_tests
+  exchange_srv_tst
+  exchange_client_tst
+  1brc_server
+  1brc_client)
