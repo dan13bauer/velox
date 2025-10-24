@@ -30,6 +30,8 @@
 
   void
   CudfTestData::initialize(const size_t numRows, const size_t minStringLength, const size_t maxStringLength) {
+
+    VLOG(3) << "+ CudfTestData::initialize numRows:" << numRows << " stringLength:[" << minStringLength << ".." << maxStringLength << "]";
     numRows_ = numRows;
     strings_ = std::make_shared<std::vector<std::string>>();
     integers_ = std::make_shared<std::vector<uint32_t>>();
@@ -50,6 +52,8 @@
         integers_->push_back(strLength);
         doubles_->push_back(hashValue);
     }
+
+     VLOG(3) << "- CudfTestData::initialize";
   }
 
   std::string CudfTestData::genRandomStr(const size_t len) {
