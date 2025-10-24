@@ -23,6 +23,7 @@
 #include <rmm/device_buffer.hpp>
 #include <memory>
 #include <vector>
+#include <chrono>
 #include "CudfTestHelpers.h"
 #include "folly/experimental/EventCount.h"
 #include "velox/common/memory/MemoryPool.h"
@@ -33,6 +34,7 @@
 #include "velox/experimental/cudf-exchange/tests/CudfTestData.h"
 #include "velox/experimental/cudf-exchange/tests/CudfTestHelpers.h"
 #include "velox/experimental/cudf-exchange/tests/SinkDriverMock.h"
+
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec;
@@ -48,11 +50,11 @@ struct ExchangeTestParams {
 };
 
 // Simple Test
-const static ExchangeTestParams test1 {.numDrivers=1,.numPartitions=1,.numChunks=10,.numRowsPerChunk=10000};
+const static ExchangeTestParams test1 {.numDrivers=1,.numPartitions=1,.numChunks=10,.numRowsPerChunk=1000};
 // Large Data Test
-const static ExchangeTestParams test2 {.numDrivers=1,.numPartitions=1,.numChunks=1,.numRowsPerChunk=1000*1000*1000};
+const static ExchangeTestParams test2 {.numDrivers=1,.numPartitions=1,.numChunks=20,.numRowsPerChunk=1000*1000*100};
 // Large Number of Driver Test
-const static ExchangeTestParams test3 {.numDrivers=10,.numPartitions=1,.numChunks=1,.numRowsPerChunk=1000*1000*10};
+const static ExchangeTestParams test3 {.numDrivers=1,.numPartitions=1,.numChunks=1,.numRowsPerChunk=1000*1000*100};
 
 class CudfExchangeTest : public testing::TestWithParam<ExchangeTestParams> {
  protected:
@@ -149,9 +151,12 @@ TEST_P(CudfExchangeTest, basicTest) {
   // Start the mocks.
   VLOG(3) << "Starting source task";
   sourceMock->run();
+ 
+
   VLOG(3) << "Starting sink task";
   std::thread sinkThread(&SinkDriverMock::run, &sinkDriver);
 
+  
   sourceMock->joinThreads();
   VLOG(3) << "Source task done.";
   sinkThread.join();
@@ -173,7 +178,7 @@ TEST_P(CudfExchangeTest, dataTest) {
 
   ExchangeTestParams p = GetParam();
   
-  int strLength = 1;
+  int strLength = 4;
 
   std::shared_ptr<CudfTestData> data = std::make_shared<CudfTestData>();
   data->initialize(p.numRowsPerChunk, strLength, strLength * 2);
@@ -217,13 +222,35 @@ TEST_P(CudfExchangeTest, dataTest) {
 
   // Start the mocks.
   VLOG(3) << "Starting source task";
+ 
   sourceMock->run();
-  VLOG(3) << "Starting sink task";
-  std::thread sinkThread(&SinkDriverMock::run, &sinkDriver);
-
   sourceMock->joinThreads();
   VLOG(3) << "Source task done.";
+  // Only starting receiving when sender is done
+
+  VLOG(3) << "Starting sink task";
+   std::chrono::time_point<std::chrono::high_resolution_clock> send_start =
+      std::chrono::high_resolution_clock::now();
+  std::thread sinkThread(&SinkDriverMock::run, &sinkDriver);
+
   sinkThread.join();
+   std::chrono::time_point<std::chrono::high_resolution_clock> send_end =
+      std::chrono::high_resolution_clock::now();
+
+
+  auto rx_bytes = sinkDriver.numBytes();
+  auto duration = send_end - send_start;
+  auto micros =
+      std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
+  auto throughput = (float) rx_bytes / (float) micros;
+  VLOG(3)
+      << "*** duration: "
+      << std::chrono::duration_cast<std::chrono::milliseconds>(duration).count()
+      << " ms ";
+  VLOG(3) << "*** MBytes " << (float) rx_bytes / (float) (1024 *1024);
+  VLOG(0) << "*** throughput: " << throughput << " MByte/s";
+
+  
   VLOG(3) << "Sink task done.";
 
   // Remove the srcTask from the queue manager, so queue get freed
