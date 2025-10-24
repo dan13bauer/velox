@@ -38,8 +38,12 @@ class CudfTestData {
   inline const static facebook::velox::RowTypePtr kTestRowType =
       ROW(kTestColumnNames, kTestColumnTypes);
 
+// Make a constant to avoid too many variables
+static const int STRING_LENGTH = 4;
+
+
   CudfTestData() = default;
-  void initialize(const size_t numRows, const size_t minStringLength) {
+  void initialize(const size_t numRows, const size_t minStringLength = CudfTestData::STRING_LENGTH) {
     initialize(numRows, minStringLength, minStringLength);
   }
 

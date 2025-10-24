@@ -53,6 +53,11 @@ void CudfTestData::initialize(
     doubles_->push_back(hashValue);
   }
 
+  for (int i = 0; i < numRows; i++) {
+    VLOG(4) << "In dataTest Generated data String: " << strings_->at(i)
+            << " Integer: " << integers_->at(i) << " Double: " << doubles_->at(i);
+  }
+
   VLOG(3) << "- CudfTestData::initialize";
 }
 

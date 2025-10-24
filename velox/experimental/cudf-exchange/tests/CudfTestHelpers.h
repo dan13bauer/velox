@@ -33,6 +33,8 @@
 
 namespace facebook::velox::cudf_exchange {
 
+static const uint64_t FOUR_GBYTES = 4294967296;
+
 /*const std::vector<std::string> kTestColumnNames = {"c0", "c1","c2"};
 const std::vector<TypePtr> kTestColumnTypes = {INTEGER(), DOUBLE(),VARCHAR()};
 const facebook::velox::RowTypePtr kTestRowType =
@@ -51,7 +53,9 @@ const facebook::velox::RowTypePtr kTestRowType =
 std::shared_ptr<facebook::velox::exec::Task> createSourceTask(
     const std::string& taskId,
     std::shared_ptr<facebook::velox::memory::MemoryPool> pool,
-    facebook::velox::RowTypePtr rowType);
+    facebook::velox::RowTypePtr rowType,
+    uint64_t kMaxOutputBufferSize = FOUR_GBYTES
+);
 
 /// @brief Helper function to create a sink task for testing.
 /// Creates a simple task associated with a plan fragment that consists fo a

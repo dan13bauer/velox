@@ -31,12 +31,12 @@ constexpr uint32_t kPartitionId = 0; // not used in tests.
 SinkDriverMock::SinkDriverMock(
     std::shared_ptr<facebook::velox::exec::Task> task,
     uint32_t numDrivers,
-    std::shared_ptr<CudfTestData> dataToSend)
+    std::shared_ptr<CudfTestData> referenceData)
     : task_{std::move(task)},
       numDrivers_{numDrivers},
       numRows_{0},
       numBytes_{0},
-      dataToSend_(dataToSend) {
+      referenceData_(referenceData) {
   // create a new exchange client facade. Since this test doesn't use
   // HTTP exchange, the facade will only use a cudf exchange client.
   // create new cudfExchangeClient
@@ -62,7 +62,7 @@ void SinkDriverMock::updateDataValidity(const cudf::table_view& tab) {
   // string]
 
   int num_columns = tab.num_columns();
-  int num_rows = dataToSend_->getNumRows();
+  int num_rows = referenceData_->getNumRows();
 
   VELOX_CHECK_EQ(num_columns, CudfTestData::kTestColumnTypes.size());
 
@@ -72,10 +72,10 @@ void SinkDriverMock::updateDataValidity(const cudf::table_view& tab) {
   }
 
   // Get the Reference data
-  std::shared_ptr<std::vector<uint32_t>> integers = dataToSend_->getIntegers();
-  std::shared_ptr<std::vector<float>> doubles = dataToSend_->getDoubles();
+  std::shared_ptr<std::vector<uint32_t>> integers = referenceData_->getIntegers();
+  std::shared_ptr<std::vector<float>> doubles = referenceData_->getDoubles();
   const std::shared_ptr<std::vector<std::string>>& strings =
-      dataToSend_->getStrings();
+      referenceData_->getStrings();
 
   // Get the Received data: assume in a fixed order
   cudf::column_view iCol = tab.column(0);
@@ -88,7 +88,7 @@ void SinkDriverMock::updateDataValidity(const cudf::table_view& tab) {
       getColVector<uint32_t>(iCol, num_rows, stream_pool.get_stream());
   std::vector<float> col_doubles =
       getColVector<float>(dCol, num_rows, stream_pool.get_stream());
-  // Com pare Reference with Received
+  // Compare Reference with Received
   for (int i = 0; i < num_rows; i++) {
     if (integers->at(i) != col_integers.at(i)) {
       VLOG(0) << "Error " << integers->at(i) << " != " << col_integers.at(i);
@@ -130,7 +130,7 @@ void SinkDriverMock::receiveAllData(HybridExchange* hybridExchange) {
         numBytes_.fetch_add(cudfRes->estimateFlatSize());
         numRows_ += cudfRes->getTableView().num_rows();
         // If we have Reference data check the received data is the same
-        if (dataToSend_)
+        if (referenceData_)
           updateDataValidity(cudfRes->getTableView());
       }
     }

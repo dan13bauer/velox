@@ -37,12 +37,13 @@ class SinkDriverMock {
   /// exchange operator instance and drive it until is is finished or an error
   /// occurs.
   /// @param task A pointer to the sink task.
-  /// @param numDrivers The number of drivers used in running the exchange
-  /// operators.
+  /// @param numDrivers The number of drivers used in running the exchange operators
+  /// @param referenceData data to check against, if should not check send null
+
   SinkDriverMock(
       std::shared_ptr<facebook::velox::exec::Task> task,
       uint32_t numDrivers = 1,
-      std::shared_ptr<CudfTestData> dataToSend = nullptr);
+      std::shared_ptr<CudfTestData> referenceData = nullptr);
 
   /// @brief Executes the exchange operator until it finishes receiving all data
   /// from the upstream.
@@ -88,7 +89,7 @@ class SinkDriverMock {
   std::atomic<uint64_t> numRows_;
    std::atomic<uint64_t> numBytes_{0};
 
-  const std::shared_ptr<CudfTestData> dataToSend_;
+  const std::shared_ptr<CudfTestData> referenceData_;
   std::vector<std::thread> threads_;
 };
 

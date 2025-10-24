@@ -29,7 +29,8 @@ namespace facebook::velox::cudf_exchange {
 std::shared_ptr<Task> createSourceTask(
     const std::string& taskId,
     std::shared_ptr<memory::MemoryPool> pool,
-    RowTypePtr rowType) {
+    RowTypePtr rowType,
+  uint64_t kMaxOutputBufferSize) {
   VLOG(3) << "Testing SourceTask";
   const size_t vectorSize = 10;
 
@@ -56,7 +57,7 @@ std::shared_ptr<Task> createSourceTask(
           std::thread::hardware_concurrency()));
 
 
-  std::unordered_map<std::string, std::string> configSettings {{velox::core::QueryConfig::kMaxOutputBufferSize, "42949672960"}};
+  std::unordered_map<std::string, std::string> configSettings {{velox::core::QueryConfig::kMaxOutputBufferSize, std::to_string(kMaxOutputBufferSize)}};
  
   auto queryCtx = core::QueryCtx::create(
       executor.get(), core::QueryConfig(std::move(configSettings)));
