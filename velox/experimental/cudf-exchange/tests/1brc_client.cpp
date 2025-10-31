@@ -219,8 +219,8 @@ int main(int argc, char** argv) {
 
   future.wait(); // wait for communicator to start up.
 
-  std::chrono::time_point<std::chrono::high_resolution_clock> startTime =
-      std::chrono::high_resolution_clock::now();
+  /*std::chrono::time_point<std::chrono::high_resolution_clock> startTime =
+      std::chrono::high_resolution_clock::now();*/
 
   // Add remote splits such that the processor task starts fetching data from
   // the remote reader task.
@@ -237,6 +237,9 @@ int main(int argc, char** argv) {
 
   // Start the processor task with some number of drivers.
   VLOG(3) << "Starting tasks";
+
+   std::chrono::time_point<std::chrono::high_resolution_clock> startTime =
+      std::chrono::high_resolution_clock::now();
   processorTask->start(kNumDrivers);
 
   processorTask->taskCompletionFuture().wait();
@@ -251,9 +254,9 @@ int main(int argc, char** argv) {
             << std::endl;*/
 
   // cat the contents of the generated file.
-  print_file_contents(absTempDirPath);
+  //print_file_contents(absTempDirPath);
 
-  VLOG(3) << "processing task done in: " << durationCount << " milliseconds";
+  VLOG(0) << "*** processing task done in: " << durationCount << " milliseconds";
   // Clean up
   std::cout << "Going to clean-up" << std::endl;
 
