@@ -5,23 +5,25 @@ that communicate via the CudfExchange/UCXX:
 - the 1brc_server reads a parquet file containing the challenge data
 - the 1brc_client does the actual processing
 
-First create the image
+First create the image:
 
 $ cd velox/experimental/cudf-exchange/tests/containers
 $ ./create_docker.sh
 
 Then start the image this will be called  `velox-dev-ucx-test` 
+You will need to have a large one billion row challenge  parquet file and
+change the mount volume in the following script to use this:
 
 ./start_docker.sh
 
 
-Start the 1brc_server by logging it to container from a terminal
+Start the 1brc_server by logging it to container from a terminal:
 
 $ docker exec -it velox-dev-ucx-test /bin/bash
 $$ cd velox/experimental/cudf-exchange/tests/scripts
 $$ ./1brc_server.sh
 
-Start the 1brc_client in the same way
+Start the 1brc_client in the same way:
 
 $ docker exec -it velox-dev-ucx-test /bin/bash
 $$ cd velox/experimental/cudf-exchange/tests/scripts
