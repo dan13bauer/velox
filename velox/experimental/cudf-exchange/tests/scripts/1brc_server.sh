@@ -1,0 +1,1 @@
+UCX_TLS=tcp,cuda_copy,cuda_ipc UCX_MAX_RNDV_RAILS=1  UCX_LOG_LEVEL=error UCX_PROTO_INFO=n UCX_RNDV_PIPELINE_ERROR_HANDLING=y CUDA_VISIBLE_DEVICES=6   /workspace/velox/_build/release/velox/experimental/cudf-exchange/tests/1brc_server   -inputfiles=/data/measurements.parquet -v=3 --logtostdout -velox_cudf_memory_resource=async  -port 50003 
