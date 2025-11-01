@@ -46,7 +46,6 @@ Exchange::Exchange(
           operatorId,
           exchangeNode->id(),
           operatorType),
-      exchangeClient_{std::move(exchangeClient)},
       preferredOutputBatchBytes_{
           driverCtx->queryConfig().preferredOutputBatchBytes()},
       serdeKind_{exchangeNode->serdeKind()},
@@ -54,7 +53,8 @@ Exchange::Exchange(
           operatorCtx_->driverCtx()->queryConfig(),
           serdeKind_)},
       processSplits_{operatorCtx_->driverCtx()->driverId == 0},
-      driverId_{driverCtx->driverId} {}
+      driverId_{driverCtx->driverId},
+      exchangeClient_{std::move(exchangeClient)} {}
 
 void Exchange::addRemoteTaskIds(std::vector<std::string>& remoteTaskIds) {
   std::shuffle(std::begin(remoteTaskIds), std::end(remoteTaskIds), rng_);
