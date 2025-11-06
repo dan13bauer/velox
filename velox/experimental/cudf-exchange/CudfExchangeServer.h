@@ -114,7 +114,8 @@ class CudfExchangeServer
   std::shared_ptr<ucxx::Request> metaRequest_{nullptr};
   std::shared_ptr<ucxx::Request> dataRequest_{nullptr};
 
-  std::chrono::time_point<std::chrono::high_resolution_clock> sendStart_;
+  std::chrono::time_point<std::chrono::high_resolution_clock> exchangeStart_;
+  std::chrono::time_point<std::chrono::high_resolution_clock> dataStart_;
   std::size_t bytes_;
 
   std::shared_ptr<CudfOutputQueueManager> queueMgr_;

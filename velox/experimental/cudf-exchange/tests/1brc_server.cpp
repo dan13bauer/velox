@@ -63,7 +63,7 @@ DEFINE_uint32(
     "Port number"); // "+3" accounts for the hack for Presto ! See
                     // cudf-exchange/CudfExchangeSource.cpp
 DEFINE_string(taskId, "task0", "task id");
-DEFINE_uint32(cudfChunkSizeMB, 1024, "cuDF Parquet chunk size to read in GB");
+DEFINE_uint64(cudfChunkSizeMB, 1024, "cuDF Parquet chunk size to read in GB");
 DEFINE_int32(cuda_device, -1, "Cuda device or -1 for not setting the device");
 DEFINE_bool(use_hive, false, "Use Hive Connector");
 
@@ -171,13 +171,12 @@ int main(int argc, char** argv) {
     // cudf-based parquet reader that produces Cudf vectors.
   }
 
-  
   std::unordered_map<std::string, std::string> c = {};
   LOG(INFO) << "reading " << FLAGS_cudfChunkSizeMB << "MB chunks at once";
   c[facebook::velox::cudf_velox::connector::parquet::ParquetConfig::
         kMaxChunkReadLimit] =
-     // std::to_string(512 *1024 * 1024);
-    std::to_string(FLAGS_cudfChunkSizeMB * 1024 * 1024);
+      // std::to_string(512 *1024 * 1024);
+      std::to_string(FLAGS_cudfChunkSizeMB * 1024 * 1024);
   std::shared_ptr<const facebook::velox::config::ConfigBase> properties =
       std::make_shared<const facebook::velox::config::ConfigBase>(std::move(c));
 
@@ -214,8 +213,10 @@ int main(int argc, char** argv) {
       std::make_shared<folly::CPUThreadPoolExecutor>(
           std::thread::hardware_concurrency()));
 
-  //std::unordered_map<std::string, std::string> configSettings {{facebook::velox::core::QueryConfig::kMaxOutputBufferSize, std::to_string(FOUR_GBYTES*10)}};
-  std::unordered_map<std::string, std::string> configSettings {};
+  std::unordered_map<std::string, std::string> configSettings{
+      {facebook::velox::core::QueryConfig::kMaxOutputBufferSize,
+       std::to_string(FOUR_GBYTES * 10)}};
+  // std::unordered_map<std::string, std::string> configSettings {};
   auto queryCtx = core::QueryCtx::create(
       executor.get(), core::QueryConfig(std::move(configSettings)));
 
@@ -225,7 +226,7 @@ int main(int argc, char** argv) {
       readerTaskId,
       readerPlan,
       /*destination=*/0,
-      core::QueryCtx::create(executor.get()),
+      queryCtx,
       exec::Task::ExecutionMode::kParallel);
 
   // Now that we have the query fragment and Task structure set up, we will

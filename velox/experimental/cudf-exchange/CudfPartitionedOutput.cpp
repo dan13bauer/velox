@@ -81,6 +81,7 @@ CudfPartitionedOutput::CudfPartitionedOutput(
 }
 
 void CudfPartitionedOutput::addInput(RowVectorPtr input) {
+  auto addInputStart = std::chrono::high_resolution_clock::now();
   VELOX_NVTX_OPERATOR_FUNC_RANGE();
   auto cudfVector = std::dynamic_pointer_cast<CudfVector>(input);
   VELOX_CHECK(cudfVector, "Input must be a CudfVector");
@@ -108,6 +109,8 @@ void CudfPartitionedOutput::addInput(RowVectorPtr input) {
         blocked = equalPartition(tableView, cudfVector->stream());
       }
     } else {
+      auto cudfPackStart = std::chrono::high_resolution_clock::now();
+
       // Single partition case. No need to hash, assume queue zero
       auto packedCols = cudf::pack(tableView, stream);
       // Sync the stream since UCXX/UCX is not stream oriented and without
@@ -118,6 +121,18 @@ void CudfPartitionedOutput::addInput(RowVectorPtr input) {
       // TODO: change stream sync and move to event sync
       // Thanks to Lawrence Mitchel for pointing this out!
       stream.synchronize();
+
+      auto end = std::chrono::high_resolution_clock::now();
+      auto duration = end - cudfPackStart;
+      auto micros =
+          std::chrono::duration_cast<std::chrono::microseconds>(duration)
+              .count();
+      auto throughput = packedCols.gpu_data->size() / micros;
+
+      VLOG(3) << "cudf::pack time: " << micros << " µs";
+
+      VLOG(3) << "throughput: " << throughput << " MByte/s";
+
       std::unique_ptr<cudf::packed_columns> packedColsPtr =
           std::make_unique<cudf::packed_columns>(
               std::move(packedCols.metadata), std::move(packedCols.gpu_data));
@@ -144,6 +159,12 @@ void CudfPartitionedOutput::addInput(RowVectorPtr input) {
     }
     throw; // Let the driver know we have failed
   }
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = end - addInputStart;
+  auto micros =
+      std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
+
+  VLOG(3) << "complete partitioning and enqueueing time: " << micros << " µs";
 }
 
 exec::BlockingReason CudfPartitionedOutput::isBlocked(ContinueFuture* future) {

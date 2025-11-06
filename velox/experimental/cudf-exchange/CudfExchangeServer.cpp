@@ -122,6 +122,8 @@ std::shared_ptr<CudfExchangeServer> CudfExchangeServer::getSelfPtr() {
 }
 
 void CudfExchangeServer::sendData() {
+  exchangeStart_ = std::chrono::high_resolution_clock::now();
+
   // Create the MetaDataRecord.
   std::shared_ptr<MetadataMsg> metadataMsg = std::make_shared<MetadataMsg>();
 
@@ -169,7 +171,7 @@ void CudfExchangeServer::sendData() {
   {
     std::lock_guard<std::recursive_mutex> lock(dataMutex_);
     if (dataPtr_) {
-      sendStart_ = std::chrono::high_resolution_clock::now();
+      dataStart_ = std::chrono::high_resolution_clock::now();
       bytes_ = dataPtr_->gpu_data->size();
       VLOG(3) << "Sending rmm::buffer: " << std::hex << dataPtr_->gpu_data.get()
               << " pointing to device memory: " << std::hex
@@ -209,16 +211,21 @@ void CudfExchangeServer::sendComplete(
     VELOX_CHECK(dataPtr_ != nullptr, "dataPtr_ is null");
 
     auto end = std::chrono::high_resolution_clock::now();
-    auto duration = end - sendStart_;
+    auto duration = end - exchangeStart_;
     auto micros =
         std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
     auto throughput = bytes_ / micros;
 
-    VLOG(3) << "duration: "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(duration)
-                   .count()
-            << " ms ";
-    VLOG(3) << "throughput: " << throughput << " MByte/s";
+    VLOG(3) << "exchange duration: " << micros << " µs";
+    VLOG(3) << "metadata & data throughput: " << throughput << " MByte/s";
+
+    duration = end - dataStart_;
+    micros =
+        std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
+    throughput = bytes_ / micros;
+
+    VLOG(3) << "data send duration (micros): " << micros << " µs";
+    VLOG(3) << "data only throughput: " << throughput << " MByte/s";
 
     this->sequenceNumber_++;
     dataPtr_.reset(); // release memory.
