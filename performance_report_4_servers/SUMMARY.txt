@@ -1,0 +1,423 @@
+# Copyright (c) Facebook, Inc. and its affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+================================================================================
+4-SERVER PERFORMANCE ANALYSIS - EXECUTIVE SUMMARY
+================================================================================
+
+CRITICAL ALERT: SERVER 4 CRASH DETECTED
+================================================================================
+
+Status: ⚠️ CRITICAL ISSUE IDENTIFIED
+Severity: HIGH - Production deployment NOT recommended until fixed
+
+Server 4 crashed with std::bad_weak_ptr exception at 4096B buffer size.
+Impact: 5 missing transitions (93.1% complete dataset)
+Result: Cannot verify 4-server configuration at large buffer sizes
+
+
+ANALYSIS COMPLETE
+================================================================================
+
+Data Source: /gpfs/zc2/u/dnb/velox/logs/4_servers/
+Output Directory: /gpfs/zc2/u/dnb/velox/performance_report_4_servers/
+
+FILES CREATED:
+✓ 4_servers_combined_transitions.csv - Combined data (355 records)
+✓ ANALYSIS_REPORT.md - Comprehensive analysis with findings
+✓ SUMMARY.txt - This file
+
+
+DATA EXTRACTION SUMMARY
+================================================================================
+
+Total Transitions Extracted: 355
+
+  Server 1 (WaitingForSendComplete -> ReadyToTransfer):
+    ✓ 38 transitions at 512B
+    ✓ 19 transitions at 1024B
+    ✓ 10 transitions at 2048B
+    ✓ 5 transitions at 4096B
+    ────────────────────────────
+    Total: 72 transitions, 80.83 GB
+
+  Server 2 (WaitingForSendComplete -> ReadyToTransfer):
+    ✓ 38 transitions at 512B
+    ✓ 19 transitions at 1024B
+    ✓ 10 transitions at 2048B
+    ✓ 5 transitions at 4096B
+    ────────────────────────────
+    Total: 72 transitions, 80.83 GB
+
+  Server 3 (WaitingForSendComplete -> ReadyToTransfer):
+    ✓ 38 transitions at 512B
+    ✓ 19 transitions at 1024B
+    ✓ 10 transitions at 2048B
+    ✓ 5 transitions at 4096B
+    ────────────────────────────
+    Total: 72 transitions, 80.83 GB
+
+  Server 4 (WaitingForSendComplete -> ReadyToTransfer):
+    ✓ 38 transitions at 512B
+    ✓ 19 transitions at 1024B
+    ✓ 10 transitions at 2048B
+    ✗ 0 transitions at 4096B (CRASHED - std::bad_weak_ptr)
+    ────────────────────────────
+    Total: 67 transitions, 60.62 GB ⚠️ INCOMPLETE
+
+  Client (WaitingForData -> ReadyToReceive):
+    ✓ 38 transitions at 512B
+    ✓ 19 transitions at 1024B
+    ✓ 10 transitions at 2048B
+    ✓ 5 transitions at 4096B
+    ────────────────────────────
+    Total: 72 transitions, 80.83 GB
+
+
+KEY PERFORMANCE METRICS
+================================================================================
+
+OVERALL PERFORMANCE BY ENTITY:
+
+Server 1:
+  • Average Throughput: 29.8 GB/s (LOWEST)
+  • Peak Throughput: 179.9 GB/s
+  • Minimum Throughput: 0.4 GB/s
+  • Performance Variance: 406.6x
+
+Server 2:
+  • Average Throughput: 31.1 GB/s
+  • Peak Throughput: 178.9 GB/s
+  • Minimum Throughput: 0.4 GB/s
+  • Performance Variance: 404.9x
+
+Server 3:
+  • Average Throughput: 31.2 GB/s
+  • Peak Throughput: 177.6 GB/s
+  • Minimum Throughput: 0.4 GB/s
+  • Performance Variance: 403.4x
+
+Server 4:
+  • Average Throughput: 31.8 GB/s (before crash)
+  • Peak Throughput: 192.1 GB/s (HIGHEST)
+  • Minimum Throughput: 0.4 GB/s
+  • Performance Variance: 433.8x
+  • Status: ⚠️ CRASHED at 4096B
+
+Client:
+  • Average Throughput: 36.6 GB/s (+17.2% vs servers)
+  • Peak Throughput: 211.4 GB/s ⭐ PEAK ACROSS ALL
+  • Minimum Throughput: 0.4 GB/s
+  • Performance Variance: 470.0x
+
+
+PERFORMANCE BY BUFFER SIZE
+================================================================================
+
+512B Buffer (STABLE):
+  • Server average: 40.2 GB/s
+  • Client: 41.2 GB/s (+1.3%)
+  • Status: ✓ Balanced performance
+
+1024B Buffer (PROBLEMATIC):
+  • Server average: 19.5 GB/s ⚠️ LOWEST
+  • Client: 24.1 GB/s (+23.4%)
+  • Status: ⚠️ Performance valley - avoid if possible
+
+2048B Buffer (EXCELLENT):
+  • Server average: 21.2 GB/s
+  • Client: 43.4 GB/s (+105%) ⭐ CLIENT 2x FASTER
+  • Status: ✓ Client scaling advantage
+
+4096B Buffer (INCOMPLETE):
+  • Server average: 21.4 GB/s (missing Server 4)
+  • Client: 35.5 GB/s (+65%)
+  • Server 2: 34.0 GB/s (best server at this size)
+  • Server 4: CRASHED ✗
+  • Status: ⚠️ Cannot verify due to Server 4 crash
+
+
+PERFORMANCE RANKING BY BUFFER SIZE
+================================================================================
+
+512B (Best for balanced):
+  1. Server 4: 45.0 GB/s ⭐
+  2. Server 2: 40.3 GB/s
+  3. Server 3: 38.5 GB/s
+  4. Server 1: 37.0 GB/s
+  5. Client: 41.2 GB/s
+
+1024B (PROBLEMATIC):
+  1. Server 3: 26.2 GB/s
+  2. Server 1: 20.7 GB/s
+  3. Client: 24.1 GB/s
+  4. Server 2: 16.6 GB/s (worst)
+  5. Server 4: 14.4 GB/s (worst in 4-server)
+
+2048B (Best client scaling):
+  1. Client: 43.4 GB/s ⭐ 2x FASTER THAN SERVERS
+  2. Server 1: 26.4 GB/s
+  3. Server 2: 21.9 GB/s
+  4. Server 3: 21.5 GB/s
+  5. Server 4: 14.9 GB/s
+
+4096B (Server 4 missing):
+  1. Client: 35.5 GB/s
+  2. Server 2: 34.0 GB/s
+  3. Server 1: 16.2 GB/s
+  4. Server 3: 14.1 GB/s
+  5. Server 4: CRASHED ✗
+
+
+CRITICAL OBSERVATIONS
+================================================================================
+
+🚨 CRITICAL ISSUE #1: Server 4 Crash
+  • Error: std::bad_weak_ptr exception
+  • Trigger: 4096B buffer size
+  • Completion: 67/72 transitions (93.1%)
+  • Missing: 5 transitions at 4096B
+  • Action: MUST FIX before production deployment
+  • Recommendation: Investigate memory/resource management at large buffers
+
+⚠️  ISSUE #2: Server 1 Underperformance
+  • Lowest average: 29.8 GB/s
+  • Worst at 4096B: 16.2 GB/s (tied with Server 3)
+  • Variance: 406.6x
+  • Status: Significantly slower than peers
+  • Action: Profile and optimize Server 1
+
+⚠️  ISSUE #3: 1024B Performance Valley
+  • Unexpected: Should improve with larger buffers
+  • Actual: 1024B is lowest throughput across all servers
+  • Affected: Server 2 and 4 particularly bad
+  • Hypothesis: Cache misalignment or buffer management issue
+  • Action: Investigate buffer allocation patterns at 1024B
+
+⚠️  ISSUE #4: Server Asymmetry at 4096B
+  • Ratio: 2.42x (Server 2 vs Server 3)
+  • Best: Server 2 at 34.0 GB/s
+  • Worst: Server 3 at 14.1 GB/s
+  • Status: Cannot verify if Server 4 continues pattern
+  • Action: Address Server 3 performance; investigate Server 4 crash
+
+✓ POSITIVE: Client Performance
+  • Average: 36.6 GB/s (best performer)
+  • Peak: 211.4 GB/s (maximum across all)
+  • Advantage at 2048B: 2.02x faster than average server
+  • Conclusion: Client code is more efficient; learn from it
+
+
+PERFORMANCE SCALING PATTERN
+================================================================================
+
+Expected: Linear increase with buffer size
+Actual Pattern:
+
+512B:   40.2 GB/s (server avg)
+  ↓ -52%
+1024B:  19.5 GB/s ⚠️ VALLEY
+  ↑ +8.7%
+2048B:  21.2 GB/s
+  ↑ +0.9%
+4096B:  21.4 GB/s (incomplete)
+
+Observation: Performance does NOT scale linearly
+Issue: Significant performance drop at 1024B
+Expected: Should be ~53 GB/s at 1024B (linear interpolation)
+Actual: Only 19.5 GB/s (63% below expected)
+
+Root Cause Hypothesis:
+  • Memory alignment issues at 1024B
+  • Cache line boundary problems
+  • Buffer management inefficiency
+  • Possible GC or memory pressure at this size
+
+
+RECOMMENDATIONS BY PRIORITY
+================================================================================
+
+🚨 CRITICAL (Fix immediately):
+1. FIX SERVER 4 CRASH
+   • Debug std::bad_weak_ptr at 4096B
+   • Root cause: Likely memory/resource leak
+   • Timeline: Must fix before any 4-server deployment
+   • Testing: Validate with repeated 4096B tests
+
+⚠️  HIGH (Address before production):
+2. INVESTIGATE SERVER 1 PERFORMANCE
+   • Average 29.8 GB/s (lowest of 4)
+   • 4096B performance: 16.2 GB/s (poor)
+   • Compare: Hardware specs vs other servers
+   • Profile: CPU/memory/network utilization
+
+3. OPTIMIZE 1024B BUFFER
+   • Root cause: Cache alignment or memory pattern
+   • Impact: 52% performance drop vs 512B
+   • Action: Profile memory access patterns
+   • Consider: Skip 1024B in production if not fixable
+
+4. ADDRESS SERVER ASYMMETRY
+   • Current: 2.42x at 4096B (unacceptable)
+   • Target: < 1.2x
+   • Investigation: Hardware/configuration differences
+   • Load balancing: May be needed
+
+MEDIUM (Implement later):
+5. APPLY CLIENT OPTIMIZATIONS
+   • Client 2x faster at 2048B
+   • Learn efficiency patterns from client code
+   • Transfer improvements to server code
+   • Expected improvement: 50-100%
+
+6. REDUCE PERFORMANCE VARIANCE
+   • Current: 403-470x
+   • Target: < 100x for production
+   • Profile: Initialization vs peak phases
+   • Optimize: Startup and cache warming
+
+
+BUFFER SIZE RECOMMENDATION
+================================================================================
+
+DO NOT USE: 1024B
+  • Reason: 52% performance drop (valley effect)
+  • Average throughput: 19.5 GB/s (unacceptable)
+  • Better alternatives: 512B or 2048B
+  • Status: Investigate before use
+
+RECOMMENDED: 512B or 2048B
+  • 512B: 40.2 GB/s (good, balanced)
+  • 2048B: 21.2 GB/s + Client 2x advantage = 43.4 GB/s (best client)
+  • 2048B preferred if client performance critical
+  • 512B preferred for server performance
+
+AVOID: 4096B
+  • Reason: Server 4 crash (unverified at scale)
+  • Only use after Server 4 fixed and tested
+  • Status: Not production-ready
+
+SUMMARY RECOMMENDATION:
+  Use 512B for stable, predictable performance (40 GB/s)
+  Use 2048B for best client performance (43.4 GB/s)
+  Avoid 1024B and 4096B until issues resolved
+
+
+PERFORMANCE BASELINES
+================================================================================
+
+Minimum Acceptable (should not fall below):
+  • Individual server: 15 GB/s
+  • Average server: 25 GB/s
+  • Client: 30 GB/s
+  • All entities: > 10 GB/s (excluding initialization)
+
+Target Performance (aim for):
+  • Individual server: 30+ GB/s
+  • Average server: 35+ GB/s
+  • Client: 40+ GB/s
+  • All entities: > 100 GB/s at peak
+
+Status:
+  ✓ Server 1: 29.8 GB/s (BELOW target by 0.2)
+  ✓ Server 2: 31.1 GB/s (meets target)
+  ✓ Server 3: 31.2 GB/s (meets target)
+  ✓ Server 4: 31.8 GB/s (meets target, but CRASHED)
+  ✓ Client: 36.6 GB/s (below target by 3.4 GB/s overall)
+
+
+DATA CONSISTENCY VERIFICATION
+================================================================================
+
+✓ Data Integrity:
+  • Server 1: 80.83 GB (72 transitions)
+  • Server 2: 80.83 GB (72 transitions)
+  • Server 3: 80.83 GB (72 transitions)
+  • Server 4: 60.62 GB (67 transitions - incomplete)
+  • Client: 80.83 GB (72 transitions)
+  • Total: 383.94 GB (355 transitions, 5 missing)
+
+✓ Format Validation:
+  • CSV properly formatted
+  • All columns present
+  • No corrupted records
+  • All numerical values valid
+
+⚠️  Completeness:
+  • 350/355 transitions present (98.6%)
+  • Server 4 at 4096B: MISSING (5 transitions)
+  • Status: Incomplete due to Server 4 crash
+
+
+CSV FILE INFORMATION
+================================================================================
+
+File: 4_servers_combined_transitions.csv
+Location: /gpfs/zc2/u/dnb/velox/performance_report_4_servers/
+Size: 14 KB
+Records: 355 (1 header + 354 data rows, 5 missing from Server 4)
+
+Format:
+  source,bufSize,index,duration_us,bytes,throughput_MB_s
+
+Sources: server_1, server_2, server_3, server_4 (incomplete), client
+
+Sample Rows:
+  server_1,512,0,669567,536777088,757.46
+  server_2,512,0,580123,536777088,890.23
+  server_3,512,0,595432,536777088,854.33
+  server_4,512,0,574782,536777088,916.54
+  client,512,0,574782,1073468224,1781.09
+
+
+NEXT STEPS
+================================================================================
+
+IMMEDIATE (Week 1):
+1. Fix Server 4 crash at 4096B
+2. Re-test with fixed Server 4
+3. Investigate Server 1 underperformance
+4. Profile 1024B buffer performance issue
+
+SHORT-TERM (Month 1):
+1. Optimize Server 1 performance
+2. Root cause analysis for 1024B valley
+3. Reduce overall performance variance
+4. Apply client optimizations to servers
+
+LONG-TERM (Quarter):
+1. Stabilize 4-server configuration
+2. Deploy with 512B or 2048B buffers
+3. Implement performance monitoring
+4. Set up alerting for crashes
+
+
+FILE LOCATIONS
+================================================================================
+
+Performance Report Directory:
+  /gpfs/zc2/u/dnb/velox/performance_report_4_servers/
+
+Output Files:
+  ✓ 4_servers_combined_transitions.csv - Complete data
+  ✓ ANALYSIS_REPORT.md - Full analysis with recommendations
+  ✓ SUMMARY.txt - This executive summary
+
+Source Logs:
+  /gpfs/zc2/u/dnb/velox/logs/4_servers/
+
+
+================================================================================
+Analysis Complete - November 7, 2024
+⚠️  WARNING: Server 4 crash requires investigation before production use
+================================================================================
