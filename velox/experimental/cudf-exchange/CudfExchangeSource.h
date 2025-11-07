@@ -23,6 +23,7 @@
 #include "velox/experimental/cudf-exchange/CudfExchangeQueue.h"
 #include "velox/experimental/cudf-exchange/EndpointRef.h"
 #include "velox/experimental/cudf-exchange/PartitionKey.h"
+#include "velox/experimental/cudf-exchange/StateTransitionMetrics.h"
 
 #include <cuda.h>
 #include <cuda_runtime.h>
@@ -110,6 +111,11 @@ class CudfExchangeSource
     return obj;
   }
 
+  /// @return Reference to the state transition metrics.
+  const StateTransitionMetrics& getStateTransitionMetrics() const {
+    return receiverMetrics_;
+  }
+
  private:
   enum class ReceiverState : uint32_t {
     Created,
@@ -177,15 +183,39 @@ class CudfExchangeSource
   void onData(ucs_status_t status, std::shared_ptr<void> arg);
 
   /// @brief Sets the new state of this exchange source using
-  /// sequential consistency.
+  /// sequential consistency and records the transition metrics.
   /// @param newState the new state of the CudfExchangeSource.
-  void setState(ReceiverState newState) {
+  /// @param bytes Optional: number of bytes received during this transition.
+  void setState(ReceiverState newState, uint64_t bytes = 0) {
+    ReceiverState oldState = state_.load(std::memory_order_seq_cst);
+    if (oldState != newState) {
+      auto endTime = std::chrono::high_resolution_clock::now();
+      receiverMetrics_.recordTransition(
+          getStateNameForEnum(oldState),
+          getStateNameForEnum(newState),
+          lastStateChangeTime_,
+          endTime,
+          bytes);
+      lastStateChangeTime_ = endTime;
+    }
     state_.store(newState, std::memory_order_seq_cst);
   }
 
   /// @brief Returns the state.
   ReceiverState getState() {
     return state_.load(std::memory_order_seq_cst);
+  }
+
+  /// @brief Converts ReceiverState enum to string representation.
+  static std::string getStateNameForEnum(ReceiverState state) {
+    const std::string stateMap[] = {
+        "Created",
+        "WaitingForHandshakeComplete",
+        "ReadyToReceive",
+        "WaitingForMetadata",
+        "WaitingForData",
+        "Done"};
+    return stateMap[static_cast<uint32_t>(state)];
   }
 
   /// @brief Remove the state associated with the source called by the
@@ -196,8 +226,10 @@ class CudfExchangeSource
   /// state is "expected".
   /// @param expected The expected state
   /// @param desired The desired state
+  /// @param bytes Optional: number of bytes received during this transition.
   /// @return Returns true if state was changed, false otherwise.
-  bool setStateIf(ReceiverState expected, ReceiverState desired);
+  bool
+  setStateIf(ReceiverState expected, ReceiverState desired, uint64_t bytes = 0);
 
   // The connection parameters
   const std::string host_;
@@ -218,6 +250,11 @@ class CudfExchangeSource
 
   // Some metrics/counters:
   CudfExchangeMetrics metrics_;
+
+  // State transition metrics
+  StateTransitionMetrics receiverMetrics_;
+  std::chrono::time_point<std::chrono::high_resolution_clock>
+      lastStateChangeTime_{std::chrono::high_resolution_clock::now()};
 
   // The outstanding request - there can only be one outstanding request
   // at any point in time. Used for handshake, metadata and data.

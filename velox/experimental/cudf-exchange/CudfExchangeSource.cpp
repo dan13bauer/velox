@@ -148,6 +148,7 @@ void CudfExchangeSource::close() {
   VLOG(1) << "CudfExchangeSource::close called.";
   VLOG(1) << fmt::format("closing task: {}", partitionKey_.toString());
   VLOG(3) << "Close receiver to remote " << partitionKey_.toString() << ".";
+  VLOG(3) << std::endl << receiverMetrics_.toString();
 
   //  Let the Communicator progress thread do the actual clean-up
   setState(ReceiverState::Done);
@@ -418,14 +419,23 @@ void CudfExchangeSource::onData(
         std::make_unique<cudf::packed_columns>(
             std::move(ptr->metadata.cudfMetadata), std::move(ptr->dataBuf));
     enqueue(std::move(columns), ptr->metadata);
-    setStateIf(ReceiverState::WaitingForData, ReceiverState::ReadyToReceive);
+    // Record transition with bytes received
+    setStateIf(
+        ReceiverState::WaitingForData,
+        ReceiverState::ReadyToReceive,
+        ptr->metadata.dataSizeBytes);
   }
   communicator_->addToWorkQueue(getSelfPtr());
 }
 
 bool CudfExchangeSource::setStateIf(
     CudfExchangeSource::ReceiverState expected,
-    CudfExchangeSource::ReceiverState desired) {
+    CudfExchangeSource::ReceiverState desired,
+    uint64_t bytes) {
+  if (desired == expected) {
+    return true;
+  }
+  auto endTime = std::chrono::high_resolution_clock::now();
   ReceiverState exp = expected;
   // since spurious failures can happen even if state_ == expected, we need
   // to do this in a loop.
@@ -438,6 +448,14 @@ bool CudfExchangeSource::setStateIf(
     // spurious failure.
     exp = expected; // reset for the next try
   }
+  receiverMetrics_.recordTransition(
+      getStateNameForEnum(expected),
+      getStateNameForEnum(desired),
+      lastStateChangeTime_,
+      endTime,
+      bytes);
+  lastStateChangeTime_ = endTime;
+
   return true;
 }
 

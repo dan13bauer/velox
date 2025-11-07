@@ -63,7 +63,11 @@ DEFINE_uint32(
     "Port number"); // "+3" accounts for the hack for Presto ! See
                     // cudf-exchange/CudfExchangeSource.cpp
 DEFINE_string(taskId, "task0", "task id");
-DEFINE_uint64(cudfChunkSizeMB, 1024, "cuDF Parquet chunk size to read in GB");
+DEFINE_uint64(cudfChunkSizeMB, 1024, "cuDF Parquet chunk size to read in MB");
+DEFINE_uint64(
+    maxOutputBufferSizeMB,
+    4096,
+    "Output buffer size for flow controll in MB");
 DEFINE_int32(cuda_device, -1, "Cuda device or -1 for not setting the device");
 DEFINE_bool(use_hive, false, "Use Hive Connector");
 
@@ -172,10 +176,9 @@ int main(int argc, char** argv) {
   }
 
   std::unordered_map<std::string, std::string> c = {};
-  LOG(INFO) << "reading " << FLAGS_cudfChunkSizeMB << "MB chunks at once";
+  LOG(INFO) << "reading " << FLAGS_cudfChunkSizeMB << " MB chunks at once";
   c[facebook::velox::cudf_velox::connector::parquet::ParquetConfig::
         kMaxChunkReadLimit] =
-      // std::to_string(512 *1024 * 1024);
       std::to_string(FLAGS_cudfChunkSizeMB * 1024 * 1024);
   std::shared_ptr<const facebook::velox::config::ConfigBase> properties =
       std::make_shared<const facebook::velox::config::ConfigBase>(std::move(c));
@@ -189,7 +192,7 @@ int main(int argc, char** argv) {
   facebook::velox::cudf_velox::registerCudf();
 
   int kNumDestinations = 1;
-  int kNumDrivers = 4;
+  int kNumDrivers = 1;
   // Define a query plan that reads data from parquet.
   core::PlanNodeId scanNodeId;
   core::PlanNodeId partitionNodeId;
@@ -213,9 +216,11 @@ int main(int argc, char** argv) {
       std::make_shared<folly::CPUThreadPoolExecutor>(
           std::thread::hardware_concurrency()));
 
+  LOG(INFO) << "setting output buffer to: " << FLAGS_maxOutputBufferSizeMB
+            << " MB";
   std::unordered_map<std::string, std::string> configSettings{
       {facebook::velox::core::QueryConfig::kMaxOutputBufferSize,
-       std::to_string(FOUR_GBYTES * 10)}};
+       std::to_string(FLAGS_maxOutputBufferSizeMB * 1024 * 1024)}};
   // std::unordered_map<std::string, std::string> configSettings {};
   auto queryCtx = core::QueryCtx::create(
       executor.get(), core::QueryConfig(std::move(configSettings)));

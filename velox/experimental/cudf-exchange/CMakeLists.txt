@@ -27,7 +27,8 @@ add_library(
   Communicator.cpp
   Acceptor.cpp
   EndpointRef.cpp
-  NetUtil.cpp)
+  NetUtil.cpp
+  StateTransitionMetrics.cpp)
 
 find_package(ucx REQUIRED)
 

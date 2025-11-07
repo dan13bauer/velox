@@ -122,7 +122,10 @@ std::shared_ptr<CudfExchangeServer> CudfExchangeServer::getSelfPtr() {
 }
 
 void CudfExchangeServer::sendData() {
-  exchangeStart_ = std::chrono::high_resolution_clock::now();
+  sendStart_ = std::chrono::high_resolution_clock::now();
+  if (exchangeStart_.time_since_epoch().count() == 0) {
+    exchangeStart_ = sendStart_;
+  }
 
   // Create the MetaDataRecord.
   std::shared_ptr<MetadataMsg> metadataMsg = std::make_shared<MetadataMsg>();
@@ -173,13 +176,14 @@ void CudfExchangeServer::sendData() {
     if (dataPtr_) {
       dataStart_ = std::chrono::high_resolution_clock::now();
       bytes_ = dataPtr_->gpu_data->size();
+      totalBytes_ += bytes_;
       VLOG(3) << "Sending rmm::buffer: " << std::hex << dataPtr_->gpu_data.get()
               << " pointing to device memory: " << std::hex
               << dataPtr_->gpu_data->data() << std::dec << " to task "
               << partitionKey_.toString() << ":" << this->sequenceNumber_
               << std::dec << " of size " << bytes_;
 
-      setState(ServerState::WaitingForSendComplete);
+      setState(ServerState::WaitingForSendComplete, bytes_);
       uint64_t dataTag =
           getDataTag(this->partitionKeyHash_, this->sequenceNumber_);
       dataRequest_ = endpointRef_->endpoint_->tagSend(
@@ -196,6 +200,18 @@ void CudfExchangeServer::sendData() {
       // Data pointer is null, so no more data will be coming.
       VLOG(3) << "Finished transferring partition for task "
               << partitionKey_.toString();
+      auto end = std::chrono::high_resolution_clock::now();
+      auto duration = end - exchangeStart_;
+      auto micros =
+          std::chrono::duration_cast<std::chrono::microseconds>(duration)
+              .count();
+      auto throughput = totalBytes_ / micros;
+
+      VLOG(3) << "total exchange duration: " << micros << " µs";
+      VLOG(3) << "total amount of bytes transferred: "
+              << (totalBytes_ / 1024 / 1024) << " MBytes";
+      VLOG(3) << "total throughput: " << throughput << " MByte/s";
+      VLOG(3) << std::endl << stateMetrics_.toString();
       queueMgr_->deleteResults(partitionKey_.taskId, partitionKey_.destination);
       setState(ServerState::Done);
       communicator_->addToWorkQueue(getSelfPtr());
@@ -211,12 +227,14 @@ void CudfExchangeServer::sendComplete(
     VELOX_CHECK(dataPtr_ != nullptr, "dataPtr_ is null");
 
     auto end = std::chrono::high_resolution_clock::now();
-    auto duration = end - exchangeStart_;
+    auto duration = end - sendStart_;
     auto micros =
         std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
     auto throughput = bytes_ / micros;
 
-    VLOG(3) << "exchange duration: " << micros << " µs";
+    VLOG(3) << "send duration: " << micros << " µs";
+    VLOG(3) << "send bytes transferred: " << (bytes_ / 1024 / 1024)
+            << " MBytes";
     VLOG(3) << "metadata & data throughput: " << throughput << " MByte/s";
 
     duration = end - dataStart_;
@@ -230,11 +248,11 @@ void CudfExchangeServer::sendComplete(
     this->sequenceNumber_++;
     dataPtr_.reset(); // release memory.
     VLOG(3) << "Releasing dataPtr_ in sendComplete.";
-    setState(ServerState::ReadyToTransfer);
+    setState(ServerState::ReadyToTransfer, bytes_);
   } else {
     VLOG(3) << "Error in sendComplete, send complete "
             << ucs_status_string(status);
-    setState(ServerState::Done);
+    setState(ServerState::Done, bytes_);
   }
   communicator_->addToWorkQueue(getSelfPtr());
 }

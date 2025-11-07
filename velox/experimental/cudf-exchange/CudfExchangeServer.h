@@ -27,6 +27,7 @@
 #include "velox/experimental/cudf-exchange/CommElement.h"
 #include "velox/experimental/cudf-exchange/EndpointRef.h"
 #include "velox/experimental/cudf-exchange/PartitionKey.h"
+#include "velox/experimental/cudf-exchange/StateTransitionMetrics.h"
 
 namespace facebook::velox::cudf_exchange {
 
@@ -47,6 +48,11 @@ class CudfExchangeServer
 
   const PartitionKey& getPartitionKey() const {
     return partitionKey_;
+  }
+
+  /// @return Reference to the state transition metrics.
+  const StateTransitionMetrics& getStateTransitionMetrics() const {
+    return stateMetrics_;
   }
 
  private:
@@ -74,9 +80,21 @@ class CudfExchangeServer
   void sendComplete(ucs_status_t status, std::shared_ptr<void> arg);
 
   /// @brief Sets the new state of this exchange server using
-  /// sequential consistency.
+  /// sequential consistency and records the transition metrics.
   /// @param newState the new state of the CudfExchangeServer.
-  void setState(ServerState newState) {
+  /// @param bytes Optional: number of bytes transferred during this transition.
+  void setState(ServerState newState, uint64_t bytes = 0) {
+    ServerState oldState = state_.load(std::memory_order_seq_cst);
+    if (oldState != newState) {
+      auto endTime = std::chrono::high_resolution_clock::now();
+      stateMetrics_.recordTransition(
+          getStateNameForEnum(oldState),
+          getStateNameForEnum(newState),
+          lastStateChangeTime_,
+          endTime,
+          bytes);
+      lastStateChangeTime_ = endTime;
+    }
     state_.store(newState, std::memory_order_seq_cst);
   }
 
@@ -94,6 +112,18 @@ class CudfExchangeServer
         "WaitingForSendComplete",
         "Done"};
     return stateMap[static_cast<uint32_t>(state_.load())];
+  }
+
+  /// @brief Converts ServerState enum to string representation.
+  static std::string getStateNameForEnum(ServerState state) {
+    const std::string stateMap[] = {
+        "Created",
+        "ReadyToTransfer",
+        "WaitingForDataFromQueue",
+        "DataReady",
+        "WaitingForSendComplete",
+        "Done"};
+    return stateMap[static_cast<uint32_t>(state)];
   }
 
   const PartitionKey partitionKey_;
@@ -115,10 +145,15 @@ class CudfExchangeServer
   std::shared_ptr<ucxx::Request> dataRequest_{nullptr};
 
   std::chrono::time_point<std::chrono::high_resolution_clock> exchangeStart_;
+  std::chrono::time_point<std::chrono::high_resolution_clock> sendStart_;
   std::chrono::time_point<std::chrono::high_resolution_clock> dataStart_;
+  std::size_t totalBytes_{0};
   std::size_t bytes_;
 
   std::shared_ptr<CudfOutputQueueManager> queueMgr_;
+  StateTransitionMetrics stateMetrics_;
+  std::chrono::time_point<std::chrono::high_resolution_clock>
+      lastStateChangeTime_{std::chrono::high_resolution_clock::now()};
 };
 
 } // namespace facebook::velox::cudf_exchange
