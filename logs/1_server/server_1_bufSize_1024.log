@@ -1,0 +1,424 @@
+I20251107 16:33:10.361766 4011287 HiveConnector.cpp:53] Hive connector test-hive created with maximum of 20000 cached file handles with expiration of 0ms.
+I20251107 16:33:10.391098 4011287 1brc_server.cpp:176] reading 1024 MB chunks at once
+I20251107 16:33:10.391119 4011287 ParquetConnector.cpp:31] cudf::Parquet connector test-parquet created.
+I20251107 16:33:12.341032 4011287 1brc_server.cpp:216] setting output buffer to: 32768 MB
+I20251107 16:33:12.341207 4011287 1brc_server.cpp:246] Reading parquet file: file:/gpfs/zc2/data/tpch/tpch-sf1-parquet/one_brc_parquet/measurements.parquet
+I20251107 16:33:12.341341 4011287 1brc_server.cpp:277] Starting Reader Task
+I20251107 16:33:12.341383 4011287 Task.cpp:1090] initializing OutputBufferManager with 1 partitions and 1 drivers
+I20251107 16:33:12.341511 4011287 ToCudf.cpp:72] + CompileState::compile
+I20251107 16:33:12.341589 4011287 ToCudf.cpp:427] - CompileState::compile
+I20251107 16:33:12.345875 4011335 ParquetDataSource.cpp:255] Adding split Parquet: /gpfs/zc2/data/tpch/tpch-sf1-parquet/one_brc_parquet/measurements.parquet
+I20251107 16:33:13.272766 4011334 Communicator.cpp:120] Communicator running with error handling in blocking progress mode
+I20251107 16:33:17.115619 4011335 CudfPartitionedOutput.cpp:132] cudf::pack time: 3416 µs
+I20251107 16:33:17.115679 4011335 CudfPartitionedOutput.cpp:134] throughput: 314247 MByte/s
+I20251107 16:33:17.115693 4011335 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 3529 µs
+I20251107 16:33:17.278858 4011335 CudfPartitionedOutput.cpp:132] cudf::pack time: 1558 µs
+I20251107 16:33:17.278885 4011335 CudfPartitionedOutput.cpp:134] throughput: 689079 MByte/s
+I20251107 16:33:17.278891 4011335 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 1599 µs
+I20251107 16:33:17.440701 4011335 CudfPartitionedOutput.cpp:132] cudf::pack time: 1507 µs
+I20251107 16:33:17.440724 4011335 CudfPartitionedOutput.cpp:134] throughput: 712342 MByte/s
+I20251107 16:33:17.440730 4011335 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 1543 µs
+I20251107 16:33:17.604465 4011335 CudfPartitionedOutput.cpp:132] cudf::pack time: 1536 µs
+I20251107 16:33:17.604488 4011335 CudfPartitionedOutput.cpp:134] throughput: 698815 MByte/s
+I20251107 16:33:17.604493 4011335 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 1570 µs
+I20251107 16:33:17.770943 4011335 CudfPartitionedOutput.cpp:132] cudf::pack time: 1524 µs
+I20251107 16:33:17.770961 4011335 CudfPartitionedOutput.cpp:134] throughput: 704371 MByte/s
+I20251107 16:33:17.770967 4011335 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 1552 µs
+I20251107 16:33:17.933878 4011335 CudfPartitionedOutput.cpp:132] cudf::pack time: 1518 µs
+I20251107 16:33:17.933895 4011335 CudfPartitionedOutput.cpp:134] throughput: 707055 MByte/s
+I20251107 16:33:17.933900 4011335 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 1545 µs
+I20251107 16:33:18.097069 4011335 CudfPartitionedOutput.cpp:132] cudf::pack time: 1526 µs
+I20251107 16:33:18.097082 4011335 CudfPartitionedOutput.cpp:134] throughput: 703585 MByte/s
+I20251107 16:33:18.097086 4011335 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 1548 µs
+I20251107 16:33:18.263299 4011335 CudfPartitionedOutput.cpp:132] cudf::pack time: 1528 µs
+I20251107 16:33:18.263312 4011335 CudfPartitionedOutput.cpp:134] throughput: 702582 MByte/s
+I20251107 16:33:18.263317 4011335 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 1550 µs
+I20251107 16:33:18.430189 4011335 CudfPartitionedOutput.cpp:132] cudf::pack time: 1583 µs
+I20251107 16:33:18.430210 4011335 CudfPartitionedOutput.cpp:134] throughput: 677989 MByte/s
+I20251107 16:33:18.430217 4011335 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 1615 µs
+I20251107 16:33:18.594451 4011335 CudfPartitionedOutput.cpp:132] cudf::pack time: 1525 µs
+I20251107 16:33:18.594466 4011335 CudfPartitionedOutput.cpp:134] throughput: 704021 MByte/s
+I20251107 16:33:18.594471 4011335 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 1549 µs
+I20251107 16:33:18.761163 4011335 CudfPartitionedOutput.cpp:132] cudf::pack time: 1523 µs
+I20251107 16:33:18.761178 4011335 CudfPartitionedOutput.cpp:134] throughput: 704755 MByte/s
+I20251107 16:33:18.761183 4011335 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 1546 µs
+I20251107 16:33:18.930740 4011335 CudfPartitionedOutput.cpp:132] cudf::pack time: 1530 µs
+I20251107 16:33:18.930755 4011335 CudfPartitionedOutput.cpp:134] throughput: 701464 MByte/s
+I20251107 16:33:18.930760 4011335 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 1554 µs
+I20251107 16:33:19.105522 4011335 CudfPartitionedOutput.cpp:132] cudf::pack time: 1528 µs
+I20251107 16:33:19.105536 4011335 CudfPartitionedOutput.cpp:134] throughput: 702510 MByte/s
+I20251107 16:33:19.105541 4011335 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 1549 µs
+I20251107 16:33:19.273010 4011335 CudfPartitionedOutput.cpp:132] cudf::pack time: 1547 µs
+I20251107 16:33:19.273025 4011335 CudfPartitionedOutput.cpp:134] throughput: 693805 MByte/s
+I20251107 16:33:19.273029 4011335 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 1569 µs
+I20251107 16:33:19.444475 4011335 CudfPartitionedOutput.cpp:132] cudf::pack time: 1522 µs
+I20251107 16:33:19.444490 4011335 CudfPartitionedOutput.cpp:134] throughput: 705405 MByte/s
+I20251107 16:33:19.444495 4011335 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 1546 µs
+I20251107 16:33:19.614012 4011335 CudfPartitionedOutput.cpp:132] cudf::pack time: 1514 µs
+I20251107 16:33:19.614025 4011335 CudfPartitionedOutput.cpp:134] throughput: 709009 MByte/s
+I20251107 16:33:19.614030 4011335 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 1535 µs
+I20251107 16:33:19.785830 4011335 CudfPartitionedOutput.cpp:132] cudf::pack time: 1567 µs
+I20251107 16:33:19.785848 4011335 CudfPartitionedOutput.cpp:134] throughput: 685044 MByte/s
+I20251107 16:33:19.785853 4011335 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 1599 µs
+I20251107 16:33:19.951974 4011335 CudfPartitionedOutput.cpp:132] cudf::pack time: 1510 µs
+I20251107 16:33:19.951987 4011335 CudfPartitionedOutput.cpp:134] throughput: 710782 MByte/s
+I20251107 16:33:19.951992 4011335 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 1532 µs
+I20251107 16:33:20.113875 4011335 CudfPartitionedOutput.cpp:132] cudf::pack time: 1294 µs
+I20251107 16:33:20.113888 4011335 CudfPartitionedOutput.cpp:134] throughput: 683413 MByte/s
+I20251107 16:33:20.113893 4011335 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 1314 µs
+I20251107 16:33:20.115279 4011335 Task.cpp:1377] All drivers (1) finished for task task0 after running for 7.77s
+I20251107 16:33:31.543431 4011334 Communicator.cpp:246] Communicator received a connection request from client at address 9.4.249.65:44934
+I20251107 16:33:31.728863 4011334 Acceptor.cpp:55] Registered new exchange server task: [ExSrv task0/0 - 0]
+I20251107 16:33:31.730300 4011334 CudfExchangeServer.cpp:68] Found data for client: task0/0
+I20251107 16:33:31.730418 4011334 CudfExchangeServer.cpp:162] metadata successfully sent to task0/0 with tag: cda0d3c302000000
+I20251107 16:33:31.730430 4011334 CudfExchangeServer.cpp:180] Sending rmm::buffer: 0x7fd70f58ad70 pointing to device memory: 0x7fdb3aef2c00 to task task0/0:0 of size 1073468224
+I20251107 16:33:32.304827 4011334 CudfExchangeServer.cpp:233] send duration: 574504 µs
+I20251107 16:33:32.304843 4011334 CudfExchangeServer.cpp:234] send bytes transferred: 1023 MBytes
+I20251107 16:33:32.304849 4011334 CudfExchangeServer.cpp:235] metadata & data throughput: 1868 MByte/s
+I20251107 16:33:32.304852 4011334 CudfExchangeServer.cpp:242] data send duration (micros): 574391 µs
+I20251107 16:33:32.304855 4011334 CudfExchangeServer.cpp:243] data only throughput: 1868 MByte/s
+I20251107 16:33:32.304906 4011334 CudfExchangeServer.cpp:247] Releasing dataPtr_ in sendComplete.
+I20251107 16:33:32.305233 4011334 CudfExchangeServer.cpp:68] Found data for client: task0/0
+I20251107 16:33:32.305295 4011334 CudfExchangeServer.cpp:162] metadata successfully sent to task0/0 with tag: cda0d3c302000001
+I20251107 16:33:32.305303 4011334 CudfExchangeServer.cpp:180] Sending rmm::buffer: 0x7fd70f58b750 pointing to device memory: 0x7fdb7aeb0000 to task task0/0:1 of size 1073586304
+I20251107 16:33:32.331981 4011334 CudfExchangeServer.cpp:233] send duration: 26733 µs
+I20251107 16:33:32.331991 4011334 CudfExchangeServer.cpp:234] send bytes transferred: 1023 MBytes
+I20251107 16:33:32.331995 4011334 CudfExchangeServer.cpp:235] metadata & data throughput: 40159 MByte/s
+I20251107 16:33:32.331998 4011334 CudfExchangeServer.cpp:242] data send duration (micros): 26677 µs
+I20251107 16:33:32.332001 4011334 CudfExchangeServer.cpp:243] data only throughput: 40243 MByte/s
+I20251107 16:33:32.332008 4011334 CudfExchangeServer.cpp:247] Releasing dataPtr_ in sendComplete.
+I20251107 16:33:32.332017 4011334 CudfExchangeServer.cpp:68] Found data for client: task0/0
+I20251107 16:33:32.332049 4011334 CudfExchangeServer.cpp:162] metadata successfully sent to task0/0 with tag: cda0d3c302000002
+I20251107 16:33:32.332057 4011334 CudfExchangeServer.cpp:180] Sending rmm::buffer: 0x7fd70f58be70 pointing to device memory: 0x7fdbbae8a100 to task task0/0:2 of size 1073500864
+I20251107 16:33:32.339162 4011334 CudfExchangeServer.cpp:233] send duration: 7136 µs
+I20251107 16:33:32.339170 4011334 CudfExchangeServer.cpp:234] send bytes transferred: 1023 MBytes
+I20251107 16:33:32.339176 4011334 CudfExchangeServer.cpp:235] metadata & data throughput: 150434 MByte/s
+I20251107 16:33:32.339179 4011334 CudfExchangeServer.cpp:242] data send duration (micros): 7104 µs
+I20251107 16:33:32.339183 4011334 CudfExchangeServer.cpp:243] data only throughput: 151112 MByte/s
+I20251107 16:33:32.339192 4011334 CudfExchangeServer.cpp:247] Releasing dataPtr_ in sendComplete.
+I20251107 16:33:32.339200 4011334 CudfExchangeServer.cpp:68] Found data for client: task0/0
+I20251107 16:33:32.339232 4011334 CudfExchangeServer.cpp:162] metadata successfully sent to task0/0 with tag: cda0d3c302000003
+I20251107 16:33:32.339241 4011334 CudfExchangeServer.cpp:180] Sending rmm::buffer: 0x7fd70f58c5b0 pointing to device memory: 0x7fdbfae4f400 to task task0/0:3 of size 1073380544
+I20251107 16:33:32.345453 4011334 CudfExchangeServer.cpp:233] send duration: 6245 µs
+I20251107 16:33:32.345461 4011334 CudfExchangeServer.cpp:234] send bytes transferred: 1023 MBytes
+I20251107 16:33:32.345464 4011334 CudfExchangeServer.cpp:235] metadata & data throughput: 171878 MByte/s
+I20251107 16:33:32.345468 4011334 CudfExchangeServer.cpp:242] data send duration (micros): 6212 µs
+I20251107 16:33:32.345475 4011334 CudfExchangeServer.cpp:243] data only throughput: 172791 MByte/s
+I20251107 16:33:32.345480 4011334 CudfExchangeServer.cpp:247] Releasing dataPtr_ in sendComplete.
+I20251107 16:33:32.345489 4011334 CudfExchangeServer.cpp:68] Found data for client: task0/0
+I20251107 16:33:32.345522 4011334 CudfExchangeServer.cpp:162] metadata successfully sent to task0/0 with tag: cda0d3c302000004
+I20251107 16:33:32.345528 4011334 CudfExchangeServer.cpp:180] Sending rmm::buffer: 0x7fd70f58ccf0 pointing to device memory: 0x7fdc3adf7100 to task task0/0:4 of size 1073461696
+I20251107 16:33:32.353674 4011334 CudfExchangeServer.cpp:233] send duration: 8174 µs
+I20251107 16:33:32.353683 4011334 CudfExchangeServer.cpp:234] send bytes transferred: 1023 MBytes
+I20251107 16:33:32.353689 4011334 CudfExchangeServer.cpp:235] metadata & data throughput: 131326 MByte/s
+I20251107 16:33:32.353693 4011334 CudfExchangeServer.cpp:242] data send duration (micros): 8145 µs
+I20251107 16:33:32.353698 4011334 CudfExchangeServer.cpp:243] data only throughput: 131793 MByte/s
+I20251107 16:33:32.353706 4011334 CudfExchangeServer.cpp:247] Releasing dataPtr_ in sendComplete.
+I20251107 16:33:32.353713 4011334 CudfExchangeServer.cpp:68] Found data for client: task0/0
+I20251107 16:33:32.353740 4011334 CudfExchangeServer.cpp:162] metadata successfully sent to task0/0 with tag: cda0d3c302000005
+I20251107 16:33:32.353749 4011334 CudfExchangeServer.cpp:180] Sending rmm::buffer: 0x7fd70f58d430 pointing to device memory: 0x7fdc7adb2b00 to task task0/0:5 of size 1073310848
+I20251107 16:33:32.359436 4011334 CudfExchangeServer.cpp:233] send duration: 5713 µs
+I20251107 16:33:32.359444 4011334 CudfExchangeServer.cpp:234] send bytes transferred: 1023 MBytes
+I20251107 16:33:32.359452 4011334 CudfExchangeServer.cpp:235] metadata & data throughput: 187871 MByte/s
+I20251107 16:33:32.359455 4011334 CudfExchangeServer.cpp:242] data send duration (micros): 5686 µs
+I20251107 16:33:32.359458 4011334 CudfExchangeServer.cpp:243] data only throughput: 188763 MByte/s
+I20251107 16:33:32.359464 4011334 CudfExchangeServer.cpp:247] Releasing dataPtr_ in sendComplete.
+I20251107 16:33:32.359473 4011334 CudfExchangeServer.cpp:68] Found data for client: task0/0
+I20251107 16:33:32.359500 4011334 CudfExchangeServer.cpp:162] metadata successfully sent to task0/0 with tag: cda0d3c302000006
+I20251107 16:33:32.359506 4011334 CudfExchangeServer.cpp:180] Sending rmm::buffer: 0x7fd70f58db70 pointing to device memory: 0x7fdcbad49800 to task task0/0:6 of size 1073671232
+I20251107 16:33:32.473795 4011334 CudfExchangeServer.cpp:233] send duration: 114311 µs
+I20251107 16:33:32.473806 4011334 CudfExchangeServer.cpp:234] send bytes transferred: 1023 MBytes
+I20251107 16:33:32.473812 4011334 CudfExchangeServer.cpp:235] metadata & data throughput: 9392 MByte/s
+I20251107 16:33:32.473819 4011334 CudfExchangeServer.cpp:242] data send duration (micros): 114287 µs
+I20251107 16:33:32.473822 4011334 CudfExchangeServer.cpp:243] data only throughput: 9394 MByte/s
+I20251107 16:33:32.473829 4011334 CudfExchangeServer.cpp:247] Releasing dataPtr_ in sendComplete.
+I20251107 16:33:32.473838 4011334 CudfExchangeServer.cpp:68] Found data for client: task0/0
+I20251107 16:33:32.473874 4011334 CudfExchangeServer.cpp:162] metadata successfully sent to task0/0 with tag: cda0d3c302000007
+I20251107 16:33:32.473881 4011334 CudfExchangeServer.cpp:180] Sending rmm::buffer: 0x7fd70f58e040 pointing to device memory: 0x7fdcfad38500 to task task0/0:7 of size 1073546560
+I20251107 16:33:32.484694 4011334 CudfExchangeServer.cpp:233] send duration: 10842 µs
+I20251107 16:33:32.484704 4011334 CudfExchangeServer.cpp:234] send bytes transferred: 1023 MBytes
+I20251107 16:33:32.484710 4011334 CudfExchangeServer.cpp:235] metadata & data throughput: 99017 MByte/s
+I20251107 16:33:32.484714 4011334 CudfExchangeServer.cpp:242] data send duration (micros): 10812 µs
+I20251107 16:33:32.484720 4011334 CudfExchangeServer.cpp:243] data only throughput: 99292 MByte/s
+I20251107 16:33:32.484727 4011334 CudfExchangeServer.cpp:247] Releasing dataPtr_ in sendComplete.
+I20251107 16:33:32.484736 4011334 CudfExchangeServer.cpp:68] Found data for client: task0/0
+I20251107 16:33:32.484767 4011334 CudfExchangeServer.cpp:162] metadata successfully sent to task0/0 with tag: cda0d3c302000008
+I20251107 16:33:32.484773 4011334 CudfExchangeServer.cpp:180] Sending rmm::buffer: 0x7fd70f58e1f0 pointing to device memory: 0x7fdd3ad08b00 to task task0/0:8 of size 1073257088
+I20251107 16:33:32.610847 4011334 CudfExchangeServer.cpp:233] send duration: 126101 µs
+I20251107 16:33:32.610859 4011334 CudfExchangeServer.cpp:234] send bytes transferred: 1023 MBytes
+I20251107 16:33:32.610862 4011334 CudfExchangeServer.cpp:235] metadata & data throughput: 8511 MByte/s
+I20251107 16:33:32.610867 4011334 CudfExchangeServer.cpp:242] data send duration (micros): 126072 µs
+I20251107 16:33:32.610874 4011334 CudfExchangeServer.cpp:243] data only throughput: 8513 MByte/s
+I20251107 16:33:32.610884 4011334 CudfExchangeServer.cpp:247] Releasing dataPtr_ in sendComplete.
+I20251107 16:33:32.610891 4011334 CudfExchangeServer.cpp:68] Found data for client: task0/0
+I20251107 16:33:32.610929 4011334 CudfExchangeServer.cpp:162] metadata successfully sent to task0/0 with tag: cda0d3c302000009
+I20251107 16:33:32.610934 4011334 CudfExchangeServer.cpp:180] Sending rmm::buffer: 0x7fd70f58e8d0 pointing to device memory: 0x7fdd7ac92600 to task task0/0:9 of size 1073633216
+I20251107 16:33:32.618194 4011334 CudfExchangeServer.cpp:233] send duration: 7288 µs
+I20251107 16:33:32.618206 4011334 CudfExchangeServer.cpp:234] send bytes transferred: 1023 MBytes
+I20251107 16:33:32.618211 4011334 CudfExchangeServer.cpp:235] metadata & data throughput: 147315 MByte/s
+I20251107 16:33:32.618214 4011334 CudfExchangeServer.cpp:242] data send duration (micros): 7259 µs
+I20251107 16:33:32.618221 4011334 CudfExchangeServer.cpp:243] data only throughput: 147903 MByte/s
+I20251107 16:33:32.618228 4011334 CudfExchangeServer.cpp:247] Releasing dataPtr_ in sendComplete.
+I20251107 16:33:32.618235 4011334 CudfExchangeServer.cpp:68] Found data for client: task0/0
+I20251107 16:33:32.618266 4011334 CudfExchangeServer.cpp:162] metadata successfully sent to task0/0 with tag: cda0d3c30200000a
+I20251107 16:33:32.618271 4011334 CudfExchangeServer.cpp:180] Sending rmm::buffer: 0x7fd70f58ea80 pointing to device memory: 0x7fddbac77e00 to task task0/0:10 of size 1073343232
+I20251107 16:33:32.623690 4011334 CudfExchangeServer.cpp:233] send duration: 5446 µs
+I20251107 16:33:32.623699 4011334 CudfExchangeServer.cpp:234] send bytes transferred: 1023 MBytes
+I20251107 16:33:32.623705 4011334 CudfExchangeServer.cpp:235] metadata & data throughput: 197088 MByte/s
+I20251107 16:33:32.623709 4011334 CudfExchangeServer.cpp:242] data send duration (micros): 5418 µs
+I20251107 16:33:32.623715 4011334 CudfExchangeServer.cpp:243] data only throughput: 198106 MByte/s
+I20251107 16:33:32.623720 4011334 CudfExchangeServer.cpp:247] Releasing dataPtr_ in sendComplete.
+I20251107 16:33:32.623728 4011334 CudfExchangeServer.cpp:68] Found data for client: task0/0
+I20251107 16:33:32.623754 4011334 CudfExchangeServer.cpp:162] metadata successfully sent to task0/0 with tag: cda0d3c30200000b
+I20251107 16:33:32.623761 4011334 CudfExchangeServer.cpp:180] Sending rmm::buffer: 0x7fd70f58f160 pointing to device memory: 0x7fddfac16900 to task task0/0:11 of size 1073240000
+I20251107 16:33:32.628923 4011334 CudfExchangeServer.cpp:233] send duration: 5188 µs
+I20251107 16:33:32.628931 4011334 CudfExchangeServer.cpp:234] send bytes transferred: 1023 MBytes
+I20251107 16:33:32.628937 4011334 CudfExchangeServer.cpp:235] metadata & data throughput: 206869 MByte/s
+I20251107 16:33:32.628940 4011334 CudfExchangeServer.cpp:242] data send duration (micros): 5161 µs
+I20251107 16:33:32.628947 4011334 CudfExchangeServer.cpp:243] data only throughput: 207951 MByte/s
+I20251107 16:33:32.628952 4011334 CudfExchangeServer.cpp:247] Releasing dataPtr_ in sendComplete.
+I20251107 16:33:32.628958 4011334 CudfExchangeServer.cpp:68] Found data for client: task0/0
+I20251107 16:33:32.628984 4011334 CudfExchangeServer.cpp:162] metadata successfully sent to task0/0 with tag: cda0d3c30200000c
+I20251107 16:33:32.628993 4011334 CudfExchangeServer.cpp:180] Sending rmm::buffer: 0x7fd70f58f310 pointing to device memory: 0x7fde3ab9c100 to task task0/0:12 of size 1073435840
+I20251107 16:33:32.719473 4011334 CudfExchangeServer.cpp:233] send duration: 90506 µs
+I20251107 16:33:32.719483 4011334 CudfExchangeServer.cpp:234] send bytes transferred: 1023 MBytes
+I20251107 16:33:32.719488 4011334 CudfExchangeServer.cpp:235] metadata & data throughput: 11860 MByte/s
+I20251107 16:33:32.719496 4011334 CudfExchangeServer.cpp:242] data send duration (micros): 90479 µs
+I20251107 16:33:32.719498 4011334 CudfExchangeServer.cpp:243] data only throughput: 11863 MByte/s
+I20251107 16:33:32.719506 4011334 CudfExchangeServer.cpp:247] Releasing dataPtr_ in sendComplete.
+I20251107 16:33:32.719516 4011334 CudfExchangeServer.cpp:68] Found data for client: task0/0
+I20251107 16:33:32.719549 4011334 CudfExchangeServer.cpp:162] metadata successfully sent to task0/0 with tag: cda0d3c30200000d
+I20251107 16:33:32.719554 4011334 CudfExchangeServer.cpp:180] Sending rmm::buffer: 0x7fd70f58f9f0 pointing to device memory: 0x7fde7ab51600 to task task0/0:13 of size 1073316992
+I20251107 16:33:32.819717 4011334 CudfExchangeServer.cpp:233] send duration: 100189 µs
+I20251107 16:33:32.819726 4011334 CudfExchangeServer.cpp:234] send bytes transferred: 1023 MBytes
+I20251107 16:33:32.819730 4011334 CudfExchangeServer.cpp:235] metadata & data throughput: 10712 MByte/s
+I20251107 16:33:32.819734 4011334 CudfExchangeServer.cpp:242] data send duration (micros): 100162 µs
+I20251107 16:33:32.819741 4011334 CudfExchangeServer.cpp:243] data only throughput: 10715 MByte/s
+I20251107 16:33:32.819746 4011334 CudfExchangeServer.cpp:247] Releasing dataPtr_ in sendComplete.
+I20251107 16:33:32.819754 4011334 CudfExchangeServer.cpp:68] Found data for client: task0/0
+I20251107 16:33:32.819813 4011334 CudfExchangeServer.cpp:162] metadata successfully sent to task0/0 with tag: cda0d3c30200000e
+I20251107 16:33:32.819819 4011334 CudfExchangeServer.cpp:180] Sending rmm::buffer: 0x7fd70f58fba0 pointing to device memory: 0x7fdebaae9b00 to task task0/0:14 of size 1073627136
+I20251107 16:33:32.914085 4011334 CudfExchangeServer.cpp:233] send duration: 94318 µs
+I20251107 16:33:32.914095 4011334 CudfExchangeServer.cpp:234] send bytes transferred: 1023 MBytes
+I20251107 16:33:32.914099 4011334 CudfExchangeServer.cpp:235] metadata & data throughput: 11383 MByte/s
+I20251107 16:33:32.914106 4011334 CudfExchangeServer.cpp:242] data send duration (micros): 94264 µs
+I20251107 16:33:32.914109 4011334 CudfExchangeServer.cpp:243] data only throughput: 11389 MByte/s
+I20251107 16:33:32.914116 4011334 CudfExchangeServer.cpp:247] Releasing dataPtr_ in sendComplete.
+I20251107 16:33:32.914124 4011334 CudfExchangeServer.cpp:68] Found data for client: task0/0
+I20251107 16:33:32.914157 4011334 CudfExchangeServer.cpp:162] metadata successfully sent to task0/0 with tag: cda0d3c30200000f
+I20251107 16:33:32.914163 4011334 CudfExchangeServer.cpp:180] Sending rmm::buffer: 0x7fd70f590280 pointing to device memory: 0x7fdefaacdb00 to task task0/0:15 of size 1073440640
+I20251107 16:33:33.032366 4011334 CudfExchangeServer.cpp:233] send duration: 118229 µs
+I20251107 16:33:33.032380 4011334 CudfExchangeServer.cpp:234] send bytes transferred: 1023 MBytes
+I20251107 16:33:33.032384 4011334 CudfExchangeServer.cpp:235] metadata & data throughput: 9079 MByte/s
+I20251107 16:33:33.032387 4011334 CudfExchangeServer.cpp:242] data send duration (micros): 118200 µs
+I20251107 16:33:33.032390 4011334 CudfExchangeServer.cpp:243] data only throughput: 9081 MByte/s
+I20251107 16:33:33.032400 4011334 CudfExchangeServer.cpp:247] Releasing dataPtr_ in sendComplete.
+I20251107 16:33:33.032411 4011334 CudfExchangeServer.cpp:68] Found data for client: task0/0
+I20251107 16:33:33.032441 4011334 CudfExchangeServer.cpp:162] metadata successfully sent to task0/0 with tag: cda0d3c302000010
+I20251107 16:33:33.032449 4011334 CudfExchangeServer.cpp:180] Sending rmm::buffer: 0x7fd70f590430 pointing to device memory: 0x7fdf3aa84300 to task task0/0:16 of size 1073464064
+I20251107 16:33:33.130012 4011334 CudfExchangeServer.cpp:233] send duration: 97590 µs
+I20251107 16:33:33.130020 4011334 CudfExchangeServer.cpp:234] send bytes transferred: 1023 MBytes
+I20251107 16:33:33.130023 4011334 CudfExchangeServer.cpp:235] metadata & data throughput: 10999 MByte/s
+I20251107 16:33:33.130029 4011334 CudfExchangeServer.cpp:242] data send duration (micros): 97560 µs
+I20251107 16:33:33.130034 4011334 CudfExchangeServer.cpp:243] data only throughput: 11003 MByte/s
+I20251107 16:33:33.130043 4011334 CudfExchangeServer.cpp:247] Releasing dataPtr_ in sendComplete.
+I20251107 16:33:33.130050 4011334 CudfExchangeServer.cpp:68] Found data for client: task0/0
+I20251107 16:33:33.130093 4011334 CudfExchangeServer.cpp:162] metadata successfully sent to task0/0 with tag: cda0d3c302000011
+I20251107 16:33:33.130100 4011334 CudfExchangeServer.cpp:180] Sending rmm::buffer: 0x7fd70f590b10 pointing to device memory: 0x7fdf7aa40600 to task task0/0:17 of size 1073280832
+I20251107 16:33:33.248580 4011334 CudfExchangeServer.cpp:233] send duration: 118518 µs
+I20251107 16:33:33.248594 4011334 CudfExchangeServer.cpp:234] send bytes transferred: 1023 MBytes
+I20251107 16:33:33.248598 4011334 CudfExchangeServer.cpp:235] metadata & data throughput: 9055 MByte/s
+I20251107 16:33:33.248631 4011334 CudfExchangeServer.cpp:242] data send duration (micros): 118478 µs
+I20251107 16:33:33.248637 4011334 CudfExchangeServer.cpp:243] data only throughput: 9058 MByte/s
+I20251107 16:33:33.248644 4011334 CudfExchangeServer.cpp:247] Releasing dataPtr_ in sendComplete.
+I20251107 16:33:33.248652 4011334 CudfExchangeServer.cpp:68] Found data for client: task0/0
+I20251107 16:33:33.248687 4011334 CudfExchangeServer.cpp:162] metadata successfully sent to task0/0 with tag: cda0d3c302000012
+I20251107 16:33:33.248693 4011334 CudfExchangeServer.cpp:180] Sending rmm::buffer: 0x7fd70f590cc0 pointing to device memory: 0x7fdfba9cfe00 to task task0/0:18 of size 884337088
+I20251107 16:33:33.349464 4011334 CudfExchangeServer.cpp:233] send duration: 100801 µs
+I20251107 16:33:33.349474 4011334 CudfExchangeServer.cpp:234] send bytes transferred: 843 MBytes
+I20251107 16:33:33.349481 4011334 CudfExchangeServer.cpp:235] metadata & data throughput: 8773 MByte/s
+I20251107 16:33:33.349484 4011334 CudfExchangeServer.cpp:242] data send duration (micros): 100769 µs
+I20251107 16:33:33.349488 4011334 CudfExchangeServer.cpp:243] data only throughput: 8775 MByte/s
+I20251107 16:33:33.349494 4011334 CudfExchangeServer.cpp:247] Releasing dataPtr_ in sendComplete.
+I20251107 16:33:33.349504 4011334 CudfExchangeServer.cpp:68] Found data for client: task0/0
+I20251107 16:33:33.349514 4011334 CudfExchangeServer.cpp:141] Final exchange for task0/0
+I20251107 16:33:33.349550 4011334 CudfExchangeServer.cpp:162] metadata successfully sent to task0/0 with tag: cda0d3c302000013
+I20251107 16:33:33.349556 4011334 CudfExchangeServer.cpp:201] Finished transferring partition for task task0/0
+I20251107 16:33:33.349560 4011334 CudfExchangeServer.cpp:209] total exchange duration: 1619243 µs
+I20251107 16:33:33.349563 4011334 CudfExchangeServer.cpp:210] total amount of bytes transferred: 19270 MBytes
+I20251107 16:33:33.349566 4011334 CudfExchangeServer.cpp:211] total throughput: 12478 MByte/s
+I20251107 16:33:33.349570 4011334 CudfExchangeServer.cpp:212]
+StateTransitionMetrics:
+  Total transitions recorded: 79
+
+  Statistics:
+  Created -> ReadyToTransfer:
+    Count: 1
+    Total duration: 1420 µs
+    Average duration: 1420 µs
+    Min duration: 1420 µs
+    Max duration: 1420 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 1420, 0
+  DataReady -> WaitingForSendComplete:
+    Count: 19
+    Total duration: 897 µs
+    Average duration: 47.2105 µs
+    Min duration: 34 µs
+    Max duration: 130 µs
+    Total bytes: 20206302400
+    Average bytes: 1.06349e+09
+    Min bytes: 884337088
+    Max bytes: 1073671232
+    Overall throughput: 2.1483e+07 MB/s
+    Average throughput: 2.1483e+07 MB/s
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 130, 1073468224, 7.87492e+06
+      1, 69, 1073586304, 1.48384e+07
+      2, 39, 1073500864, 2.62505e+07
+      3, 42, 1073380544, 2.43727e+07
+      4, 42, 1073461696, 2.43746e+07
+      5, 34, 1073310848, 3.01056e+07
+      6, 35, 1073671232, 2.92552e+07
+      7, 38, 1073546560, 2.69425e+07
+      8, 37, 1073257088, 2.76632e+07
+      9, 65, 1073633216, 1.57523e+07
+      10, 36, 1073343232, 2.84339e+07
+      11, 38, 1073240000, 2.69348e+07
+      12, 34, 1073435840, 3.01091e+07
+      13, 35, 1073316992, 2.92456e+07
+      14, 62, 1073627136, 1.65144e+07
+      15, 36, 1073440640, 2.84365e+07
+      16, 38, 1073464064, 2.69404e+07
+      17, 47, 1073280832, 2.17779e+07
+      18, 40, 884337088, 2.10842e+07
+  ReadyToTransfer -> WaitingForDataFromQueue:
+    Count: 20
+    Total duration: 53 µs
+    Average duration: 2.65 µs
+    Min duration: 2 µs
+    Max duration: 6 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 6, 0
+      1, 5, 0
+      2, 3, 0
+      3, 2, 0
+      4, 2, 0
+      5, 2, 0
+      6, 2, 0
+      7, 3, 0
+      8, 3, 0
+      9, 2, 0
+      10, 2, 0
+      11, 2, 0
+      12, 2, 0
+      13, 2, 0
+      14, 2, 0
+      15, 2, 0
+      16, 3, 0
+      17, 3, 0
+      18, 3, 0
+      19, 2, 0
+  WaitingForDataFromQueue -> DataReady:
+    Count: 20
+    Total duration: 154 µs
+    Average duration: 7.7 µs
+    Min duration: 4 µs
+    Max duration: 29 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 29, 0
+      1, 11, 0
+      2, 5, 0
+      3, 5, 0
+      4, 8, 0
+      5, 5, 0
+      6, 5, 0
+      7, 8, 0
+      8, 5, 0
+      9, 11, 0
+      10, 5, 0
+      11, 5, 0
+      12, 4, 0
+      13, 9, 0
+      14, 8, 0
+      15, 8, 0
+      16, 5, 0
+      17, 8, 0
+      18, 5, 0
+      19, 5, 0
+  WaitingForSendComplete -> ReadyToTransfer:
+    Count: 19
+    Total duration: 1618093 µs
+    Average duration: 85162.8 µs
+    Min duration: 5185 µs
+    Max duration: 574782 µs
+    Total bytes: 20206302400
+    Average bytes: 1.06349e+09
+    Min bytes: 884337088
+    Max bytes: 1073671232
+    Overall throughput: 11909.2 MB/s
+    Average throughput: 11909.2 MB/s
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 574782, 1073468224, 1781.09
+      1, 26701, 1073586304, 38345.1
+      2, 7134, 1073500864, 143506
+      3, 6237, 1073380544, 164126
+      4, 8172, 1073461696, 125273
+      5, 5718, 1073310848, 179012
+      6, 114320, 1073671232, 8956.72
+      7, 10846, 1073546560, 94395.5
+      8, 126110, 1073257088, 8116.23
+      9, 7264, 1073633216, 140955
+      10, 5448, 1073343232, 187889
+      11, 5185, 1073240000, 197400
+      12, 90514, 1073435840, 11309.9
+      13, 100191, 1073316992, 10216.4
+      14, 94296, 1073627136, 10858.3
+      15, 118238, 1073440640, 8658.07
+      16, 97591, 1073464064, 10490.1
+      17, 118543, 1073280832, 8634.51
+      18, 100803, 884337088, 8366.51
+I20251107 16:33:33.349660 4011334 Task.cpp:2428] Terminating task task0 with state Finished after running for 21.01s
+I20251107 16:33:33.349751 4011334 CudfExchangeServer.cpp:107] Close CudfExchangeServer to remote task0/0
+I20251107 16:33:33.349768 4011287 1brc_server.cpp:280] reader task done.
+I20251107 16:33:33.349798 4011287 1brc_server.cpp:282] -- PartitionedOutput[2][SINGLE CompactRow] -> station_name:VARCHAR, measurement:DOUBLE
+   Output: 1000000000 rows (18.82GB, 19 batches), Cpu time: 31.32ms, Wall time: 31.54ms, Blocked wall time: 0ns, Peak memory: 0B, Memory allocations: 0, Threads: 1, CPU breakdown: B/I/O/F (31.70us/31.27ms/10.23us/8.66us)
+      queuedWallNanos              sum: 4.14ms, count: 1, min: 4.14ms, max: 4.14ms, avg: 4.14ms
+      runningAddInputWallNanos     sum: 31.45ms, count: 1, min: 31.45ms, max: 31.45ms, avg: 31.45ms
+      runningFinishWallNanos       sum: 14.35us, count: 1, min: 14.35us, max: 14.35us, avg: 14.35us
+      runningGetOutputWallNanos    sum: 15.97us, count: 1, min: 15.97us, max: 15.97us, avg: 15.97us
+  -- Project[1][expressions: (station_name:VARCHAR, ROW["station_name"]), (measurement:DOUBLE, ROW["measurement"])] -> station_name:VARCHAR, measurement:DOUBLE
+     Output: 1000000000 rows (18.82GB, 19 batches), Cpu time: 277.51us, Wall time: 319.58us, Blocked wall time: 0ns, Peak memory: 0B, Memory allocations: 0, Threads: 1, CPU breakdown: B/I/O/F (28.78us/14.81us/226.69us/7.23us)
+        runningAddInputWallNanos     sum: 20.14us, count: 1, min: 20.14us, max: 20.14us, avg: 20.14us
+        runningFinishWallNanos       sum: 12.69us, count: 1, min: 12.69us, max: 12.69us, avg: 12.69us
+        runningGetOutputWallNanos    sum: 237.83us, count: 1, min: 237.83us, max: 237.83us, avg: 237.83us
+    -- TableScan[0][table: hive_table] -> station_name:VARCHAR, measurement:DOUBLE
+       Input: 1000000000 rows (18.82GB, 19 batches), Output: 1000000000 rows (18.82GB, 19 batches), Cpu time: 5.51s, Wall time: 7.74s, Blocked wall time: 0ns, Peak memory: 0B, Memory allocations: 0, Threads: 1, Splits: 1, CPU breakdown: B/I/O/F (12.55us/0ns/5.51s/380ns)
+          connectorSplitSize             sum: 0, count: 1, min: 0, max: 0, avg: 0
+          dataSourceAddSplitWallNanos    sum: 1.68s, count: 1, min: 1.68s, max: 1.68s, avg: 1.68s
+          dataSourceReadWallNanos        sum: 6.05s, count: 20, min: 1.27ms, max: 3.08s, avg: 302.72ms
+          runningAddInputWallNanos       sum: 0ns, count: 1, min: 0ns, max: 0ns, avg: 0ns
+          runningFinishWallNanos         sum: 621ns, count: 1, min: 621ns, max: 621ns, avg: 621ns
+          runningGetOutputWallNanos      sum: 7.74s, count: 1, min: 7.74s, max: 7.74s, avg: 7.74s
+          totalRemainingFilterTime       sum: 0ns, count: 1, min: 0ns, max: 0ns, avg: 0ns
+          totalScanTime                  sum: 3.14s, count: 1, min: 3.14s, max: 3.14s, avg: 3.14s
+I20251107 16:33:33.350208 4011287 Communicator.cpp:155] In Communicator::stop  elements_.size(): 0 endpoints_.size(): 1 workQueue_._size(): 0
+I20251107 16:33:33.350209 4011334 Communicator.cpp:149] Communicator stopping.
+I20251107 16:33:34.513458 4011287 Communicator.cpp:85] Communicator destructed

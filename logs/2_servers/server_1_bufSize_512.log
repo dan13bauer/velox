@@ -1,0 +1,84 @@
+I20251107 17:40:04.079226 4080593 HiveConnector.cpp:53] Hive connector test-hive created with maximum of 20000 cached file handles with expiration of 0ms.
+I20251107 17:40:04.116211 4080593 1brc_server.cpp:176] reading 512 MB chunks at once
+I20251107 17:40:04.116262 4080593 ParquetConnector.cpp:31] cudf::Parquet connector test-parquet created.
+I20251107 17:40:06.032713 4080593 1brc_server.cpp:216] setting output buffer to: 32768 MB
+I20251107 17:40:06.032872 4080593 1brc_server.cpp:246] Reading parquet file: file:/gpfs/zc2/data/tpch/tpch-sf1-parquet/one_brc_parquet/measurements.parquet
+I20251107 17:40:06.033005 4080593 1brc_server.cpp:277] Starting Reader Task
+I20251107 17:40:06.033038 4080593 Task.cpp:1090] initializing OutputBufferManager with 1 partitions and 1 drivers
+I20251107 17:40:06.033150 4080593 ToCudf.cpp:72] + CompileState::compile
+I20251107 17:40:06.033221 4080593 ToCudf.cpp:427] - CompileState::compile
+I20251107 17:40:06.036059 4080669 ParquetDataSource.cpp:255] Adding split Parquet: /gpfs/zc2/data/tpch/tpch-sf1-parquet/one_brc_parquet/measurements.parquet
+I20251107 17:40:07.186148 4080668 Communicator.cpp:120] Communicator running with error handling in blocking progress mode
+I20251107 17:40:10.362218 4080669 CudfPartitionedOutput.cpp:132] cudf::pack time: 1572 µs
+I20251107 17:40:10.362264 4080669 CudfPartitionedOutput.cpp:134] throughput: 341461 MByte/s
+I20251107 17:40:10.362277 4080669 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 1653 µs
+I20251107 17:40:10.496083 4080669 CudfPartitionedOutput.cpp:132] cudf::pack time: 890 µs
+I20251107 17:40:10.496100 4080669 CudfPartitionedOutput.cpp:134] throughput: 603024 MByte/s
+I20251107 17:40:10.496105 4080669 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 917 µs
+I20251107 17:40:10.632684 4080669 CudfPartitionedOutput.cpp:132] cudf::pack time: 889 µs
+I20251107 17:40:10.632701 4080669 CudfPartitionedOutput.cpp:134] throughput: 603889 MByte/s
+I20251107 17:40:10.632707 4080669 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 915 µs
+I20251107 17:40:10.769660 4080669 CudfPartitionedOutput.cpp:132] cudf::pack time: 973 µs
+I20251107 17:40:10.769685 4080669 CudfPartitionedOutput.cpp:134] throughput: 551622 MByte/s
+I20251107 17:40:10.769690 4080669 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 1015 µs
+I20251107 17:40:10.906493 4080669 CudfPartitionedOutput.cpp:132] cudf::pack time: 884 µs
+I20251107 17:40:10.906509 4080669 CudfPartitionedOutput.cpp:134] throughput: 607122 MByte/s
+I20251107 17:40:10.906515 4080669 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 910 µs
+I20251107 17:40:11.043089 4080669 CudfPartitionedOutput.cpp:132] cudf::pack time: 885 µs
+I20251107 17:40:11.043107 4080669 CudfPartitionedOutput.cpp:134] throughput: 606559 MByte/s
+I20251107 17:40:11.043112 4080669 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 911 µs
+I20251107 17:40:11.181366 4080669 CudfPartitionedOutput.cpp:132] cudf::pack time: 886 µs
+I20251107 17:40:11.181383 4080669 CudfPartitionedOutput.cpp:134] throughput: 605760 MByte/s
+I20251107 17:40:11.181389 4080669 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 911 µs
+I20251107 17:40:11.316527 4080669 CudfPartitionedOutput.cpp:132] cudf::pack time: 890 µs
+I20251107 17:40:11.316542 4080669 CudfPartitionedOutput.cpp:134] throughput: 603007 MByte/s
+I20251107 17:40:11.316546 4080669 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 912 µs
+I20251107 17:40:11.453255 4080669 CudfPartitionedOutput.cpp:132] cudf::pack time: 888 µs
+I20251107 17:40:11.453269 4080669 CudfPartitionedOutput.cpp:134] throughput: 604433 MByte/s
+I20251107 17:40:11.453274 4080669 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 911 µs
+I20251107 17:40:11.592163 4080669 CudfPartitionedOutput.cpp:132] cudf::pack time: 891 µs
+I20251107 17:40:11.592178 4080669 CudfPartitionedOutput.cpp:134] throughput: 602384 MByte/s
+I20251107 17:40:11.592185 4080669 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 915 µs
+I20251107 17:40:11.728996 4080669 CudfPartitionedOutput.cpp:132] cudf::pack time: 880 µs
+I20251107 17:40:11.729010 4080669 CudfPartitionedOutput.cpp:134] throughput: 609795 MByte/s
+I20251107 17:40:11.729015 4080669 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 904 µs
+I20251107 17:40:11.866328 4080669 CudfPartitionedOutput.cpp:132] cudf::pack time: 877 µs
+I20251107 17:40:11.866343 4080669 CudfPartitionedOutput.cpp:134] throughput: 611962 MByte/s
+I20251107 17:40:11.866348 4080669 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 899 µs
+I20251107 17:40:12.003489 4080669 CudfPartitionedOutput.cpp:132] cudf::pack time: 887 µs
+I20251107 17:40:12.003504 4080669 CudfPartitionedOutput.cpp:134] throughput: 605236 MByte/s
+I20251107 17:40:12.003508 4080669 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 911 µs
+I20251107 17:40:12.141695 4080669 CudfPartitionedOutput.cpp:132] cudf::pack time: 891 µs
+I20251107 17:40:12.141708 4080669 CudfPartitionedOutput.cpp:134] throughput: 602499 MByte/s
+I20251107 17:40:12.141713 4080669 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 913 µs
+I20251107 17:40:12.277799 4080669 CudfPartitionedOutput.cpp:132] cudf::pack time: 879 µs
+I20251107 17:40:12.277812 4080669 CudfPartitionedOutput.cpp:134] throughput: 610658 MByte/s
+I20251107 17:40:12.277820 4080669 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 903 µs
+I20251107 17:40:12.414978 4080669 CudfPartitionedOutput.cpp:132] cudf::pack time: 885 µs
+I20251107 17:40:12.414991 4080669 CudfPartitionedOutput.cpp:134] throughput: 606528 MByte/s
+I20251107 17:40:12.414996 4080669 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 907 µs
+I20251107 17:40:12.553097 4080669 CudfPartitionedOutput.cpp:132] cudf::pack time: 888 µs
+I20251107 17:40:12.553112 4080669 CudfPartitionedOutput.cpp:134] throughput: 604327 MByte/s
+I20251107 17:40:12.553117 4080669 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 910 µs
+I20251107 17:40:12.687630 4080669 CudfPartitionedOutput.cpp:132] cudf::pack time: 873 µs
+I20251107 17:40:12.687644 4080669 CudfPartitionedOutput.cpp:134] throughput: 614678 MByte/s
+I20251107 17:40:12.687649 4080669 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 895 µs
+I20251107 17:40:12.822619 4080669 CudfPartitionedOutput.cpp:132] cudf::pack time: 882 µs
+I20251107 17:40:12.822634 4080669 CudfPartitionedOutput.cpp:134] throughput: 608676 MByte/s
+I20251107 17:40:12.822639 4080669 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 905 µs
+I20251107 17:40:12.959575 4080669 CudfPartitionedOutput.cpp:132] cudf::pack time: 884 µs
+I20251107 17:40:12.959589 4080669 CudfPartitionedOutput.cpp:134] throughput: 607217 MByte/s
+I20251107 17:40:12.959595 4080669 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 907 µs
+I20251107 17:40:13.096482 4080669 CudfPartitionedOutput.cpp:132] cudf::pack time: 889 µs
+I20251107 17:40:13.096494 4080669 CudfPartitionedOutput.cpp:134] throughput: 603659 MByte/s
+I20251107 17:40:13.096499 4080669 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 909 µs
+I20251107 17:40:13.233326 4080669 CudfPartitionedOutput.cpp:132] cudf::pack time: 877 µs
+I20251107 17:40:13.233340 4080669 CudfPartitionedOutput.cpp:134] throughput: 611961 MByte/s
+I20251107 17:40:13.233345 4080669 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 897 µs
+I20251107 17:40:13.372014 4080669 CudfPartitionedOutput.cpp:132] cudf::pack time: 885 µs
+I20251107 17:40:13.372028 4080669 CudfPartitionedOutput.cpp:134] throughput: 606392 MByte/s
+I20251107 17:40:13.372033 4080669 CudfPartitionedOutput.cpp:167] complete partitioning and enqueueing time: 908 µs
+I20251107 17:40:13.508972 4080669 CudfPartitionedOutput.cpp:132] cudf::pack time: 881 µs
+I20251107 17:40:13.508985 4080669 Cud*** Aborted at 1762533637 (Unix time, try 'date -d @1762533637') ***
+*** Signal 15 (SIGTERM) (0x3e9003d063c) received by PID 4080593 (pthread TID 0x7fe4d6f63000) (linux TID 4080593) (maybe from PID 3999292, UID 1001) (code: 0), stack trace: ***
+(error retrieving stack trace)

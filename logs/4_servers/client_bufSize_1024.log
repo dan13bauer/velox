@@ -1,0 +1,1381 @@
+I20251107 17:41:46.964241 4082765 HiveConnector.cpp:53] Hive connector test-hive created with maximum of 20000 cached file handles with expiration of 0ms.
+I20251107 17:41:47.574350 4082765 1brc_client.cpp:180] Going to write to: /tmp/velox_test_Mnepfa
+I20251107 17:41:48.347445 4082790 Communicator.cpp:120] Communicator running with error handling in blocking progress mode
+I20251107 17:41:48.347534 4082765 1brc_client.cpp:233] Adding split: http://sally:24356/v1/task/task0/results/0
+I20251107 17:41:48.347623 4082765 1brc_client.cpp:233] Adding split: http://sally:24357/v1/task/task0/results/0
+I20251107 17:41:48.347633 4082765 1brc_client.cpp:233] Adding split: http://sally:24358/v1/task/task0/results/0
+I20251107 17:41:48.347640 4082765 1brc_client.cpp:233] Adding split: http://sally:24359/v1/task/task0/results/0
+I20251107 17:41:48.347676 4082765 1brc_client.cpp:239] Starting tasks
+I20251107 17:41:48.348192 4082765 ToCudf.cpp:72] + CompileState::compile
+I20251107 17:41:48.348821 4082765 ToCudf.cpp:427] - CompileState::compile
+I20251107 17:41:48.348886 4082765 ToCudf.cpp:72] + CompileState::compile
+I20251107 17:41:48.349422 4082765 ToCudf.cpp:427] - CompileState::compile
+I20251107 17:41:48.351399 4082804 ExchangeClientFacade.cpp:93] Activating Cudf exchange client for remote task id: http://sally:24356/v1/task/task0/results/0
+I20251107 17:41:48.351455 4082804 CudfExchangeSource.cpp:53]  Creating CudfExchangeSource http://sally:24356/v1/task/task0/results/0
+I20251107 17:41:48.351553 4082804 CudfExchangeClient.cpp:43] Added remote split for task: http://sally:24356/v1/task/task0/results/0
+I20251107 17:41:48.351652 4082804 ExchangeClientFacade.cpp:93] Activating Cudf exchange client for remote task id: http://sally:24359/v1/task/task0/results/0
+I20251107 17:41:48.351665 4082804 CudfExchangeSource.cpp:53]  Creating CudfExchangeSource http://sally:24359/v1/task/task0/results/0
+I20251107 17:41:48.351675 4082804 CudfExchangeClient.cpp:43] Added remote split for task: http://sally:24359/v1/task/task0/results/0
+I20251107 17:41:48.351738 4082804 ExchangeClientFacade.cpp:93] Activating Cudf exchange client for remote task id: http://sally:24358/v1/task/task0/results/0
+I20251107 17:41:48.351754 4082804 CudfExchangeSource.cpp:53]  Creating CudfExchangeSource http://sally:24358/v1/task/task0/results/0
+I20251107 17:41:48.351761 4082804 CudfExchangeClient.cpp:43] Added remote split for task: http://sally:24358/v1/task/task0/results/0
+I20251107 17:41:48.351830 4082804 ExchangeClientFacade.cpp:93] Activating Cudf exchange client for remote task id: http://sally:24357/v1/task/task0/results/0
+I20251107 17:41:48.351841 4082804 CudfExchangeSource.cpp:53]  Creating CudfExchangeSource http://sally:24357/v1/task/task0/results/0
+I20251107 17:41:48.351850 4082804 CudfExchangeClient.cpp:43] Added remote split for task: http://sally:24357/v1/task/task0/results/0
+I20251107 17:41:48.351853 4082804 CudfExchangeClient.cpp:54] CudfExchangeClient::noMoreRemoteTasks called.
+I20251107 17:41:48.351874 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:48.353935 4082790 CudfExchangeSource.cpp:233] [ExchangeSource task0/0(0)] Sending handshake with initial value: task0/0 to server
+I20251107 17:41:48.354353 4082790 CudfExchangeSource.cpp:233] [ExchangeSource task0/0(0)] Sending handshake with initial value: task0/0 to server
+I20251107 17:41:48.379087 4082790 CudfExchangeSource.cpp:233] [ExchangeSource task0/0(0)] Sending handshake with initial value: task0/0 to server
+I20251107 17:41:48.383769 4082790 CudfExchangeSource.cpp:233] [ExchangeSource task0/0(0)] Sending handshake with initial value: task0/0 to server
+I20251107 17:41:48.689594 4082790 CudfExchangeSource.cpp:268] [ExchangeSource task0/0(0)]+ onHandshake Success
+I20251107 17:41:48.690066 4082790 CudfExchangeSource.cpp:268] [ExchangeSource task0/0(0)]+ onHandshake Success
+I20251107 17:41:48.690143 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 0 using tag: cda0d3c302000000
+I20251107 17:41:48.690197 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:48.690207 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073468224
+I20251107 17:41:48.690804 4082790 CudfExchangeSource.cpp:362] Allocated 1073468224 bytes of device memory
+I20251107 17:41:48.690819 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 0 using tag: cda0d3c303000000
+I20251107 17:41:48.690858 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 0 using tag: cda0d3c302000000
+I20251107 17:41:48.694260 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:48.694270 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073468224
+I20251107 17:41:48.694279 4082790 CudfExchangeSource.cpp:362] Allocated 1073468224 bytes of device memory
+I20251107 17:41:48.694286 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 0 using tag: cda0d3c303000000
+I20251107 17:41:49.870301 4082790 CudfExchangeSource.cpp:268] [ExchangeSource task0/0(0)]+ onHandshake Success
+I20251107 17:41:49.870569 4082790 CudfExchangeSource.cpp:268] [ExchangeSource task0/0(0)]+ onHandshake Success
+I20251107 17:41:49.870757 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:49.870774 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 0
+I20251107 17:41:49.872241 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:49.872341 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 0 using tag: cda0d3c302000000
+I20251107 17:41:49.872411 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:49.872419 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073468224
+I20251107 17:41:49.872509 4082790 CudfExchangeSource.cpp:362] Allocated 1073468224 bytes of device memory
+I20251107 17:41:49.872512 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 0 using tag: cda0d3c303000000
+I20251107 17:41:49.872609 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 0 using tag: cda0d3c302000000
+I20251107 17:41:49.873021 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 1 using tag: cda0d3c302000001
+I20251107 17:41:49.873087 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:49.873092 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073586304
+I20251107 17:41:49.873147 4082790 CudfExchangeSource.cpp:362] Allocated 1073586304 bytes of device memory
+I20251107 17:41:49.873153 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 1 using tag: cda0d3c303000001
+I20251107 17:41:49.899351 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:49.899367 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 0
+I20251107 17:41:49.899432 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:49.899446 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 1
+I20251107 17:41:50.568745 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:50.568800 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073468224
+I20251107 17:41:50.573462 4082790 CudfExchangeSource.cpp:362] Allocated 1073468224 bytes of device memory
+I20251107 17:41:50.573470 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 0 using tag: cda0d3c303000000
+I20251107 17:41:51.076858 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.076885 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 0
+I20251107 17:41:51.076957 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 1 using tag: cda0d3c302000001
+I20251107 17:41:51.076989 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.077315 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073586304
+I20251107 17:41:51.077351 4082790 CudfExchangeSource.cpp:362] Allocated 1073586304 bytes of device memory
+I20251107 17:41:51.077355 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 1 using tag: cda0d3c303000001
+I20251107 17:41:51.077461 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 2 using tag: cda0d3c302000002
+I20251107 17:41:51.077476 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.077479 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073500864
+I20251107 17:41:51.077491 4082790 CudfExchangeSource.cpp:362] Allocated 1073500864 bytes of device memory
+I20251107 17:41:51.077495 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 2 using tag: cda0d3c303000002
+I20251107 17:41:51.077579 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 1 using tag: cda0d3c302000001
+I20251107 17:41:51.077591 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.077594 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073586304
+I20251107 17:41:51.077615 4082790 CudfExchangeSource.cpp:362] Allocated 1073586304 bytes of device memory
+I20251107 17:41:51.077618 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 1 using tag: cda0d3c303000001
+I20251107 17:41:51.081749 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.081763 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 0
+I20251107 17:41:51.081796 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 1 using tag: cda0d3c302000001
+I20251107 17:41:51.082314 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.082325 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073586304
+I20251107 17:41:51.096901 4082790 CudfExchangeSource.cpp:362] Allocated 1073586304 bytes of device memory
+I20251107 17:41:51.096908 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 1 using tag: cda0d3c303000001
+I20251107 17:41:51.096976 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.096983 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 1
+I20251107 17:41:51.097023 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.097029 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 2
+I20251107 17:41:51.097055 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.097062 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 1
+I20251107 17:41:51.097136 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 2 using tag: cda0d3c302000002
+I20251107 17:41:51.097152 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.097160 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073500864
+I20251107 17:41:51.097190 4082790 CudfExchangeSource.cpp:362] Allocated 1073500864 bytes of device memory
+I20251107 17:41:51.097200 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 2 using tag: cda0d3c303000002
+I20251107 17:41:51.097281 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 3 using tag: cda0d3c302000003
+I20251107 17:41:51.097306 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.097313 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073380544
+I20251107 17:41:51.106653 4082790 CudfExchangeSource.cpp:362] Allocated 1073380544 bytes of device memory
+I20251107 17:41:51.106660 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 3 using tag: cda0d3c303000003
+I20251107 17:41:51.106716 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.106724 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 1
+I20251107 17:41:51.106741 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:51.106750 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.106803 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 2
+I20251107 17:41:51.106922 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 2 using tag: cda0d3c302000002
+I20251107 17:41:51.106942 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.106947 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073500864
+I20251107 17:41:51.106973 4082790 CudfExchangeSource.cpp:362] Allocated 1073500864 bytes of device memory
+I20251107 17:41:51.106978 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 2 using tag: cda0d3c303000002
+I20251107 17:41:51.107045 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 2 using tag: cda0d3c302000002
+I20251107 17:41:51.107059 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.107064 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073500864
+I20251107 17:41:51.107088 4082790 CudfExchangeSource.cpp:362] Allocated 1073500864 bytes of device memory
+I20251107 17:41:51.107092 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 2 using tag: cda0d3c303000002
+I20251107 17:41:51.107170 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 3 using tag: cda0d3c302000003
+I20251107 17:41:51.107205 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.107211 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073380544
+I20251107 17:41:51.107266 4082790 CudfExchangeSource.cpp:362] Allocated 1073380544 bytes of device memory
+I20251107 17:41:51.107272 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 3 using tag: cda0d3c303000003
+I20251107 17:41:51.193836 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.193854 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 3
+I20251107 17:41:51.193884 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.193893 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 2
+I20251107 17:41:51.193921 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.193929 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 2
+I20251107 17:41:51.193956 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.193965 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 3
+I20251107 17:41:51.194032 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 4 using tag: cda0d3c302000004
+I20251107 17:41:51.194051 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.194062 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073461696
+I20251107 17:41:51.194115 4082790 CudfExchangeSource.cpp:362] Allocated 1073461696 bytes of device memory
+I20251107 17:41:51.194120 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 4 using tag: cda0d3c303000004
+I20251107 17:41:51.194233 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 3 using tag: cda0d3c302000003
+I20251107 17:41:51.194249 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.194254 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073380544
+I20251107 17:41:51.199430 4082790 CudfExchangeSource.cpp:362] Allocated 1073380544 bytes of device memory
+I20251107 17:41:51.199438 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 3 using tag: cda0d3c303000003
+I20251107 17:41:51.199595 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.199608 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 4
+I20251107 17:41:51.199630 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 3 using tag: cda0d3c302000003
+I20251107 17:41:51.199644 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.199651 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073380544
+I20251107 17:41:51.199687 4082790 CudfExchangeSource.cpp:362] Allocated 1073380544 bytes of device memory
+I20251107 17:41:51.199694 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 3 using tag: cda0d3c303000003
+I20251107 17:41:51.199774 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 4 using tag: cda0d3c302000004
+I20251107 17:41:51.199790 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.199795 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073461696
+I20251107 17:41:51.199826 4082790 CudfExchangeSource.cpp:362] Allocated 1073461696 bytes of device memory
+I20251107 17:41:51.199831 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 4 using tag: cda0d3c303000004
+I20251107 17:41:51.199931 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 5 using tag: cda0d3c302000005
+I20251107 17:41:51.199944 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.199949 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073310848
+I20251107 17:41:51.199971 4082790 CudfExchangeSource.cpp:362] Allocated 1073310848 bytes of device memory
+I20251107 17:41:51.199975 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 5 using tag: cda0d3c303000005
+I20251107 17:41:51.208922 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.208937 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 3
+I20251107 17:41:51.208967 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.208976 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 3
+I20251107 17:41:51.209005 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 4 using tag: cda0d3c302000004
+I20251107 17:41:51.209033 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.209046 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073461696
+I20251107 17:41:51.209084 4082790 CudfExchangeSource.cpp:362] Allocated 1073461696 bytes of device memory
+I20251107 17:41:51.209091 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 4 using tag: cda0d3c303000004
+I20251107 17:41:51.209178 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 4 using tag: cda0d3c302000004
+I20251107 17:41:51.209193 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.209199 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073461696
+I20251107 17:41:51.209278 4082790 CudfExchangeSource.cpp:362] Allocated 1073461696 bytes of device memory
+I20251107 17:41:51.209285 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 4 using tag: cda0d3c303000004
+I20251107 17:41:51.227516 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.227531 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 4
+I20251107 17:41:51.227573 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.227581 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 5
+I20251107 17:41:51.227605 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.227613 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 4
+I20251107 17:41:51.227645 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.227654 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 4
+I20251107 17:41:51.227671 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:51.227717 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 5 using tag: cda0d3c302000005
+I20251107 17:41:51.227738 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.227746 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073310848
+I20251107 17:41:51.227775 4082790 CudfExchangeSource.cpp:362] Allocated 1073310848 bytes of device memory
+I20251107 17:41:51.227780 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 5 using tag: cda0d3c303000005
+I20251107 17:41:51.227870 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 6 using tag: cda0d3c302000006
+I20251107 17:41:51.227885 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.227890 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073671232
+I20251107 17:41:51.227912 4082790 CudfExchangeSource.cpp:362] Allocated 1073671232 bytes of device memory
+I20251107 17:41:51.227916 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 6 using tag: cda0d3c303000006
+I20251107 17:41:51.227970 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 5 using tag: cda0d3c302000005
+I20251107 17:41:51.227980 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.227984 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073310848
+I20251107 17:41:51.228004 4082790 CudfExchangeSource.cpp:362] Allocated 1073310848 bytes of device memory
+I20251107 17:41:51.228008 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 5 using tag: cda0d3c303000005
+I20251107 17:41:51.228132 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 5 using tag: cda0d3c302000005
+I20251107 17:41:51.228145 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.228149 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073310848
+I20251107 17:41:51.228171 4082790 CudfExchangeSource.cpp:362] Allocated 1073310848 bytes of device memory
+I20251107 17:41:51.228174 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 5 using tag: cda0d3c303000005
+I20251107 17:41:51.322077 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.322093 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 5
+I20251107 17:41:51.322122 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.322129 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 6
+I20251107 17:41:51.322155 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.322165 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 5
+I20251107 17:41:51.322190 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.322196 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 5
+I20251107 17:41:51.322283 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 6 using tag: cda0d3c302000006
+I20251107 17:41:51.322301 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.322309 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073671232
+I20251107 17:41:51.322350 4082790 CudfExchangeSource.cpp:362] Allocated 1073671232 bytes of device memory
+I20251107 17:41:51.322355 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 6 using tag: cda0d3c303000006
+I20251107 17:41:51.322476 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 7 using tag: cda0d3c302000007
+I20251107 17:41:51.322527 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.322535 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073546560
+I20251107 17:41:51.322613 4082790 CudfExchangeSource.cpp:362] Allocated 1073546560 bytes of device memory
+I20251107 17:41:51.322619 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 7 using tag: cda0d3c303000007
+I20251107 17:41:51.322685 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 6 using tag: cda0d3c302000006
+I20251107 17:41:51.322696 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.322701 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073671232
+I20251107 17:41:51.322729 4082790 CudfExchangeSource.cpp:362] Allocated 1073671232 bytes of device memory
+I20251107 17:41:51.322734 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 6 using tag: cda0d3c303000006
+I20251107 17:41:51.322928 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 6 using tag: cda0d3c302000006
+I20251107 17:41:51.322944 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.322949 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073671232
+I20251107 17:41:51.322966 4082790 CudfExchangeSource.cpp:362] Allocated 1073671232 bytes of device memory
+I20251107 17:41:51.322970 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 6 using tag: cda0d3c303000006
+I20251107 17:41:51.323422 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:51.421207 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.421236 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 6
+I20251107 17:41:51.421293 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.421304 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 7
+I20251107 17:41:51.421339 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.421347 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 6
+I20251107 17:41:51.421387 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.421399 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 6
+I20251107 17:41:51.421520 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 7 using tag: cda0d3c302000007
+I20251107 17:41:51.421547 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.421554 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073546560
+I20251107 17:41:51.421581 4082790 CudfExchangeSource.cpp:362] Allocated 1073546560 bytes of device memory
+I20251107 17:41:51.421586 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 7 using tag: cda0d3c303000007
+I20251107 17:41:51.421728 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 8 using tag: cda0d3c302000008
+I20251107 17:41:51.421751 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.421758 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073257088
+I20251107 17:41:51.421774 4082790 CudfExchangeSource.cpp:362] Allocated 1073257088 bytes of device memory
+I20251107 17:41:51.421780 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 8 using tag: cda0d3c303000008
+I20251107 17:41:51.421823 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 7 using tag: cda0d3c302000007
+I20251107 17:41:51.421837 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.421844 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073546560
+I20251107 17:41:51.421857 4082790 CudfExchangeSource.cpp:362] Allocated 1073546560 bytes of device memory
+I20251107 17:41:51.421864 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 7 using tag: cda0d3c303000007
+I20251107 17:41:51.421978 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 7 using tag: cda0d3c302000007
+I20251107 17:41:51.421991 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.421995 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073546560
+I20251107 17:41:51.422025 4082790 CudfExchangeSource.cpp:362] Allocated 1073546560 bytes of device memory
+I20251107 17:41:51.422029 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 7 using tag: cda0d3c303000007
+I20251107 17:41:51.422474 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:51.519425 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.519454 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 7
+I20251107 17:41:51.519500 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.519511 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 8
+I20251107 17:41:51.519546 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.519555 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 7
+I20251107 17:41:51.519584 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.519594 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 7
+I20251107 17:41:51.519703 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 8 using tag: cda0d3c302000008
+I20251107 17:41:51.519729 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.519737 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073257088
+I20251107 17:41:51.519765 4082790 CudfExchangeSource.cpp:362] Allocated 1073257088 bytes of device memory
+I20251107 17:41:51.519771 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 8 using tag: cda0d3c303000008
+I20251107 17:41:51.519899 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 9 using tag: cda0d3c302000009
+I20251107 17:41:51.519922 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.519928 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073633216
+I20251107 17:41:51.519949 4082790 CudfExchangeSource.cpp:362] Allocated 1073633216 bytes of device memory
+I20251107 17:41:51.519955 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 9 using tag: cda0d3c303000009
+I20251107 17:41:51.520208 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 8 using tag: cda0d3c302000008
+I20251107 17:41:51.520246 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.520255 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073257088
+I20251107 17:41:51.520289 4082790 CudfExchangeSource.cpp:362] Allocated 1073257088 bytes of device memory
+I20251107 17:41:51.520295 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 8 using tag: cda0d3c303000008
+I20251107 17:41:51.520320 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:51.520437 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 8 using tag: cda0d3c302000008
+I20251107 17:41:51.520462 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.520468 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073257088
+I20251107 17:41:51.520493 4082790 CudfExchangeSource.cpp:362] Allocated 1073257088 bytes of device memory
+I20251107 17:41:51.520499 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 8 using tag: cda0d3c303000008
+I20251107 17:41:51.616247 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.616274 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 8
+I20251107 17:41:51.616317 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.616328 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 9
+I20251107 17:41:51.616359 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.616370 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 8
+I20251107 17:41:51.616415 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.616423 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 8
+I20251107 17:41:51.616551 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 9 using tag: cda0d3c302000009
+I20251107 17:41:51.616576 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.616585 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073633216
+I20251107 17:41:51.616617 4082790 CudfExchangeSource.cpp:362] Allocated 1073633216 bytes of device memory
+I20251107 17:41:51.616624 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 9 using tag: cda0d3c303000009
+I20251107 17:41:51.616765 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 10 using tag: cda0d3c30200000a
+I20251107 17:41:51.616788 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.616796 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073343232
+I20251107 17:41:51.616824 4082790 CudfExchangeSource.cpp:362] Allocated 1073343232 bytes of device memory
+I20251107 17:41:51.616832 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 10 using tag: cda0d3c30300000a
+I20251107 17:41:51.616874 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 9 using tag: cda0d3c302000009
+I20251107 17:41:51.616890 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.616896 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073633216
+I20251107 17:41:51.616915 4082790 CudfExchangeSource.cpp:362] Allocated 1073633216 bytes of device memory
+I20251107 17:41:51.616921 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 9 using tag: cda0d3c303000009
+I20251107 17:41:51.617093 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 9 using tag: cda0d3c302000009
+I20251107 17:41:51.617107 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.617111 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073633216
+I20251107 17:41:51.617146 4082790 CudfExchangeSource.cpp:362] Allocated 1073633216 bytes of device memory
+I20251107 17:41:51.617149 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 9 using tag: cda0d3c303000009
+I20251107 17:41:51.617348 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:51.717855 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.717877 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 9
+I20251107 17:41:51.717914 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.717922 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 10
+I20251107 17:41:51.717953 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.717960 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 9
+I20251107 17:41:51.717985 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.717993 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 9
+I20251107 17:41:51.718081 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 10 using tag: cda0d3c30200000a
+I20251107 17:41:51.718099 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.718104 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073343232
+I20251107 17:41:51.723512 4082790 CudfExchangeSource.cpp:362] Allocated 1073343232 bytes of device memory
+I20251107 17:41:51.723526 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 10 using tag: cda0d3c30300000a
+I20251107 17:41:51.723609 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 11 using tag: cda0d3c30200000b
+I20251107 17:41:51.723623 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.723627 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073240000
+I20251107 17:41:51.723645 4082790 CudfExchangeSource.cpp:362] Allocated 1073240000 bytes of device memory
+I20251107 17:41:51.723649 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 11 using tag: cda0d3c30300000b
+I20251107 17:41:51.723712 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 10 using tag: cda0d3c30200000a
+I20251107 17:41:51.723723 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.723727 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073343232
+I20251107 17:41:51.723740 4082790 CudfExchangeSource.cpp:362] Allocated 1073343232 bytes of device memory
+I20251107 17:41:51.723744 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 10 using tag: cda0d3c30300000a
+I20251107 17:41:51.723929 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 10 using tag: cda0d3c30200000a
+I20251107 17:41:51.723943 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.723948 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073343232
+I20251107 17:41:51.723966 4082790 CudfExchangeSource.cpp:362] Allocated 1073343232 bytes of device memory
+I20251107 17:41:51.723969 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 10 using tag: cda0d3c30300000a
+I20251107 17:41:51.724942 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:51.844890 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.844913 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 10
+I20251107 17:41:51.844954 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.844964 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 11
+I20251107 17:41:51.844991 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.845000 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 10
+I20251107 17:41:51.845023 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.845031 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 10
+I20251107 17:41:51.845116 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 11 using tag: cda0d3c30200000b
+I20251107 17:41:51.845135 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.845141 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073240000
+I20251107 17:41:51.845170 4082790 CudfExchangeSource.cpp:362] Allocated 1073240000 bytes of device memory
+I20251107 17:41:51.845176 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 11 using tag: cda0d3c30300000b
+I20251107 17:41:51.845276 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 12 using tag: cda0d3c30200000c
+I20251107 17:41:51.845292 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.845336 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073435840
+I20251107 17:41:51.845356 4082790 CudfExchangeSource.cpp:362] Allocated 1073435840 bytes of device memory
+I20251107 17:41:51.845361 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 12 using tag: cda0d3c30300000c
+I20251107 17:41:51.845481 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 11 using tag: cda0d3c30200000b
+I20251107 17:41:51.845496 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.845501 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073240000
+I20251107 17:41:51.845521 4082790 CudfExchangeSource.cpp:362] Allocated 1073240000 bytes of device memory
+I20251107 17:41:51.845526 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 11 using tag: cda0d3c30300000b
+I20251107 17:41:51.845737 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 11 using tag: cda0d3c30200000b
+I20251107 17:41:51.845763 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.845770 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073240000
+I20251107 17:41:51.845788 4082790 CudfExchangeSource.cpp:362] Allocated 1073240000 bytes of device memory
+I20251107 17:41:51.845791 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 11 using tag: cda0d3c30300000b
+I20251107 17:41:51.845880 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:51.953136 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.953156 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 11
+I20251107 17:41:51.953197 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.953204 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 12
+I20251107 17:41:51.953230 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.953238 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 11
+I20251107 17:41:51.953266 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:51.953274 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 11
+I20251107 17:41:51.953367 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 12 using tag: cda0d3c30200000c
+I20251107 17:41:51.953402 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.953408 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073435840
+I20251107 17:41:51.953436 4082790 CudfExchangeSource.cpp:362] Allocated 1073435840 bytes of device memory
+I20251107 17:41:51.953440 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 12 using tag: cda0d3c30300000c
+I20251107 17:41:51.953562 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 13 using tag: cda0d3c30200000d
+I20251107 17:41:51.953577 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.953583 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073316992
+I20251107 17:41:51.953598 4082790 CudfExchangeSource.cpp:362] Allocated 1073316992 bytes of device memory
+I20251107 17:41:51.953603 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 13 using tag: cda0d3c30300000d
+I20251107 17:41:51.953680 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 12 using tag: cda0d3c30200000c
+I20251107 17:41:51.953694 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.953699 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073435840
+I20251107 17:41:51.953712 4082790 CudfExchangeSource.cpp:362] Allocated 1073435840 bytes of device memory
+I20251107 17:41:51.953716 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 12 using tag: cda0d3c30300000c
+I20251107 17:41:51.953853 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 12 using tag: cda0d3c30200000c
+I20251107 17:41:51.953869 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:51.953874 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073435840
+I20251107 17:41:51.953889 4082790 CudfExchangeSource.cpp:362] Allocated 1073435840 bytes of device memory
+I20251107 17:41:51.953893 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 12 using tag: cda0d3c30300000c
+I20251107 17:41:51.954627 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:52.046125 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.046154 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 12
+I20251107 17:41:52.046202 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.046213 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 13
+I20251107 17:41:52.046247 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.046257 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 12
+I20251107 17:41:52.046289 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.046301 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 12
+I20251107 17:41:52.046433 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 13 using tag: cda0d3c30200000d
+I20251107 17:41:52.046460 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.046473 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073316992
+I20251107 17:41:52.046510 4082790 CudfExchangeSource.cpp:362] Allocated 1073316992 bytes of device memory
+I20251107 17:41:52.046517 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 13 using tag: cda0d3c30300000d
+I20251107 17:41:52.046686 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 14 using tag: cda0d3c30200000e
+I20251107 17:41:52.046710 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.046717 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073627136
+I20251107 17:41:52.046741 4082790 CudfExchangeSource.cpp:362] Allocated 1073627136 bytes of device memory
+I20251107 17:41:52.046746 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 14 using tag: cda0d3c30300000e
+I20251107 17:41:52.046914 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 13 using tag: cda0d3c30200000d
+I20251107 17:41:52.046934 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.046941 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073316992
+I20251107 17:41:52.046964 4082790 CudfExchangeSource.cpp:362] Allocated 1073316992 bytes of device memory
+I20251107 17:41:52.046969 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 13 using tag: cda0d3c30300000d
+I20251107 17:41:52.047050 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:52.047082 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 13 using tag: cda0d3c30200000d
+I20251107 17:41:52.047106 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.047113 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073316992
+I20251107 17:41:52.047137 4082790 CudfExchangeSource.cpp:362] Allocated 1073316992 bytes of device memory
+I20251107 17:41:52.047143 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 13 using tag: cda0d3c30300000d
+I20251107 17:41:52.141044 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.141103 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 13
+I20251107 17:41:52.141160 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.141168 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 14
+I20251107 17:41:52.141197 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.141204 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 13
+I20251107 17:41:52.141233 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.141242 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 13
+I20251107 17:41:52.141288 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 14 using tag: cda0d3c30200000e
+I20251107 17:41:52.141309 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.141315 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073627136
+I20251107 17:41:52.141342 4082790 CudfExchangeSource.cpp:362] Allocated 1073627136 bytes of device memory
+I20251107 17:41:52.141348 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 14 using tag: cda0d3c30300000e
+I20251107 17:41:52.141474 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 15 using tag: cda0d3c30200000f
+I20251107 17:41:52.141490 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.141495 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073440640
+I20251107 17:41:52.141538 4082790 CudfExchangeSource.cpp:362] Allocated 1073440640 bytes of device memory
+I20251107 17:41:52.141543 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 15 using tag: cda0d3c30300000f
+I20251107 17:41:52.141618 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 14 using tag: cda0d3c30200000e
+I20251107 17:41:52.141633 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.141638 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073627136
+I20251107 17:41:52.141713 4082790 CudfExchangeSource.cpp:362] Allocated 1073627136 bytes of device memory
+I20251107 17:41:52.141719 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 14 using tag: cda0d3c30300000e
+I20251107 17:41:52.141985 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 14 using tag: cda0d3c30200000e
+I20251107 17:41:52.141999 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.142004 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073627136
+I20251107 17:41:52.144253 4082790 CudfExchangeSource.cpp:362] Allocated 1073627136 bytes of device memory
+I20251107 17:41:52.144266 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 14 using tag: cda0d3c30300000e
+I20251107 17:41:52.144899 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:52.147234 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.147248 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 14
+I20251107 17:41:52.147290 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 15 using tag: cda0d3c30200000f
+I20251107 17:41:52.147320 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.147327 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073440640
+I20251107 17:41:52.147356 4082790 CudfExchangeSource.cpp:362] Allocated 1073440640 bytes of device memory
+I20251107 17:41:52.147360 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 15 using tag: cda0d3c30300000f
+I20251107 17:41:52.267616 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.267637 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 15
+I20251107 17:41:52.267675 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.267684 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 14
+I20251107 17:41:52.267710 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.267716 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 14
+I20251107 17:41:52.267743 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.267751 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 15
+I20251107 17:41:52.267902 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 16 using tag: cda0d3c302000010
+I20251107 17:41:52.267920 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.267925 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073464064
+I20251107 17:41:52.267953 4082790 CudfExchangeSource.cpp:362] Allocated 1073464064 bytes of device memory
+I20251107 17:41:52.267957 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 16 using tag: cda0d3c303000010
+I20251107 17:41:52.268050 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 15 using tag: cda0d3c30200000f
+I20251107 17:41:52.268064 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.268069 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073440640
+I20251107 17:41:52.268085 4082790 CudfExchangeSource.cpp:362] Allocated 1073440640 bytes of device memory
+I20251107 17:41:52.268090 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 15 using tag: cda0d3c30300000f
+I20251107 17:41:52.268146 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 15 using tag: cda0d3c30200000f
+I20251107 17:41:52.268155 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.268159 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073440640
+I20251107 17:41:52.268175 4082790 CudfExchangeSource.cpp:362] Allocated 1073440640 bytes of device memory
+I20251107 17:41:52.268179 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 15 using tag: cda0d3c30300000f
+I20251107 17:41:52.268301 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 16 using tag: cda0d3c302000010
+I20251107 17:41:52.268313 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.268317 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073464064
+I20251107 17:41:52.268328 4082790 CudfExchangeSource.cpp:362] Allocated 1073464064 bytes of device memory
+I20251107 17:41:52.268332 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 16 using tag: cda0d3c303000010
+I20251107 17:41:52.269191 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:52.366356 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.366396 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 16
+I20251107 17:41:52.366443 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.366456 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 15
+I20251107 17:41:52.366500 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.366508 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 15
+I20251107 17:41:52.366541 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.366550 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 16
+I20251107 17:41:52.366726 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 17 using tag: cda0d3c302000011
+I20251107 17:41:52.366751 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.366803 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073280832
+I20251107 17:41:52.366842 4082790 CudfExchangeSource.cpp:362] Allocated 1073280832 bytes of device memory
+I20251107 17:41:52.366848 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 17 using tag: cda0d3c303000011
+I20251107 17:41:52.366963 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 16 using tag: cda0d3c302000010
+I20251107 17:41:52.366976 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.366981 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073464064
+I20251107 17:41:52.366995 4082790 CudfExchangeSource.cpp:362] Allocated 1073464064 bytes of device memory
+I20251107 17:41:52.366998 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 16 using tag: cda0d3c303000010
+I20251107 17:41:52.367106 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 16 using tag: cda0d3c302000010
+I20251107 17:41:52.367120 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.367125 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073464064
+I20251107 17:41:52.367144 4082790 CudfExchangeSource.cpp:362] Allocated 1073464064 bytes of device memory
+I20251107 17:41:52.367148 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 16 using tag: cda0d3c303000010
+I20251107 17:41:52.367287 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 17 using tag: cda0d3c302000011
+I20251107 17:41:52.367300 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.367305 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073280832
+I20251107 17:41:52.367326 4082790 CudfExchangeSource.cpp:362] Allocated 1073280832 bytes of device memory
+I20251107 17:41:52.367331 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 17 using tag: cda0d3c303000011
+I20251107 17:41:52.367344 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:52.468338 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.468366 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 17
+I20251107 17:41:52.468433 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.468446 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 16
+I20251107 17:41:52.468480 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.468489 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 16
+I20251107 17:41:52.468521 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.468531 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 17
+I20251107 17:41:52.468704 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 18 using tag: cda0d3c302000012
+I20251107 17:41:52.468731 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.468739 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 884337088
+I20251107 17:41:52.468775 4082790 CudfExchangeSource.cpp:362] Allocated 884337088 bytes of device memory
+I20251107 17:41:52.468781 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 18 using tag: cda0d3c303000012
+I20251107 17:41:52.468957 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 17 using tag: cda0d3c302000011
+I20251107 17:41:52.468977 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.468981 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073280832
+I20251107 17:41:52.468997 4082790 CudfExchangeSource.cpp:362] Allocated 1073280832 bytes of device memory
+I20251107 17:41:52.469000 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 17 using tag: cda0d3c303000011
+I20251107 17:41:52.469169 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 17 using tag: cda0d3c302000011
+I20251107 17:41:52.469192 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.469197 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 1073280832
+I20251107 17:41:52.469214 4082790 CudfExchangeSource.cpp:362] Allocated 1073280832 bytes of device memory
+I20251107 17:41:52.469218 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 17 using tag: cda0d3c303000011
+I20251107 17:41:52.469362 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 18 using tag: cda0d3c302000012
+I20251107 17:41:52.469380 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:52.469388 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.469409 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 884337088
+I20251107 17:41:52.469455 4082790 CudfExchangeSource.cpp:362] Allocated 884337088 bytes of device memory
+I20251107 17:41:52.469460 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 18 using tag: cda0d3c303000012
+I20251107 17:41:52.564913 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.564940 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 18
+I20251107 17:41:52.564987 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.565001 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 17
+I20251107 17:41:52.565037 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.565047 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 17
+I20251107 17:41:52.565083 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.565091 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 18
+I20251107 17:41:52.565191 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 19 using tag: cda0d3c302000013
+I20251107 17:41:52.565219 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.565229 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 0
+I20251107 17:41:52.565235 4082790 CudfExchangeSource.cpp:335] There is no more data to transfer for [ExchangeSource task0/0(0)]
+I20251107 17:41:52.565270 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 18 using tag: cda0d3c302000012
+I20251107 17:41:52.565284 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.565291 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 884337088
+I20251107 17:41:52.565327 4082790 CudfExchangeSource.cpp:362] Allocated 884337088 bytes of device memory
+I20251107 17:41:52.565336 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 18 using tag: cda0d3c303000012
+I20251107 17:41:52.565495 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 18 using tag: cda0d3c302000012
+I20251107 17:41:52.565517 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.565526 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 884337088
+I20251107 17:41:52.565551 4082790 CudfExchangeSource.cpp:362] Allocated 884337088 bytes of device memory
+I20251107 17:41:52.565557 4082790 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 18 using tag: cda0d3c303000012
+I20251107 17:41:52.565838 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 19 using tag: cda0d3c302000013
+I20251107 17:41:52.565876 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.565884 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 0
+I20251107 17:41:52.565927 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:52.565932 4082790 CudfExchangeSource.cpp:335] There is no more data to transfer for [ExchangeSource task0/0(0)]
+I20251107 17:41:52.677008 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.677039 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 18
+I20251107 17:41:52.677083 4082790 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:41:52.677093 4082790 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 18
+I20251107 17:41:52.677204 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 19 using tag: cda0d3c302000013
+I20251107 17:41:52.677259 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.677268 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 0
+I20251107 17:41:52.677274 4082790 CudfExchangeSource.cpp:335] There is no more data to transfer for [ExchangeSource task0/0(0)]
+I20251107 17:41:52.677305 4082790 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 19 using tag: cda0d3c302000013
+I20251107 17:41:52.677322 4082790 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:41:52.677330 4082790 CudfExchangeSource.cpp:329] Datasize bytes == 0
+I20251107 17:41:52.677336 4082790 CudfExchangeSource.cpp:335] There is no more data to transfer for [ExchangeSource task0/0(0)]
+I20251107 17:41:52.677771 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:52.734926 4082790 Communicator.cpp:212] In Communicator::removeEndpointRef for Communicator with port = 13131
+I20251107 17:41:52.735428 4082790 Communicator.cpp:229] - Communicator::removeEndpointRef
+I20251107 17:41:52.735918 4082790 Communicator.cpp:212] In Communicator::removeEndpointRef for Communicator with port = 13131
+I20251107 17:41:52.736058 4082790 Communicator.cpp:229] - Communicator::removeEndpointRef
+I20251107 17:41:52.767378 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:52.847676 4082790 Communicator.cpp:212] In Communicator::removeEndpointRef for Communicator with port = 13131
+I20251107 17:41:52.847832 4082790 Communicator.cpp:229] - Communicator::removeEndpointRef
+I20251107 17:41:52.871577 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:52.971469 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:53.069511 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:53.173986 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:53.294404 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:53.405367 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:53.502701 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:53.610091 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:53.708436 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:53.817670 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:53.885906 4082790 Communicator.cpp:212] In Communicator::removeEndpointRef for Communicator with port = 13131
+I20251107 17:41:53.886282 4082790 Communicator.cpp:229] - Communicator::removeEndpointRef
+I20251107 17:41:53.913242 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:54.024636 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:54.134816 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:54.235994 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:54.342447 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:54.451604 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:54.545504 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:54.648803 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:54.746899 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:54.837459 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:54.951228 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:55.060575 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:55.156744 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:55.265897 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:55.369007 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:55.472772 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:55.601630 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:55.694162 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:55.801764 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:55.898535 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:56.000684 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:56.098780 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:56.201797 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:56.298204 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:56.404239 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:56.507740 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:56.607705 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:56.704605 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:56.840914 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:56.943387 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:57.057806 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:57.159557 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:57.262171 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:57.376780 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:57.480759 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:57.587076 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:57.694712 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:57.781098 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:57.877453 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:57.993249 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:58.107077 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:58.201996 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:58.299202 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:58.380074 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:58.501520 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:58.606284 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:58.684546 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:58.762195 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:58.837329 4082804 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:41:58.837597 4082804 CudfExchangeSource.cpp:148] CudfExchangeSource::close called.
+I20251107 17:41:58.837608 4082804 CudfExchangeSource.cpp:149] closing task: task0/0
+I20251107 17:41:58.837616 4082804 CudfExchangeSource.cpp:150] Close receiver to remote task0/0.
+I20251107 17:41:58.837622 4082804 CudfExchangeSource.cpp:151]
+StateTransitionMetrics:
+  Total transitions recorded: 61
+
+  Statistics:
+  Created -> WaitingForHandshakeComplete:
+    Count: 1
+    Total duration: 2372 µs
+    Average duration: 2372 µs
+    Min duration: 2372 µs
+    Max duration: 2372 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 2372, 0
+  ReadyToReceive -> WaitingForMetadata:
+    Count: 20
+    Total duration: 1189670 µs
+    Average duration: 59483.5 µs
+    Min duration: 126 µs
+    Max duration: 1177991 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 523, 0
+      1, 882, 0
+      2, 1177991, 0
+      3, 243, 0
+      4, 126, 0
+      5, 309, 0
+      6, 277, 0
+      7, 334, 0
+      8, 408, 0
+      9, 370, 0
+      10, 419, 0
+      11, 5675, 0
+      12, 300, 0
+      13, 346, 0
+      14, 457, 0
+      15, 292, 0
+      16, 130, 0
+      17, 171, 0
+      18, 187, 0
+      19, 230, 0
+  WaitingForData -> ReadyToReceive:
+    Count: 19
+    Total duration: 2674003 µs
+    Average duration: 140737 µs
+    Min duration: 5490 µs
+    Max duration: 1181305 µs
+    Total bytes: 20206302400
+    Average bytes: 1.06349e+09
+    Min bytes: 884337088
+    Max bytes: 1073671232
+    Overall throughput: 7206.51 MB/s
+    Average throughput: 7206.51 MB/s
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 1181305, 1073468224, 866.617
+      1, 26300, 1073586304, 38929.7
+      2, 19535, 1073500864, 52407
+      3, 87198, 1073380544, 11739.4
+      4, 5490, 1073461696, 186472
+      5, 27610, 1073310848, 37073.1
+      6, 94215, 1073671232, 10868
+      7, 98689, 1073546560, 10374.1
+      8, 97737, 1073257088, 10472.4
+      9, 96376, 1073633216, 10624
+      10, 101092, 1073343232, 10125.6
+      11, 121319, 1073240000, 8436.61
+      12, 107843, 1073435840, 9492.58
+      13, 92617, 1073316992, 11051.9
+      14, 94423, 1073627136, 10843.7
+      15, 126099, 1073440640, 8118.33
+      16, 98450, 1073464064, 10398.5
+      17, 101538, 1073280832, 10080.6
+      18, 96167, 884337088, 8769.84
+  WaitingForHandshakeComplete -> ReadyToReceive:
+    Count: 1
+    Total duration: 335697 µs
+    Average duration: 335697 µs
+    Min duration: 335697 µs
+    Max duration: 335697 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 335697, 0
+  WaitingForMetadata -> Done:
+    Count: 1
+    Total duration: 55 µs
+    Average duration: 55 µs
+    Min duration: 55 µs
+    Max duration: 55 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 55, 0
+  WaitingForMetadata -> WaitingForData:
+    Count: 19
+    Total duration: 11864 µs
+    Average duration: 624.421 µs
+    Min duration: 47 µs
+    Max duration: 9387 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 684, 0
+      1, 145, 0
+      2, 48, 0
+      3, 9387, 0
+      4, 137, 0
+      5, 50, 0
+      6, 54, 0
+      7, 152, 0
+      8, 62, 0
+      9, 67, 0
+      10, 79, 0
+      11, 47, 0
+      12, 94, 0
+      13, 49, 0
+      14, 71, 0
+      15, 79, 0
+      16, 181, 0
+      17, 273, 0
+      18, 205, 0
+I20251107 17:41:58.838416 4082804 CudfExchangeSource.cpp:148] CudfExchangeSource::close called.
+I20251107 17:41:58.838424 4082804 CudfExchangeSource.cpp:149] closing task: task0/0
+I20251107 17:41:58.838428 4082804 CudfExchangeSource.cpp:150] Close receiver to remote task0/0.
+I20251107 17:41:58.838433 4082804 CudfExchangeSource.cpp:151]
+StateTransitionMetrics:
+  Total transitions recorded: 61
+
+  Statistics:
+  Created -> WaitingForHandshakeComplete:
+    Count: 1
+    Total duration: 2677 µs
+    Average duration: 2677 µs
+    Min duration: 2677 µs
+    Max duration: 2677 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 2677, 0
+  ReadyToReceive -> WaitingForMetadata:
+    Count: 20
+    Total duration: 1189090 µs
+    Average duration: 59454.5 µs
+    Min duration: 7 µs
+    Max duration: 1177571 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 772, 0
+      1, 1177571, 0
+      2, 131, 0
+      3, 354, 0
+      4, 5797, 0
+      5, 171, 0
+      6, 132, 0
+      7, 209, 0
+      8, 177, 0
+      9, 196, 0
+      10, 143, 0
+      11, 140, 0
+      12, 149, 0
+      13, 182, 0
+      14, 163, 0
+      15, 7, 0
+      16, 534, 0
+      17, 722, 0
+      18, 816, 0
+      19, 724, 0
+  WaitingForData -> ReadyToReceive:
+    Count: 19
+    Total duration: 2675653 µs
+    Average duration: 140824 µs
+    Min duration: 5905 µs
+    Max duration: 1205091 µs
+    Total bytes: 20206302400
+    Average bytes: 1.06349e+09
+    Min bytes: 884337088
+    Max bytes: 1073671232
+    Overall throughput: 7202.07 MB/s
+    Average throughput: 7202.07 MB/s
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 1205091, 1073468224, 849.512
+      1, 19629, 1073586304, 52160.2
+      2, 9607, 1073500864, 106565
+      3, 86696, 1073380544, 11807.4
+      4, 27707, 1073461696, 36948.5
+      5, 94316, 1073310848, 10852.8
+      6, 98897, 1073671232, 10353.5
+      7, 97874, 1073546560, 10460.5
+      8, 96510, 1073257088, 10605.5
+      9, 101256, 1073633216, 10112
+      10, 121393, 1073343232, 8432.28
+      11, 107986, 1073240000, 9478.28
+      12, 92724, 1073435840, 11040.4
+      13, 94595, 1073316992, 10820.8
+      14, 5905, 1073627136, 173394
+      15, 120397, 1073440640, 8502.81
+      16, 98225, 1073464064, 10422.3
+      17, 101206, 1073280832, 10113.6
+      18, 95639, 884337088, 8818.26
+  WaitingForHandshakeComplete -> ReadyToReceive:
+    Count: 1
+    Total duration: 335730 µs
+    Average duration: 335730 µs
+    Min duration: 335730 µs
+    Max duration: 335730 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 335730, 0
+  WaitingForMetadata -> Done:
+    Count: 1
+    Total duration: 133 µs
+    Average duration: 133 µs
+    Min duration: 133 µs
+    Max duration: 133 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 133, 0
+  WaitingForMetadata -> WaitingForData:
+    Count: 19
+    Total duration: 10978 µs
+    Average duration: 577.789 µs
+    Min duration: 38 µs
+    Max duration: 5501 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 3438, 0
+      1, 406, 0
+      2, 84, 0
+      3, 110, 0
+      4, 62, 0
+      5, 72, 0
+      6, 124, 0
+      7, 127, 0
+      8, 132, 0
+      9, 146, 0
+      10, 5501, 0
+      11, 115, 0
+      12, 127, 0
+      13, 171, 0
+      14, 69, 0
+      15, 98, 0
+      16, 38, 0
+      17, 51, 0
+      18, 107, 0
+I20251107 17:41:58.838546 4082804 CudfExchangeSource.cpp:148] CudfExchangeSource::close called.
+I20251107 17:41:58.838551 4082804 CudfExchangeSource.cpp:149] closing task: task0/0
+I20251107 17:41:58.838555 4082804 CudfExchangeSource.cpp:150] Close receiver to remote task0/0.
+I20251107 17:41:58.838559 4082804 CudfExchangeSource.cpp:151]
+StateTransitionMetrics:
+  Total transitions recorded: 61
+
+  Statistics:
+  Created -> WaitingForHandshakeComplete:
+    Count: 1
+    Total duration: 27322 µs
+    Average duration: 27322 µs
+    Min duration: 27322 µs
+    Max duration: 27322 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 27322, 0
+  ReadyToReceive -> WaitingForMetadata:
+    Count: 20
+    Total duration: 22402 µs
+    Average duration: 1120.1 µs
+    Min duration: 12 µs
+    Max duration: 5921 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 2014, 0
+      1, 12, 0
+      2, 310, 0
+      3, 5690, 0
+      4, 191, 0
+      5, 465, 0
+      6, 717, 0
+      7, 565, 0
+      8, 825, 0
+      9, 655, 0
+      10, 5921, 0
+      11, 692, 0
+      12, 562, 0
+      13, 762, 0
+      14, 730, 0
+      15, 417, 0
+      16, 583, 0
+      17, 664, 0
+      18, 431, 0
+      19, 196, 0
+  WaitingForData -> ReadyToReceive:
+    Count: 19
+    Total duration: 2064941 µs
+    Average duration: 108681 µs
+    Min duration: 9284 µs
+    Max duration: 508285 µs
+    Total bytes: 20206302400
+    Average bytes: 1.06349e+09
+    Min bytes: 884337088
+    Max bytes: 1073671232
+    Overall throughput: 9332.1 MB/s
+    Average throughput: 9332.1 MB/s
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 508285, 1073468224, 2014.1
+      1, 9817, 1073586304, 104294
+      2, 86841, 1073500864, 11789
+      3, 9284, 1073380544, 110260
+      4, 18372, 1073461696, 55722.4
+      5, 94028, 1073310848, 10886
+      6, 98434, 1073671232, 10402.2
+      7, 97573, 1073546560, 10492.8
+      8, 95881, 1073257088, 10675.1
+      9, 100848, 1073633216, 10152.9
+      10, 121064, 1073343232, 8455.2
+      11, 107490, 1073240000, 9522.02
+      12, 92416, 1073435840, 11077.2
+      13, 94099, 1073316992, 10877.9
+      14, 123452, 1073627136, 8293.84
+      15, 98336, 1073440640, 10410.4
+      16, 101347, 1073464064, 10101.3
+      17, 95834, 1073280832, 10680.6
+      18, 111540, 884337088, 7561.14
+  WaitingForHandshakeComplete -> ReadyToReceive:
+    Count: 1
+    Total duration: 1491503 µs
+    Average duration: 1.4915e+06 µs
+    Min duration: 1491503 µs
+    Max duration: 1491503 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 1491503, 0
+  WaitingForMetadata -> Done:
+    Count: 1
+    Total duration: 41 µs
+    Average duration: 41 µs
+    Min duration: 41 µs
+    Max duration: 41 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 41, 0
+  WaitingForMetadata -> WaitingForData:
+    Count: 19
+    Total duration: 719343 µs
+    Average duration: 37860.2 µs
+    Min duration: 40 µs
+    Max duration: 700883 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 700883, 0
+      1, 15132, 0
+      2, 54, 0
+      3, 71, 0
+      4, 115, 0
+      5, 50, 0
+      6, 50, 0
+      7, 56, 0
+      8, 120, 0
+      9, 64, 0
+      10, 49, 0
+      11, 66, 0
+      12, 48, 0
+      13, 71, 0
+      14, 2292, 0
+      15, 40, 0
+      16, 49, 0
+      17, 58, 0
+      18, 75, 0
+I20251107 17:41:58.838649 4082804 CudfExchangeSource.cpp:148] CudfExchangeSource::close called.
+I20251107 17:41:58.838653 4082804 CudfExchangeSource.cpp:149] closing task: task0/0
+I20251107 17:41:58.838657 4082804 CudfExchangeSource.cpp:150] Close receiver to remote task0/0.
+I20251107 17:41:58.838660 4082804 CudfExchangeSource.cpp:151]
+StateTransitionMetrics:
+  Total transitions recorded: 61
+
+  Statistics:
+  Created -> WaitingForHandshakeComplete:
+    Count: 1
+    Total duration: 31916 µs
+    Average duration: 31916 µs
+    Min duration: 31916 µs
+    Max duration: 31916 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 31916, 0
+  ReadyToReceive -> WaitingForMetadata:
+    Count: 20
+    Total duration: 24507 µs
+    Average duration: 1225.35 µs
+    Min duration: 41 µs
+    Max duration: 9847 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 1857, 0
+      1, 672, 0
+      2, 9847, 0
+      3, 328, 0
+      4, 41, 0
+      5, 347, 0
+      6, 508, 0
+      7, 464, 0
+      8, 634, 0
+      9, 479, 0
+      10, 5738, 0
+      11, 469, 0
+      12, 427, 0
+      13, 644, 0
+      14, 400, 0
+      15, 354, 0
+      16, 491, 0
+      17, 495, 0
+      18, 253, 0
+      19, 59, 0
+  WaitingForData -> ReadyToReceive:
+    Count: 19
+    Total duration: 2775571 µs
+    Average duration: 146083 µs
+    Min duration: 9459 µs
+    Max duration: 1204353 µs
+    Total bytes: 20206302400
+    Average bytes: 1.06349e+09
+    Min bytes: 884337088
+    Max bytes: 1073671232
+    Overall throughput: 6942.8 MB/s
+    Average throughput: 6942.8 MB/s
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 1204353, 1073468224, 850.032
+      1, 19448, 1073586304, 52645.6
+      2, 86917, 1073500864, 11778.7
+      3, 9459, 1073380544, 108220
+      4, 18524, 1073461696, 55265.2
+      5, 94161, 1073310848, 10870.6
+      6, 98617, 1073671232, 10382.9
+      7, 97695, 1073546560, 10479.7
+      8, 96089, 1073257088, 10652
+      9, 101040, 1073633216, 10133.6
+      10, 121259, 1073343232, 8441.6
+      11, 107719, 1073240000, 9501.77
+      12, 92544, 1073435840, 11061.9
+      13, 94237, 1073316992, 10861.9
+      14, 125964, 1073627136, 8128.44
+      15, 98375, 1073440640, 10406.2
+      16, 101453, 1073464064, 10090.7
+      17, 96008, 1073280832, 10661.2
+      18, 111709, 884337088, 7549.7
+  WaitingForHandshakeComplete -> ReadyToReceive:
+    Count: 1
+    Total duration: 1486705 µs
+    Average duration: 1.4867e+06 µs
+    Min duration: 1486705 µs
+    Max duration: 1486705 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 1486705, 0
+  WaitingForMetadata -> Done:
+    Count: 1
+    Total duration: 168 µs
+    Average duration: 168 µs
+    Min duration: 168 µs
+    Max duration: 168 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 168, 0
+  WaitingForMetadata -> WaitingForData:
+    Count: 19
+    Total duration: 6537 µs
+    Average duration: 344.053 µs
+    Min duration: 40 µs
+    Max duration: 5259 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 219, 0
+      1, 48, 0
+      2, 65, 0
+      3, 5259, 0
+      4, 107, 0
+      5, 43, 0
+      6, 58, 0
+      7, 49, 0
+      8, 102, 0
+      9, 56, 0
+      10, 40, 0
+      11, 53, 0
+      12, 43, 0
+      13, 65, 0
+      14, 112, 0
+      15, 47, 0
+      16, 42, 0
+      17, 52, 0
+      18, 77, 0
+I20251107 17:41:58.848712 4082803 FileSink.cpp:160] closing file: /tmp/velox_test_Mnepfa/local:://processor-0_0_5_f8169ff9-3441-422b-b231-920cc4a79dcb,  total size: 16.02KB
+I20251107 17:41:58.849110 4082803 Task.cpp:1377] All drivers (2) finished for task local:://processor-0 after running for 10.50s
+I20251107 17:41:58.849129 4082803 Task.cpp:2428] Terminating task local:://processor-0 with state Finished after running for 10.50s
+I20251107 17:41:58.849397 4082765 1brc_client.cpp:259] *** processing task done in: 10501 milliseconds
+Going to clean-up
+I20251107 17:41:58.849536 4082765 Communicator.cpp:155] In Communicator::stop  elements_.size(): 0 endpoints_.size(): 0 workQueue_._size(): 0
+I20251107 17:41:58.849581 4082790 Communicator.cpp:149] Communicator stopping.
+Going to leave main
+I20251107 17:41:58.884416 4082765 TempDirectoryPath.cpp:29] TempDirectoryPath:: removing all files from /tmp/velox_test_Mnepfa
+[1762533719.047735] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047747] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047748] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047750] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047751] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047753] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047754] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047755] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047757] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047757] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047758] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047759] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047760] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047762] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047763] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047764] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047765] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047767] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047768] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047769] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047771] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047772] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047773] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047774] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047776] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047777] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047778] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047779] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047779] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047780] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047781] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047782] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047783] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047791] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047793] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047794] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047796] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047797] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047798] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047799] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047800] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047801] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047802] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047803] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047804] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047805] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047805] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047806] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047807] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047807] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047808] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047809] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047809] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047810] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047811] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047811] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047812] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047813] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047813] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047814] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047815] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047815] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047816] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047817] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047817] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047818] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047819] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047819] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047820] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047876] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047878] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047879] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047879] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047880] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047881] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047881] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047882] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047883] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047883] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047884] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047885] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047885] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047886] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047887] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047887] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047888] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047889] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047889] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047890] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047891] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047891] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047892] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047893] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047893] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047894] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047895] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047895] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047896] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047897] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047898] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047899] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047899] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047900] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047901] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047901] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047902] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047903] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047903] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047904] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047905] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047905] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047906] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047907] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047907] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047908] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047909] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047909] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047910] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047911] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047911] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047912] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047913] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047913] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047914] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047915] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047915] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047916] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047917] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047930] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047930] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047931] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762533719.047932] [sally:4082765:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+I20251107 17:41:59.054589 4082765 Communicator.cpp:85] Communicator destructed

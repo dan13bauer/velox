@@ -1,0 +1,5 @@
+terminate called after throwing an instance of 'std::bad_weak_ptr'
+  what():  bad_weak_ptr
+*** Aborted at 1762533779 (Unix time, try 'date -d @1762533779') ***
+*** Signal 6 (SIGABRT) (0x3e9003e4fed) received by PID 4083693 (pthread TID 0x7f035ec87000) (linux TID 4083756) (maybe from PID 4083693, UID 1001) (code: -6), stack trace: ***
+(error retrieving stack trace)

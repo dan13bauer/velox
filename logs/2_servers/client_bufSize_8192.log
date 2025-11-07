@@ -1,0 +1,413 @@
+I20251107 17:16:08.757596 4053962 HiveConnector.cpp:53] Hive connector test-hive created with maximum of 20000 cached file handles with expiration of 0ms.
+I20251107 17:16:09.327059 4053962 1brc_client.cpp:180] Going to write to: /tmp/velox_test_uiVGB7
+I20251107 17:16:10.178118 4053990 Communicator.cpp:120] Communicator running with error handling in blocking progress mode
+I20251107 17:16:10.178203 4053962 1brc_client.cpp:233] Adding split: http://sally:24356/v1/task/task0/results/0
+I20251107 17:16:10.178288 4053962 1brc_client.cpp:233] Adding split: http://sally:24357/v1/task/task0/results/0
+I20251107 17:16:10.178342 4053962 1brc_client.cpp:239] Starting tasks
+I20251107 17:16:10.178774 4053962 ToCudf.cpp:72] + CompileState::compile
+I20251107 17:16:10.179193 4053962 ToCudf.cpp:427] - CompileState::compile
+I20251107 17:16:10.179252 4053962 ToCudf.cpp:72] + CompileState::compile
+I20251107 17:16:10.179788 4053962 ToCudf.cpp:427] - CompileState::compile
+I20251107 17:16:10.181607 4054034 ExchangeClientFacade.cpp:93] Activating Cudf exchange client for remote task id: http://sally:24357/v1/task/task0/results/0
+I20251107 17:16:10.181665 4054034 CudfExchangeSource.cpp:53]  Creating CudfExchangeSource http://sally:24357/v1/task/task0/results/0
+I20251107 17:16:10.181754 4054034 CudfExchangeClient.cpp:43] Added remote split for task: http://sally:24357/v1/task/task0/results/0
+I20251107 17:16:10.181849 4054034 ExchangeClientFacade.cpp:93] Activating Cudf exchange client for remote task id: http://sally:24356/v1/task/task0/results/0
+I20251107 17:16:10.181861 4054034 CudfExchangeSource.cpp:53]  Creating CudfExchangeSource http://sally:24356/v1/task/task0/results/0
+I20251107 17:16:10.181869 4054034 CudfExchangeClient.cpp:43] Added remote split for task: http://sally:24356/v1/task/task0/results/0
+I20251107 17:16:10.181874 4054034 CudfExchangeClient.cpp:54] CudfExchangeClient::noMoreRemoteTasks called.
+I20251107 17:16:10.181900 4054034 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:16:10.184146 4053990 CudfExchangeSource.cpp:233] [ExchangeSource task0/0(0)] Sending handshake with initial value: task0/0 to server
+I20251107 17:16:10.184573 4053990 CudfExchangeSource.cpp:233] [ExchangeSource task0/0(0)] Sending handshake with initial value: task0/0 to server
+I20251107 17:16:10.408897 4053990 CudfExchangeSource.cpp:268] [ExchangeSource task0/0(0)]+ onHandshake Success
+I20251107 17:16:10.408947 4053990 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 0 using tag: cda0d3c302000000
+I20251107 17:16:10.409555 4053990 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:16:10.409569 4053990 CudfExchangeSource.cpp:329] Datasize bytes == 10287967104
+I20251107 17:16:10.410084 4053990 CudfExchangeSource.cpp:362] Allocated 10287967104 bytes of device memory
+I20251107 17:16:10.410095 4053990 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 0 using tag: cda0d3c303000000
+I20251107 17:16:10.977731 4053990 CudfExchangeSource.cpp:268] [ExchangeSource task0/0(0)]+ onHandshake Success
+I20251107 17:16:10.977805 4053990 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 0 using tag: cda0d3c302000000
+I20251107 17:16:10.978185 4053990 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:16:10.978195 4053990 CudfExchangeSource.cpp:329] Datasize bytes == 10287967104
+I20251107 17:16:10.978222 4053990 CudfExchangeSource.cpp:362] Allocated 10287967104 bytes of device memory
+I20251107 17:16:10.978227 4053990 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 0 using tag: cda0d3c303000000
+I20251107 17:16:11.541471 4053990 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:16:11.541486 4053990 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 0
+I20251107 17:16:11.541728 4053990 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 1 using tag: cda0d3c302000001
+I20251107 17:16:11.541787 4053990 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:16:11.541795 4053990 CudfExchangeSource.cpp:329] Datasize bytes == 10290202624
+I20251107 17:16:11.541817 4053990 CudfExchangeSource.cpp:362] Allocated 10290202624 bytes of device memory
+I20251107 17:16:11.541821 4053990 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 1 using tag: cda0d3c303000001
+I20251107 17:16:11.541821 4054034 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:16:11.835994 4053990 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:16:11.836011 4053990 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 0
+I20251107 17:16:11.836035 4053990 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 1 using tag: cda0d3c302000001
+I20251107 17:16:11.836241 4053990 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:16:11.836247 4053990 CudfExchangeSource.cpp:329] Datasize bytes == 10290202624
+I20251107 17:16:11.842103 4053990 CudfExchangeSource.cpp:362] Allocated 10290202624 bytes of device memory
+I20251107 17:16:11.842116 4053990 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 1 using tag: cda0d3c303000001
+I20251107 17:16:12.137579 4053990 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:16:12.137598 4053990 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 1
+I20251107 17:16:12.137621 4053990 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 2 using tag: cda0d3c302000002
+I20251107 17:16:12.137696 4053990 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:16:12.137706 4053990 CudfExchangeSource.cpp:329] Datasize bytes == 3028596992
+I20251107 17:16:12.167258 4053990 CudfExchangeSource.cpp:362] Allocated 3028596992 bytes of device memory
+I20251107 17:16:12.167268 4053990 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 2 using tag: cda0d3c303000002
+I20251107 17:16:12.193933 4053990 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:16:12.193945 4053990 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 1
+I20251107 17:16:12.193976 4053990 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:16:12.193984 4053990 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 2
+I20251107 17:16:12.194007 4053990 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 2 using tag: cda0d3c302000002
+I20251107 17:16:12.194028 4053990 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 3 using tag: cda0d3c302000003
+I20251107 17:16:12.194044 4053990 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:16:12.194051 4053990 CudfExchangeSource.cpp:329] Datasize bytes == 3028596992
+I20251107 17:16:12.194067 4053990 CudfExchangeSource.cpp:362] Allocated 3028596992 bytes of device memory
+I20251107 17:16:12.194070 4053990 CudfExchangeSource.cpp:367] [ExchangeSource task0/0(0)] waiting for data for chunk: 2 using tag: cda0d3c303000002
+I20251107 17:16:12.194139 4053990 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:16:12.194149 4053990 CudfExchangeSource.cpp:329] Datasize bytes == 0
+I20251107 17:16:12.194154 4053990 CudfExchangeSource.cpp:335] There is no more data to transfer for [ExchangeSource task0/0(0)]
+I20251107 17:16:12.212805 4053990 CudfExchangeSource.cpp:394] + onData Success
+I20251107 17:16:12.212817 4053990 CudfExchangeSource.cpp:407] [ExchangeSource task0/0(0)]+ onData Success got chunk: 2
+I20251107 17:16:12.212873 4053990 CudfExchangeSource.cpp:282] [ExchangeSource task0/0(0)] waiting for metadata for chunk: 3 using tag: cda0d3c302000003
+I20251107 17:16:12.212895 4053990 CudfExchangeSource.cpp:303] + onMetadata Success
+I20251107 17:16:12.212901 4053990 CudfExchangeSource.cpp:329] Datasize bytes == 0
+I20251107 17:16:12.212908 4053990 CudfExchangeSource.cpp:335] There is no more data to transfer for [ExchangeSource task0/0(0)]
+I20251107 17:16:12.367380 4053990 Communicator.cpp:212] In Communicator::removeEndpointRef for Communicator with port = 13131
+I20251107 17:16:12.367635 4053990 Communicator.cpp:229] - Communicator::removeEndpointRef
+I20251107 17:16:12.971138 4054034 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:16:13.451562 4053990 Communicator.cpp:212] In Communicator::removeEndpointRef for Communicator with port = 13131
+I20251107 17:16:13.451753 4053990 Communicator.cpp:229] - Communicator::removeEndpointRef
+I20251107 17:16:13.850878 4054034 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:16:14.719914 4054034 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:16:15.552385 4054034 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:16:15.819370 4054034 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:16:16.151206 4054034 CudfExchangeClient.cpp:108] CudfExchangeClient::next called for task local:://processor-0
+I20251107 17:16:16.151389 4054034 CudfExchangeSource.cpp:148] CudfExchangeSource::close called.
+I20251107 17:16:16.151399 4054034 CudfExchangeSource.cpp:149] closing task: task0/0
+I20251107 17:16:16.151407 4054034 CudfExchangeSource.cpp:150] Close receiver to remote task0/0.
+I20251107 17:16:16.151412 4054034 CudfExchangeSource.cpp:151]
+StateTransitionMetrics:
+  Total transitions recorded: 13
+
+  Statistics:
+  Created -> WaitingForHandshakeComplete:
+    Count: 1
+    Total duration: 2380 µs
+    Average duration: 2380 µs
+    Min duration: 2380 µs
+    Max duration: 2380 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 2380, 0
+  ReadyToReceive -> WaitingForMetadata:
+    Count: 4
+    Total duration: 83 µs
+    Average duration: 20.75 µs
+    Min duration: 8 µs
+    Max duration: 33 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 25, 0
+      1, 17, 0
+      2, 8, 0
+      3, 33, 0
+  WaitingForData -> ReadyToReceive:
+    Count: 3
+    Total duration: 1754106 µs
+    Average duration: 584702 µs
+    Min duration: 26718 µs
+    Max duration: 1131606 µs
+    Total bytes: 23606766720
+    Average bytes: 7.86892e+09
+    Min bytes: 3028596992
+    Max bytes: 10290202624
+    Overall throughput: 12834.6 MB/s
+    Average throughput: 12834.6 MB/s
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 1131606, 10287967104, 8670.31
+      1, 595782, 10290202624, 16471.6
+      2, 26718, 3028596992, 108103
+  WaitingForHandshakeComplete -> ReadyToReceive:
+    Count: 1
+    Total duration: 224791 µs
+    Average duration: 224791 µs
+    Min duration: 224791 µs
+    Max duration: 224791 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 224791, 0
+  WaitingForMetadata -> Done:
+    Count: 1
+    Total duration: 132 µs
+    Average duration: 132 µs
+    Min duration: 132 µs
+    Max duration: 132 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 132, 0
+  WaitingForMetadata -> WaitingForData:
+    Count: 3
+    Total duration: 30915 µs
+    Average duration: 10305 µs
+    Min duration: 101 µs
+    Max duration: 29657 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 1157, 0
+      1, 101, 0
+      2, 29657, 0
+I20251107 17:16:16.151515 4054034 CudfExchangeSource.cpp:148] CudfExchangeSource::close called.
+I20251107 17:16:16.151520 4054034 CudfExchangeSource.cpp:149] closing task: task0/0
+I20251107 17:16:16.151523 4054034 CudfExchangeSource.cpp:150] Close receiver to remote task0/0.
+I20251107 17:16:16.151526 4054034 CudfExchangeSource.cpp:151]
+StateTransitionMetrics:
+  Total transitions recorded: 13
+
+  Statistics:
+  Created -> WaitingForHandshakeComplete:
+    Count: 1
+    Total duration: 2701 µs
+    Average duration: 2701 µs
+    Min duration: 2701 µs
+    Max duration: 2701 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 2701, 0
+  ReadyToReceive -> WaitingForMetadata:
+    Count: 4
+    Total duration: 99 µs
+    Average duration: 24.75 µs
+    Min duration: 4 µs
+    Max duration: 43 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 43, 0
+      1, 13, 0
+      2, 39, 0
+      3, 4, 0
+  WaitingForData -> ReadyToReceive:
+    Count: 3
+    Total duration: 1228365 µs
+    Average duration: 409455 µs
+    Min duration: 18745 µs
+    Max duration: 857787 µs
+    Total bytes: 23606766720
+    Average bytes: 7.86892e+09
+    Min bytes: 3028596992
+    Max bytes: 10290202624
+    Overall throughput: 18327.8 MB/s
+    Average throughput: 18327.8 MB/s
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 857787, 10287967104, 11438
+      1, 351833, 10290202624, 27892.5
+      2, 18745, 3028596992, 154083
+  WaitingForHandshakeComplete -> ReadyToReceive:
+    Count: 1
+    Total duration: 793189 µs
+    Average duration: 793189 µs
+    Min duration: 793189 µs
+    Max duration: 793189 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 793189, 0
+  WaitingForMetadata -> Done:
+    Count: 1
+    Total duration: 327 µs
+    Average duration: 327 µs
+    Min duration: 327 µs
+    Max duration: 327 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 327, 0
+  WaitingForMetadata -> WaitingForData:
+    Count: 3
+    Total duration: 6603 µs
+    Average duration: 2201 µs
+    Min duration: 84 µs
+    Max duration: 6090 µs
+    Total bytes: 0
+    Average bytes: 0
+    Min bytes: 0
+    Max bytes: 0
+    Individual transitions:
+      Index, Duration µs, Bytes, Throughput MB/s
+      0, 429, 0
+      1, 6090, 0
+      2, 84, 0
+I20251107 17:16:16.163749 4054033 FileSink.cpp:160] closing file: /tmp/velox_test_uiVGB7/local:://processor-0_0_5_843950bf-6d23-44ea-bad4-02ee2dd4f129,  total size: 16.02KB
+I20251107 17:16:16.164186 4054033 Task.cpp:1377] All drivers (2) finished for task local:://processor-0 after running for 5.99s
+I20251107 17:16:16.164206 4054033 Task.cpp:2428] Terminating task local:://processor-0 with state Finished after running for 5.99s
+I20251107 17:16:16.164307 4053962 1brc_client.cpp:259] *** processing task done in: 5985 milliseconds
+Going to clean-up
+I20251107 17:16:16.164475 4053962 Communicator.cpp:155] In Communicator::stop  elements_.size(): 0 endpoints_.size(): 0 workQueue_._size(): 0
+I20251107 17:16:16.164496 4053990 Communicator.cpp:149] Communicator stopping.
+Going to leave main
+I20251107 17:16:16.196630 4053962 TempDirectoryPath.cpp:29] TempDirectoryPath:: removing all files from /tmp/velox_test_uiVGB7
+[1762532176.355130] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355137] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355138] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355139] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355140] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355141] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355141] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355142] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355143] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355144] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355145] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355146] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355147] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355147] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355148] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355149] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355149] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355150] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355151] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355151] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355152] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355153] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355153] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355154] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355155] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355155] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355156] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355157] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355157] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355158] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355159] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355159] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355160] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355161] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355161] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355162] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355163] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355163] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355164] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355165] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355165] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355167] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355168] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355168] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355169] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355170] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355170] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355171] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355172] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355172] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355173] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355174] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355174] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355175] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355176] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355176] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355177] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355178] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355178] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355179] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355180] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355180] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355181] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355182] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355182] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355183] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355184] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355184] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355185] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355210] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355211] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355212] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355213] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355214] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355214] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355215] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355216] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355216] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355217] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355218] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355218] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355219] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355220] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355220] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355221] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355222] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355222] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355223] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355224] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355224] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355225] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355226] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355226] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355227] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355228] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355228] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355229] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355230] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355230] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355231] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355232] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355232] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355233] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355234] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355234] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355235] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355236] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355236] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355237] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355238] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355238] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355239] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355240] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355240] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355241] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355242] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355242] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355243] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355244] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355244] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355245] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355246] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355246] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355247] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355248] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355248] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355249] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355250] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355256] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+[1762532176.355257] [sally:4053962:0]      cuda_iface.c:249  UCX  WARN  cuCtxGetId failed: unrecognized error code 4
+I20251107 17:16:16.357419 4053962 Communicator.cpp:85] Communicator destructed
