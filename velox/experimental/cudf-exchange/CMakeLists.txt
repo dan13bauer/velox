@@ -17,7 +17,7 @@ add_library(
   CudfOutputQueueManager.cpp
   CudfQueues.cpp
   CudfExchange.cpp
-  CombinedCudfHttpExchange.cpp
+  HybridExchange.cpp
   ExchangeClientFacade.cpp
   CudfExchangeProtocol.cpp
   CudfExchangeSource.cpp

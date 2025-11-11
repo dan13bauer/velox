@@ -11,19 +11,27 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-add_executable(velox_cudf_queue_mgr_test CudfOutputQueueManagerTest.cpp
-                                         Main.cpp)
+
+add_executable(
+  cudf_exchange_test
+  CudfOutputQueueManagerTest.cpp
+  CudfExchangeTest.cpp
+  Main.cpp
+  CudfTestHelpers.cpp
+  CudfTestData.cpp
+  CudfPartitionedOutputMock.cpp
+  SinkDriverMock.cpp)
 
 add_test(
-  NAME velox_cudf_queue_mgr_test
-  COMMAND velox_cudf_queue_mgr_test
+  NAME cudf_exchange_test
+  COMMAND cudf_exchange_test
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
-set_tests_properties(velox_cudf_queue_mgr_test PROPERTIES LABELS cuda_driver
-                                                          TIMEOUT 3000)
+set_tests_properties(cudf_exchange_test PROPERTIES LABELS cuda_driver TIMEOUT
+                                                   3000)
 
 target_link_libraries(
-  velox_cudf_queue_mgr_test
+  cudf_exchange_test
   velox_cudf_exchange
   velox_cudf_exec
   velox_exec

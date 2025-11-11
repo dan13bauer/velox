@@ -52,11 +52,11 @@ set(VELOX_cudf_SOURCE_URL
 )
 velox_resolve_dependency_url(cudf)
 
-set(VELOXX_ucxx_VERSION 0.45)
+set(VELOXX_ucxx_VERSION 0.46)
 set(VELOX_ucxx_BUILD_SHA256_CHECKSUM
-    e603bf66a1232c4fabb666d1b4860a8ad45eda53ec92d92e830ce126eac9f912)
+    29d04707a7650ccef6482e6a0aeadafa72f2e149d65886c4653255d456fc66b1)
 set(VELOX_ucxx_SOURCE_URL
-    "https://github.com/rapidsai/ucxx/archive/refs/tags/v0.45.01.tar.gz")
+    "https://github.com/rapidsai/ucxx/archive/refs/tags/v0.46.00.tar.gz")
 velox_resolve_dependency_url(ucxx)
 
 # Use block so we don't leak variables
@@ -65,6 +65,12 @@ block(SCOPE_FOR VARIABLES)
 set(BUILD_TESTS OFF)
 set(CUDF_BUILD_TESTUTIL OFF)
 set(BUILD_SHARED_LIBS ON)
+# UCXX build variables:
+set(UCXX_ENABLE_PYTHON OFF)
+set(UCXX_ENABLE_RMM ON)
+set(UCXX_BENCHMARKS_ENABLE_CUDA ON)
+set(BUILD_TESTS OFF)
+set(BUILD_BENCHMARKS OFF)
 
 FetchContent_Declare(
   rapids-cmake
