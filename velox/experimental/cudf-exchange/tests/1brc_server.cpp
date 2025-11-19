@@ -118,8 +118,6 @@ int main(int argc, char** argv) {
   // We need a connector id string to identify the connector.
   const std::string kCudfHiveConnectorId = "test-hive";
 
-  std::cout << "bla" << std::endl;
-
   // Configure the CudfHiveConnector with chunk size settings
   std::unordered_map<std::string, std::string> connectorConfig{};
   LOG(INFO) << "reading " << FLAGS_cudfChunkSizeMB << "MB chunks at once";
