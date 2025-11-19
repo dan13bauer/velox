@@ -120,7 +120,7 @@ int main(int argc, char** argv) {
   }
 
   // Default memory allocator used throughout this example.
-  const memory::MemoryManagerOptions options;
+  const memory::MemoryManager::Options options;
   memory::MemoryManager::initialize(options);
   auto pool = memory::memoryManager()->addLeafPool();
 
@@ -142,20 +142,35 @@ int main(int argc, char** argv) {
         registerNamedVectorSerde();
   }
 
-  // Register the Hive Connector Factory.
+#if 0
   const std::string kHiveConnectorId = "test-hive";
-  connector::registerConnectorFactory(
-      std::make_shared<connector::hive::HiveConnectorFactory>());
-  // Create a new connector instance from the connector factory and register
-  // it:
-  auto hiveConnector =
-      connector::getConnectorFactory(
-          connector::hive::HiveConnectorFactory::kHiveConnectorName)
-          ->newConnector(
-              kHiveConnectorId,
-              std::make_shared<config::ConfigBase>(
-                  std::unordered_map<std::string, std::string>()));
-  connector::registerConnector(hiveConnector);
+  // Unregister a previously registered connector, just to be sure.
+  connector::unregisterConnector(kHiveConnectorId);
+
+  // Add new values into the cudfHive configuration...
+  auto cudfHiveConfigurationValues =
+      std::unordered_map<std::string, std::string>();
+  cudfHiveConfigurationValues
+      [cudf_velox::connector::hive::CudfHiveConfig::kMaxChunkReadLimit] =
+          std::to_string(0);
+  cudfHiveConfigurationValues
+      [cudf_velox::connector::hive::CudfHiveConfig::kMaxPassReadLimit] =
+          std::to_string(0);
+  cudfHiveConfigurationValues[cudf_velox::connector::hive::CudfHiveConfig::
+                                  kAllowMismatchedCudfHiveSchemas] =
+      std::to_string(true);
+  auto cudfHiveProperties = std::make_shared<const config::ConfigBase>(
+      std::move(cudfHiveConfigurationValues));
+
+
+  // Create cudfHive connector with config...
+  cudf_velox::connector::hive::CudfHiveConnectorFactory CudfHiveFactory;
+  auto cudfHiveConnector = CudfHiveFactory.newConnector(
+      kHiveConnectorId,
+      cudfHiveProperties,
+      ioExecutor_.get());
+  connector::registerConnector(cudfHiveConnector);
+#endif
 
   // Enable cuDF operators
   facebook::velox::cudf_velox::registerCudf();
@@ -179,8 +194,6 @@ int main(int argc, char** argv) {
 
   LOG(INFO) << "Going to write to: " << absTempDirPath;
 
-  facebook::velox::cudf_velox::CudfOptions::getInstance()
-      .setShouldTransformLastOutput(false);
   // create a plan for processing the input read by the reader task.
   core::PlanNodeId exchangeNodeId;
   auto processorPlan =
