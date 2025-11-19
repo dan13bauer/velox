@@ -39,12 +39,12 @@ function install_ucx {
   local NEEDS_AUTOGEN=false
 
   if [ "${VELOX_UCX_VERSION}" == "master" ]; then
-      echo "UCX version is 'master', performing git checkout..."
-      github_checkout "${UCX_REPO_NAME}" "${VELOX_UCX_VERSION}"
-      NEEDS_AUTOGEN=true
+    echo "UCX version is 'master', performing git checkout..."
+    github_checkout "${UCX_REPO_NAME}" "${VELOX_UCX_VERSION}"
+    NEEDS_AUTOGEN=true
   else
-      echo "UCX version is '${VELOX_UCX_VERSION}', performing wget and untar..."
-      wget_and_untar https://github.com/openucx/ucx/releases/download/v"${VELOX_UCX_VERSION}"/ucx-"${VELOX_UCX_VERSION}".tar.gz ucx
+    echo "UCX version is '${VELOX_UCX_VERSION}', performing wget and untar..."
+    wget_and_untar https://github.com/openucx/ucx/releases/download/v"${VELOX_UCX_VERSION}"/ucx-"${VELOX_UCX_VERSION}".tar.gz ucx
   fi
 
   (
@@ -56,8 +56,8 @@ function install_ucx {
 
     mkdir build-linux && cd build-linux
     ../contrib/configure-release --prefix="${INSTALL_PREFIX}" --with-sysroot --enable-cma \
-        --enable-mt --with-gnu-ld --with-rdmacm --with-verbs \
-        --with-cuda="/usr/local/cuda"
+      --enable-mt --with-gnu-ld --with-rdmacm --with-verbs \
+      --with-cuda="/usr/local/cuda"
     make "-j${NPROC}"
     ${SUDO} make install
   )
