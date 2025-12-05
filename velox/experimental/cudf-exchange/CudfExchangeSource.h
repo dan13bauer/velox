@@ -123,6 +123,7 @@ class CudfExchangeSource
   struct DataAndMetadata {
     MetadataMsg metadata;
     std::unique_ptr<rmm::device_buffer> dataBuf;
+    rmm::cuda_stream_view stream; // The stream used to allocate dataBuf
   };
 
   /// @brief The constructor is private in order to ensure that exchange sources
@@ -133,7 +134,7 @@ class CudfExchangeSource
   /// @param port The portnumber of the upstream CudfExchangeServer
   /// @param partitionKey the partition identifier that the remote task is
   /// writing to
-  /// @param queue the queue of packed_columns that we write to when data is
+  /// @param queue the queue of packed tables that we write to when data is
   /// available
   explicit CudfExchangeSource(
       const std::shared_ptr<Communicator> communicator,
@@ -151,7 +152,7 @@ class CudfExchangeSource
 
   // Put the received data into the exchange queue.
   void enqueue(
-      std::unique_ptr<cudf::packed_columns> columns,
+      PackedTableWithStreamPtr data,
       MetadataMsg& metadata);
 
   /// @brief Sets the endpoint for this receiver.
@@ -214,7 +215,7 @@ class CudfExchangeSource
 
   uint32_t sequenceNumber_{0};
 
-  // The shared queue of packed_columns that all CudfExchangeSources write to
+  // The shared queue of packed tables that all CudfExchangeSources write to
   const std::shared_ptr<CudfExchangeQueue> queue_{nullptr};
   std::atomic<bool> closed_{false};
   bool atEnd_{false}; // set when "atEnd" is being received.

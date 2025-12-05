@@ -209,13 +209,13 @@ std::shared_ptr<CudfExchangeSource> CudfExchangeSource::getSelfPtr() {
 }
 
 void CudfExchangeSource::enqueue(
-    std::unique_ptr<cudf::packed_columns> columns,
+    PackedTableWithStreamPtr data,
     MetadataMsg& metadata) {
   std::vector<velox::ContinuePromise> queuePromises;
   {
     std::lock_guard<std::mutex> l(queue_->mutex());
 
-    queue_->enqueueLocked(std::move(columns), queuePromises);
+    queue_->enqueueLocked(std::move(data), queuePromises);
   }
   // wake up consumers of the CudfExchangeQueue
   for (auto& promise : queuePromises) {
@@ -361,12 +361,12 @@ void CudfExchangeSource::onMetadata(
     }
 
     // Now allocate memory for the CudaVector
-    // Get a stream from the global stream pool
-    auto stream =
+    // Get a stream from the global stream pool and store it for later use
+    ptr->stream =
         facebook::velox::cudf_velox::cudfGlobalStreamPool().get_stream();
     try {
       ptr->dataBuf = std::make_unique<rmm::device_buffer>(
-          ptr->metadata.dataSizeBytes, stream);
+          ptr->metadata.dataSizeBytes, ptr->stream);
     } catch (const rmm::bad_alloc& e) {
       VLOG(0) << toString() << " *** RMM  failed to allocate: " << e.what();
       queue_->setError(
@@ -377,7 +377,7 @@ void CudfExchangeSource::onMetadata(
     }
 
     // sync after allocating.
-    stream.synchronize();
+    ptr->stream.synchronize();
 
     VLOG(3) << toString() << " Allocated " << ptr->metadata.dataSizeBytes
             << " bytes of device memory";
@@ -442,10 +442,20 @@ void CudfExchangeSource::onData(
     metrics_.numPackedColumns_.addValue(1);
     metrics_.totalBytes_.addValue(ptr->metadata.dataSizeBytes);
 
-    std::unique_ptr<cudf::packed_columns> columns =
-        std::make_unique<cudf::packed_columns>(
-            std::move(ptr->metadata.cudfMetadata), std::move(ptr->dataBuf));
-    enqueue(std::move(columns), ptr->metadata);
+    // Create packed_columns from the received metadata and data buffer
+    cudf::packed_columns packedCols(
+        std::move(ptr->metadata.cudfMetadata), std::move(ptr->dataBuf));
+
+    // Unpack to get the table_view and create a packed_table
+    cudf::table_view tableView = cudf::unpack(packedCols);
+    auto packedTable = std::make_unique<cudf::packed_table>(
+        cudf::packed_table{tableView, std::move(packedCols)});
+
+    // Bundle the packed_table with the stream that was used for allocation
+    auto data = std::make_unique<PackedTableWithStream>(
+        std::move(packedTable), ptr->stream);
+
+    enqueue(std::move(data), ptr->metadata);
     setStateIf(ReceiverState::WaitingForData, ReceiverState::ReadyToReceive);
   }
   communicator_->addToWorkQueue(getSelfPtr());
