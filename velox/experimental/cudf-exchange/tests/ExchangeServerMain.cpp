@@ -30,6 +30,7 @@
 #include "velox/experimental/cudf-exchange/CudfExchangeProtocol.h"
 #include "velox/experimental/cudf-exchange/CudfExchangeServer.h"
 #include "velox/experimental/cudf-exchange/CudfOutputQueueManager.h"
+#include "velox/experimental/cudf-exchange/CudfQueues.h"
 #include "velox/experimental/cudf/exec/ToCudf.h"
 
 using namespace facebook::velox::cudf_exchange;
@@ -97,7 +98,7 @@ class CudfExchangeServerTest {
     return task;
   }
 
-  std::unique_ptr<cudf::packed_columns> makePackedColumns(
+  std::unique_ptr<cudf::table> makeTable(
       std::size_t numRows,
       rmm::cuda_stream_view stream,
       rmm::device_async_resource_ref mr) {
@@ -148,16 +149,11 @@ class CudfExchangeServerTest {
         vec2.size() * sizeof(double),
         cudaMemcpyHostToDevice);
 
-    // Build cudf::table
+    // Build cudf::table directly (no pack/unpack)
     std::vector<std::unique_ptr<cudf::column>> columns;
     columns.push_back(std::move(col1));
     columns.push_back(std::move(col2));
-    auto table = std::make_unique<cudf::table>(std::move(columns));
-
-    cudf::packed_columns packed = cudf::pack(table->view());
-
-    return std::unique_ptr<cudf::packed_columns>(new cudf::packed_columns(
-        std::move(packed.metadata), std::move(packed.gpu_data)));
+    return std::make_unique<cudf::table>(std::move(columns));
   }
 
   // Returns the enqueued page byte size.
@@ -167,10 +163,16 @@ class CudfExchangeServerTest {
       vector_size_t size,
       rmm::cuda_stream_view stream,
       rmm::device_async_resource_ref mr) {
-    ContinueFuture future;
-    auto data = makePackedColumns(size, stream, mr);
-    auto blocked = queueManager_->enqueue(
-        taskId, destination, std::move(data), size, &future);
+    auto table = makeTable(size, stream, mr);
+    stream.synchronize();
+
+    // Build TableWithMetadata directly from table (no pack/unpack)
+    auto tableData = std::make_unique<TableWithMetadata>();
+    tableData->metadata = TableMetadata::buildFromTable(table->view());
+    tableData->table = std::move(table);
+    tableData->numRows = static_cast<cudf::size_type>(size);
+
+    queueManager_->enqueue(taskId, destination, std::move(tableData));
   }
 
   void noMoreData(const std::string& taskId) {

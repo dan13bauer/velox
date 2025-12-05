@@ -190,11 +190,11 @@ std::unique_ptr<cudf::column> make_strings_column_from_host(
       rmm::device_buffer{}); // null mask
 }
 
-std::unique_ptr<cudf::packed_columns> makeFilledPackedColumns(
+std::unique_ptr<cudf::table> makeFilledTable(
     std::size_t numRows,
     std::shared_ptr<CudfTestData> dataToSend,
     rmm::cuda_stream_view stream) {
-  // Create packed columns with default value
+  // Create table with filled data
   std::vector<std::unique_ptr<cudf::column>> columns;
 
   facebook::velox::RowTypePtr rowType = CudfTestData::kTestRowType;
@@ -229,19 +229,15 @@ std::unique_ptr<cudf::packed_columns> makeFilledPackedColumns(
 
     columns.push_back(std::move(col));
   }
-  auto table = std::make_unique<cudf::table>(std::move(columns));
 
-  cudf::packed_columns packed = cudf::pack(table->view(), stream);
-
-  return std::unique_ptr<cudf::packed_columns>(new cudf::packed_columns(
-      std::move(packed.metadata), std::move(packed.gpu_data)));
+  return std::make_unique<cudf::table>(std::move(columns));
 }
 
-std::unique_ptr<cudf::packed_columns> makePackedColumns(
+std::unique_ptr<cudf::table> makeTable(
     std::size_t numRows,
     facebook::velox::RowTypePtr rowType,
     rmm::cuda_stream_view stream) {
-  // Create packed columns with default value
+  // Create table with default values
   std::vector<std::unique_ptr<cudf::column>> columns;
 
   for (size_t i = 0; i < rowType->size(); ++i) {
@@ -278,12 +274,7 @@ std::unique_ptr<cudf::packed_columns> makePackedColumns(
     columns.push_back(std::move(col));
   }
 
-  auto table = std::make_unique<cudf::table>(std::move(columns));
-
-  cudf::packed_columns packed = cudf::pack(table->view(), stream);
-
-  return std::unique_ptr<cudf::packed_columns>(new cudf::packed_columns(
-      std::move(packed.metadata), std::move(packed.gpu_data)));
+  return std::make_unique<cudf::table>(std::move(columns));
 }
 
 std::vector<std::string> getStringCol(

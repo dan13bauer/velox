@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 #include "velox/experimental/cudf-exchange/tests/CudfPartitionedOutputMock.h"
+#include "velox/experimental/cudf-exchange/CudfExchangeProtocol.h"
+#include "velox/experimental/cudf-exchange/CudfQueues.h"
 #include "velox/experimental/cudf-exchange/tests/CudfTestHelpers.h"
 
 namespace facebook::velox::cudf_exchange {
@@ -48,7 +50,6 @@ void CudfPartitionedOutputMock::joinThreads() {
 }
 
 void CudfPartitionedOutputMock::publishDataChunks() {
-  bool blocked;
   ContinueFuture future;
   // create numPartitions_ x numDataChunks_ data chunks and
   // push it into the destination queues identified by the taskId.
@@ -61,13 +62,11 @@ void CudfPartitionedOutputMock::publishDataChunks() {
       // create a data chunk with numRowsPerChunk_ rows
       // and push it into the destination queue identified by the taskId.
 
-      std::unique_ptr<cudf::packed_columns> packedColumns;
+      std::unique_ptr<cudf::table> table;
       if (dataToSend_ == nullptr) {
-        packedColumns = makePackedColumns(
-            numRowsPerChunk_, CudfTestData::kTestRowType, stream);
+        table = makeTable(numRowsPerChunk_, CudfTestData::kTestRowType, stream);
       } else {
-        packedColumns =
-            makeFilledPackedColumns(numRowsPerChunk_, dataToSend_, stream);
+        table = makeFilledTable(numRowsPerChunk_, dataToSend_, stream);
       }
       // Sync the stream since UCXX/UCX is not stream oriented and without
       // syncing, data could get lost. Syncing here is  easy but not the most
@@ -75,13 +74,19 @@ void CudfPartitionedOutputMock::publishDataChunks() {
       // the data through the queue and synchronize on the event before calling
       // into UCXX.
       stream.synchronize();
-      blocked = queueManager_->enqueue(
+
+      // Build TableWithMetadata directly from table (no pack/unpack)
+      auto tableData = std::make_unique<TableWithMetadata>();
+      tableData->metadata = TableMetadata::buildFromTable(table->view());
+      tableData->table = std::move(table);
+      tableData->numRows = static_cast<cudf::size_type>(numRowsPerChunk_);
+
+      queueManager_->enqueue(
           taskId_,
-          partition,
-          std::move(packedColumns),
-          numRowsPerChunk_,
-          &future);
-      if (blocked) {
+          static_cast<int>(partition),
+          std::move(tableData));
+      // Check if blocked after enqueueing all partitions for this batch
+      if (queueManager_->checkBlocked(taskId_, &future)) {
         // wait until the queue becomes non-full.
         future.wait();
       }

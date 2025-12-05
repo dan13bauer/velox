@@ -1,0 +1,2 @@
+- Build velox unit tests in /gpfs/zc2/u/dnb/presto/presto-native-execution/velox using this command: cmake --build _build/release -j --target=cudf_exchange_test
+- To release UCXX ports, set environment variable export UCX_TCP_CM_REUSEADDR=y before running any unit test.

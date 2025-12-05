@@ -17,6 +17,8 @@
 
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include <cudf/table/table_view.hpp>
+#include <cudf/types.hpp>
 #include <cinttypes>
 #include <cstring>
 #include <iostream>
@@ -63,6 +65,71 @@ struct HandshakeMsg {
   uint32_t destination;
 };
 
+/// @brief Metadata for a single cudf column, used for UCX transfer.
+/// This struct captures all the information needed to reconstruct a column
+/// from its raw GPU buffer data after transfer.
+struct ColumnMetadata {
+  cudf::type_id typeId;         // Column data type id
+  int32_t typeScale;            // Scale for fixed_point types (0 for others)
+  cudf::size_type size;         // Number of elements
+  cudf::size_type nullCount;    // Count of null values
+  int64_t dataSize;             // Size of data buffer in bytes (-1 if empty)
+  int64_t nullMaskSize;         // Size of null mask buffer in bytes (-1 if no nulls)
+  cudf::size_type numChildren;  // Number of child columns
+
+  /// Returns the serialized size of this struct in bytes.
+  static constexpr size_t serializedSize() {
+    return sizeof(int32_t) +     // typeId
+           sizeof(int32_t) +     // typeScale
+           sizeof(int32_t) +     // size
+           sizeof(int32_t) +     // nullCount
+           sizeof(int64_t) +     // dataSize
+           sizeof(int64_t) +     // nullMaskSize
+           sizeof(int32_t);      // numChildren
+  }
+
+  /// Serializes this ColumnMetadata to a buffer.
+  /// @param buffer Pointer to buffer with at least serializedSize() bytes.
+  void serialize(uint8_t* buffer) const;
+
+  /// Deserializes a ColumnMetadata from a buffer.
+  /// @param buffer Pointer to serialized data.
+  /// @return The deserialized ColumnMetadata.
+  static ColumnMetadata deserialize(const uint8_t* buffer);
+};
+
+/// @brief Manages metadata for a cudf table for UCX transfer.
+/// Builds metadata by traversing the table's columns in depth-first order.
+class TableMetadata {
+ public:
+  /// Build serialized metadata from a table view.
+  /// The metadata is stored in depth-first order, with a header containing
+  /// the number of root columns and total column count.
+  /// @param table The table to build metadata for.
+  /// @return Serialized metadata as a byte vector.
+  static std::unique_ptr<std::vector<uint8_t>> buildFromTable(
+      const cudf::table_view& table);
+
+  /// Deserialize metadata from a byte buffer.
+  /// @param buffer The serialized metadata.
+  /// @return Vector of ColumnMetadata in depth-first order.
+  static std::vector<ColumnMetadata> deserialize(
+      const std::vector<uint8_t>& buffer);
+
+  /// Get the number of root columns from serialized metadata.
+  /// @param buffer The serialized metadata.
+  /// @return Number of root (top-level) columns.
+  static int32_t getNumRootColumns(const std::vector<uint8_t>& buffer);
+
+ private:
+  /// Recursively build metadata for a column and its children.
+  /// @param col The column view to process.
+  /// @param metadata Output vector to append metadata to.
+  static void buildColumnMetadata(
+      const cudf::column_view& col,
+      std::vector<ColumnMetadata>& metadata);
+};
+
 constexpr uint32_t kMagicNumber = 0x12345678;
 constexpr uint32_t kMetaBufSize = 4096;
 
@@ -71,6 +138,7 @@ struct MetadataMsg {
   int64_t dataSizeBytes;
   std::vector<int64_t> remainingBytes;
   bool atEnd;
+  int32_t numColumns; // Number of columns in the table for column-based transfer
 
   uint32_t getSerializedSize() {
     // The header: the magic number and the metadata length (an uint32_t).
@@ -87,6 +155,8 @@ struct MetadataMsg {
     totalSize += remainingBytes.size() * sizeof(uint64_t);
 
     totalSize += sizeof(uint8_t); // atEnd, encoded in a byte.
+
+    totalSize += sizeof(int32_t); // numColumns
 
     return totalSize;
   }
@@ -141,6 +211,10 @@ struct MetadataMsg {
 
     // Serialize atEnd bool as 0/1.
     *ptr = atEnd ? 1 : 0;
+    ptr += sizeof(uint8_t);
+
+    // Serialize numColumns.
+    std::memcpy(ptr, &numColumns, sizeof(int32_t));
 
     return std::make_pair<std::shared_ptr<uint8_t>, size_t>(
         std::move(buffer), totalSize);
@@ -211,6 +285,12 @@ struct MetadataMsg {
     // Deserialize bool `atEnd` (stored as a single byte: 1 for true, 0 for
     // false)
     record.atEnd = (*ptr != 0);
+    ptr += sizeof(uint8_t);
+
+    // Deserialize numColumns.
+    if (ptr + sizeof(int32_t) > endPtr)
+      throw std::runtime_error("Insufficient data for numColumns");
+    std::memcpy(&record.numColumns, ptr, sizeof(int32_t));
 
     return record;
   }

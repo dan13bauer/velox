@@ -23,10 +23,11 @@
 #include <rmm/device_buffer.hpp>
 #include <memory>
 #include <vector>
-#include "CudfTestHelpers.h"
 #include "folly/experimental/EventCount.h"
 #include "velox/common/memory/MemoryPool.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
+#include "velox/experimental/cudf-exchange/CudfExchangeProtocol.h"
+#include "velox/experimental/cudf-exchange/CudfQueues.h"
 #include "velox/experimental/cudf-exchange/tests/CudfTestHelpers.h"
 
 using namespace facebook::velox::cudf_exchange;
@@ -62,12 +63,19 @@ class CudfOutputQueueManagerTest : public testing::Test {
     return task;
   }
 
-  std::unique_ptr<cudf::packed_columns> makePackedColumns(std::size_t numRows) {
+  std::unique_ptr<TableWithMetadata> makeTableWithMetadata(std::size_t numRows) {
     rmm::cuda_stream_view stream = rmm::cuda_stream_default;
-    auto cols = facebook::velox::cudf_exchange::makePackedColumns(
+    // Create table directly without going through pack/unpack
+    auto table = facebook::velox::cudf_exchange::makeTable(
         numRows, CudfTestData::kTestRowType, stream);
     stream.synchronize();
-    return cols;
+
+    // Build TableWithMetadata
+    auto tableData = std::make_unique<TableWithMetadata>();
+    tableData->metadata = TableMetadata::buildFromTable(table->view());
+    tableData->table = std::move(table);
+    tableData->numRows = static_cast<cudf::size_type>(numRows);
+    return tableData;
   }
 
   void enqueue(const std::string& taskId, vector_size_t size) {
@@ -76,10 +84,8 @@ class CudfOutputQueueManagerTest : public testing::Test {
 
   // Returns the enqueued page byte size.
   void enqueue(const std::string& taskId, int destination, vector_size_t size) {
-    ContinueFuture future;
-    auto data = makePackedColumns(size);
-    auto blocked = queueManager_->enqueue(
-        taskId, destination, std::move(data), size, &future);
+    auto data = makeTableWithMetadata(size);
+    queueManager_->enqueue(taskId, destination, std::move(data));
   }
 
   void noMoreData(const std::string& taskId) {
@@ -95,7 +101,7 @@ class CudfOutputQueueManagerTest : public testing::Test {
         taskId,
         destination,
         [destination, expectedEndMarker, &receivedData](
-            std::unique_ptr<cudf::packed_columns> data,
+            std::unique_ptr<TableWithMetadata> data,
             std::vector<int64_t> remainingBytes) {
           ASSERT_EQ(expectedEndMarker, data == nullptr)
               << "for destination " << destination;
@@ -108,7 +114,7 @@ class CudfOutputQueueManagerTest : public testing::Test {
       int destination,
       bool& receivedEndMarker) {
     return [destination, &receivedEndMarker](
-               std::unique_ptr<cudf::packed_columns> data,
+               std::unique_ptr<TableWithMetadata> data,
                std::vector<int64_t> remainingBytes) {
       EXPECT_FALSE(receivedEndMarker) << "for destination " << destination;
       EXPECT_TRUE(data == nullptr) << "for destination " << destination;
@@ -142,7 +148,7 @@ class CudfOutputQueueManagerTest : public testing::Test {
   CudfDataAvailableCallback receiveData(int destination, bool& receivedData) {
     receivedData = false;
     return [destination, &receivedData](
-               std::unique_ptr<cudf::packed_columns> data,
+               std::unique_ptr<TableWithMetadata> data,
                std::vector<int64_t> /*remainingBytes*/) {
       EXPECT_FALSE(receivedData) << "for destination " << destination;
       EXPECT_TRUE(data != nullptr) << "for destination " << destination;
@@ -163,7 +169,7 @@ class CudfOutputQueueManagerTest : public testing::Test {
   void dataFetcher(
       const std::string& taskId,
       int destination,
-      int64_t& fetchedPackedColumns,
+      int64_t& fetchedTables,
       bool earlyTermination) {
     int64_t received{0};
     folly::Random::DefaultGenerator rng;
@@ -179,7 +185,7 @@ class CudfOutputQueueManagerTest : public testing::Test {
       queueManager_->getData(
           taskId,
           destination,
-          [&](std::unique_ptr<cudf::packed_columns> data,
+          [&](std::unique_ptr<TableWithMetadata> data,
               std::vector<int64_t> /*remainingBytes*/) {
             if (data == nullptr) {
               atEnd = true;
@@ -197,7 +203,7 @@ class CudfOutputQueueManagerTest : public testing::Test {
     // out of order requests are allowed (fetch after delete)
     {
       struct Response {
-        std::unique_ptr<cudf::packed_columns> data;
+        std::unique_ptr<TableWithMetadata> data;
         std::vector<int64_t> remainingBytes;
       };
       folly::Promise<Response> promise;
@@ -206,7 +212,7 @@ class CudfOutputQueueManagerTest : public testing::Test {
           taskId,
           destination,
           [&promise](
-              std::unique_ptr<cudf::packed_columns> data,
+              std::unique_ptr<TableWithMetadata> data,
               std::vector<int64_t> remainingBytes) {
             promise.setValue(
                 Response{std::move(data), std::move(remainingBytes)});
@@ -218,7 +224,7 @@ class CudfOutputQueueManagerTest : public testing::Test {
       ASSERT_EQ(response.data, nullptr);
     }
 
-    fetchedPackedColumns = received;
+    fetchedTables = received;
   }
 
   std::shared_ptr<facebook::velox::memory::MemoryPool> pool_;
@@ -340,7 +346,7 @@ TEST_F(CudfOutputQueueManagerTest, lateTaskCreation) {
 
   // Fetch data from a non-existing task.
   struct Response {
-    std::unique_ptr<cudf::packed_columns> data;
+    std::unique_ptr<TableWithMetadata> data;
     std::vector<int64_t> remainingBytes;
   };
   folly::Promise<Response> promise;
@@ -349,7 +355,7 @@ TEST_F(CudfOutputQueueManagerTest, lateTaskCreation) {
       taskId,
       destination,
       [&promise](
-          std::unique_ptr<cudf::packed_columns> data,
+          std::unique_ptr<TableWithMetadata> data,
           std::vector<int64_t> remainingBytes) {
         promise.setValue(Response{std::move(data), std::move(remainingBytes)});
       });
@@ -374,7 +380,7 @@ TEST_F(CudfOutputQueueManagerTest, lateTaskCreation) {
         taskId,
         destination,
         [&promise](
-            std::unique_ptr<cudf::packed_columns> data,
+            std::unique_ptr<TableWithMetadata> data,
             std::vector<int64_t> remainingBytes) {
           promise.setValue(
               Response{std::move(data), std::move(remainingBytes)});

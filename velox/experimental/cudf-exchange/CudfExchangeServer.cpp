@@ -14,10 +14,12 @@
  * limitations under the License.
  */
 #include "velox/experimental/cudf-exchange/CudfExchangeServer.h"
+#include <cudf/contiguous_split.hpp>
 #include <glog/logging.h>
 #include "cuda_runtime.h"
 #include "velox/experimental/cudf-exchange/Communicator.h"
 #include "velox/experimental/cudf-exchange/CudfExchangeProtocol.h"
+#include "velox/experimental/cudf/exec/Utilities.h"
 
 namespace facebook::velox::cudf_exchange {
 
@@ -66,7 +68,7 @@ void CudfExchangeServer::process() {
           partitionKey_.taskId,
           partitionKey_.destination,
           [weakQueue](
-              std::unique_ptr<cudf::packed_columns> data,
+              std::unique_ptr<TableWithMetadata> data,
               std::vector<int64_t> remainingBytes) {
             auto self = weakQueue.lock();
             if (!self) {
@@ -132,8 +134,10 @@ void CudfExchangeServer::close() {
   if (metaRequest_ && !metaRequest_->isCompleted()) {
     metaRequest_->cancel();
   }
-  if (dataRequest_ && !dataRequest_->isCompleted()) {
-    dataRequest_->cancel();
+  for (auto& req : dataRequests_) {
+    if (req && !req->isCompleted()) {
+      req->cancel();
+    }
   }
 
   communicator_->unregister(getSelfPtr());
@@ -159,10 +163,16 @@ void CudfExchangeServer::sendData() {
   {
     std::lock_guard<std::recursive_mutex> lock(dataMutex_);
     if (dataPtr_) {
-      metadataMsg->cudfMetadata = std::move(dataPtr_->metadata);
-      metadataMsg->dataSizeBytes = dataPtr_->gpu_data->size();
+      // Build per-column metadata from the table view for the receiver.
+      // This uses the new TableMetadata format that contains ColumnMetadata
+      // entries in depth-first order, which the receiver can use to
+      // reconstruct the table from per-column buffer transfers.
+      metadataMsg->cudfMetadata =
+          TableMetadata::buildFromTable(dataPtr_->table->view());
+      metadataMsg->dataSizeBytes = dataPtr_->gpuDataSize();
       metadataMsg->remainingBytes = {};
       metadataMsg->atEnd = false;
+      metadataMsg->numColumns = dataPtr_->table->num_columns();
     } else {
       VLOG(3) << "@" << partitionKey_.taskId << " Final exchange for "
               << partitionKey_.toString();
@@ -170,6 +180,7 @@ void CudfExchangeServer::sendData() {
       metadataMsg->dataSizeBytes = 0;
       metadataMsg->remainingBytes = {};
       metadataMsg->atEnd = true;
+      metadataMsg->numColumns = 0;
     }
   }
 
@@ -211,34 +222,143 @@ void CudfExchangeServer::sendData() {
       },
       serializedMetadata);
 
-  // send the data chunk (if any)
+  // Send data per-column without packing
   {
     std::lock_guard<std::recursive_mutex> lock(dataMutex_);
-    if (dataPtr_) {
+    if (dataPtr_ && dataPtr_->table) {
       sendStart_ = std::chrono::high_resolution_clock::now();
-      bytes_ = dataPtr_->gpu_data->size();
-      VLOG(3) << "@" << partitionKey_.taskId << " Sending rmm::buffer: "
-              << std::hex << dataPtr_->gpu_data.get()
-              << " pointing to device memory: " << std::hex
-              << dataPtr_->gpu_data->data() << std::dec << " to task "
-              << partitionKey_.toString() << ":" << this->sequenceNumber_
-              << std::dec << " of size " << bytes_;
+
+      auto numColumns = dataPtr_->table->num_columns();
+      VLOG(3) << "@" << partitionKey_.taskId << " Sending table with "
+              << numColumns << " columns to task " << partitionKey_.toString()
+              << ":" << this->sequenceNumber_ << " using per-column transfer";
 
       setState(ServerState::WaitingForSendComplete);
-      uint64_t dataTag =
+
+      // Base tag for data - we'll add offsets for each column/buffer
+      uint64_t baseDataTag =
           getDataTag(this->partitionKeyHash_, this->sequenceNumber_);
-      // Use weak_ptr to prevent use-after-free if close() is called during callback
-      std::weak_ptr<CudfExchangeServer> weakData = weak_from_this();
-      dataRequest_ = endpointRef_->endpoint_->tagSend(
-          dataPtr_->gpu_data->data(),
-          dataPtr_->gpu_data->size(),
-          ucxx::Tag{dataTag},
-          false,
-          [weakData](ucs_status_t status, std::shared_ptr<void> arg) {
-            if (auto self = weakData.lock()) {
-              self->sendComplete(status, arg);
+
+      dataRequests_.clear();
+      bytes_ = 0;
+
+      // Release ownership of all columns and send their buffers
+      auto columns = dataPtr_->table->release();
+
+      // Store released column contents to keep buffers alive until send completes
+      auto releasedContents =
+          std::make_shared<std::vector<cudf::column::contents>>();
+      releasedContents->reserve(numColumns);
+
+      // We send buffers in depth-first order to match metadata order.
+      // Tag encoding: baseDataTag + (columnIndex * 2) for data,
+      //               baseDataTag + (columnIndex * 2) + 1 for null_mask
+      uint32_t bufferIndex = 0;
+
+      std::function<void(std::unique_ptr<cudf::column>)> sendColumn =
+          [&](std::unique_ptr<cudf::column> col) {
+            if (!col) {
+              return;
             }
-          });
+
+            // Get column info before release
+            auto dataType = col->type();
+            auto size = col->size();
+            auto nullCount = col->null_count();
+            auto numChildren = col->num_children();
+
+            // Release the column to get its raw buffers
+            auto contents = col->release();
+
+            // Send data buffer if present
+            if (contents.data && contents.data->size() > 0) {
+              uint64_t dataTag = baseDataTag + (bufferIndex * 2);
+              auto dataSize = contents.data->size();
+              bytes_ += dataSize;
+
+              VLOG(3) << "@" << partitionKey_.taskId << " Sending data buffer "
+                      << bufferIndex << " size " << dataSize << " tag "
+                      << std::hex << dataTag << std::dec;
+
+              // Keep buffer alive - move to shared container
+              auto dataBuffer = std::shared_ptr<rmm::device_buffer>(
+                  contents.data.release());
+
+              std::weak_ptr<CudfExchangeServer> weakData = weak_from_this();
+              auto req = endpointRef_->endpoint_->tagSend(
+                  dataBuffer->data(),
+                  dataBuffer->size(),
+                  ucxx::Tag{dataTag},
+                  false,
+                  [weakData, dataBuffer](
+                      ucs_status_t status, std::shared_ptr<void> arg) {
+                    if (auto self = weakData.lock()) {
+                      size_t remaining =
+                          self->pendingDataRequests_.fetch_sub(1) - 1;
+                      if (remaining == 0) {
+                        self->sendComplete(status, arg);
+                      }
+                    }
+                  });
+              dataRequests_.push_back(req);
+              pendingDataRequests_.fetch_add(1);
+            }
+
+            // Send null mask buffer if present
+            if (contents.null_mask && contents.null_mask->size() > 0) {
+              uint64_t nullTag = baseDataTag + (bufferIndex * 2) + 1;
+              auto nullSize = contents.null_mask->size();
+              bytes_ += nullSize;
+
+              VLOG(3) << "@" << partitionKey_.taskId
+                      << " Sending null_mask buffer " << bufferIndex << " size "
+                      << nullSize << " tag " << std::hex << nullTag << std::dec;
+
+              // Keep buffer alive
+              auto nullBuffer = std::shared_ptr<rmm::device_buffer>(
+                  contents.null_mask.release());
+
+              std::weak_ptr<CudfExchangeServer> weakData = weak_from_this();
+              auto req = endpointRef_->endpoint_->tagSend(
+                  nullBuffer->data(),
+                  nullBuffer->size(),
+                  ucxx::Tag{nullTag},
+                  false,
+                  [weakData, nullBuffer](
+                      ucs_status_t status, std::shared_ptr<void> arg) {
+                    if (auto self = weakData.lock()) {
+                      size_t remaining =
+                          self->pendingDataRequests_.fetch_sub(1) - 1;
+                      if (remaining == 0) {
+                        self->sendComplete(status, arg);
+                      }
+                    }
+                  });
+              dataRequests_.push_back(req);
+              pendingDataRequests_.fetch_add(1);
+            }
+
+            bufferIndex++;
+
+            // Recursively process children (depth-first order)
+            for (auto& child : contents.children) {
+              sendColumn(std::move(child));
+            }
+          };
+
+      // Send all columns
+      for (auto& col : columns) {
+        sendColumn(std::move(col));
+      }
+
+      VLOG(3) << "@" << partitionKey_.taskId << " Initiated "
+              << pendingDataRequests_.load() << " buffer sends, total "
+              << bytes_ << " bytes";
+
+      // If no buffers to send (e.g., empty table), complete immediately
+      if (pendingDataRequests_.load() == 0) {
+        sendComplete(UCS_OK, nullptr);
+      }
     } else {
       // Data pointer is null, so no more data will be coming.
       VLOG(3) << "@" << partitionKey_.taskId
@@ -262,13 +382,12 @@ void CudfExchangeServer::sendComplete(
   }
   if (status == UCS_OK) {
     std::lock_guard<std::recursive_mutex> lock(dataMutex_);
-    VELOX_CHECK(dataPtr_ != nullptr, "dataPtr_ is null");
 
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = end - sendStart_;
     auto micros =
         std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
-    auto throughput = bytes_ / micros;
+    auto throughput = micros > 0 ? bytes_ / micros : 0;
 
     VLOG(3) << "@" << partitionKey_.taskId << " duration: "
             << std::chrono::duration_cast<std::chrono::milliseconds>(duration)
@@ -278,7 +397,8 @@ void CudfExchangeServer::sendComplete(
             << " MByte/s";
 
     this->sequenceNumber_++;
-    dataPtr_.reset(); // release memory.
+    dataPtr_.reset(); // release memory (table columns already released)
+    dataRequests_.clear(); // clear request pointers
     VLOG(3) << "@" << partitionKey_.taskId
             << " Releasing dataPtr_ in sendComplete.";
     setState(ServerState::ReadyToTransfer);

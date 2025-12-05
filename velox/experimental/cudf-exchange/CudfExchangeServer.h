@@ -15,7 +15,7 @@
  */
 #pragma once
 
-#include <cudf/contiguous_split.hpp>
+#include <cudf/column/column.hpp>
 #include <folly/Synchronized.h>
 #include <ucxx/api.h>
 #include <ucxx/utils/ucx.h>
@@ -101,18 +101,25 @@ class CudfExchangeServer
       partitionKeyHash_; // A hash of above, used to create unique tags.
 
   std::atomic<ServerState> state_;
-  std::unique_ptr<cudf::packed_columns> dataPtr_{nullptr};
+  std::unique_ptr<TableWithMetadata> dataPtr_{nullptr};
   std::recursive_mutex dataMutex_; // mutex for above ptr.
   std::atomic<bool> closed_{false};
 
+  // Helper to send a column recursively (including children)
+  void sendColumnRecursive(
+      cudf::column& col,
+      ucxx::Tag dataTag,
+      std::vector<std::shared_ptr<ucxx::Request>>& requests);
+
   uint32_t sequenceNumber_{0};
 
-  // The outstanding requests - there can only be one outstanding request
-  // of each type at any point in time.
+  // The outstanding requests.
   // NOTE: The request owns/holds references to the upcall function
   // and must therefore exist until the upcall is done.
   std::shared_ptr<ucxx::Request> metaRequest_{nullptr};
-  std::shared_ptr<ucxx::Request> dataRequest_{nullptr};
+  // For column-based transfer, we have multiple data requests (one per buffer)
+  std::vector<std::shared_ptr<ucxx::Request>> dataRequests_;
+  std::atomic<size_t> pendingDataRequests_{0};
 
   std::chrono::time_point<std::chrono::high_resolution_clock> sendStart_;
   std::size_t bytes_;

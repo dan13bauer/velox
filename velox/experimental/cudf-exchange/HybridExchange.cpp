@@ -146,7 +146,7 @@ bool HybridExchange::resultIsEmpty() {
     if constexpr (std::is_same_v<std::decay_t<decltype(res)>, SerPageVector>) {
       return res.empty();
     } else {
-      // PackedColPtr
+      // TablePtr
       return res == nullptr;
     }
   };
@@ -160,7 +160,7 @@ void HybridExchange::emptyResult() {
     if constexpr (std::is_same_v<std::decay_t<decltype(res)>, SerPageVector>) {
       res.clear();
     } else {
-      // PackedColPtr
+      // TablePtr
       res.reset();
     }
   };
@@ -171,8 +171,8 @@ const SerPageVector* HybridExchange::getResultPages() {
   return std::get_if<SerPageVector>(&currentData_);
 }
 
-const PackedColPtr* HybridExchange::getResultPackedColumns() {
-  return std::get_if<PackedColPtr>(&currentData_);
+const TablePtr* HybridExchange::getResultTable() {
+  return std::get_if<TablePtr>(&currentData_);
 }
 
 BlockingReason HybridExchange::isBlocked(ContinueFuture* future) {
@@ -354,39 +354,37 @@ RowVectorPtr HybridExchange::getOutputFromUnsafeRows(
   return result;
 }
 
-RowVectorPtr HybridExchange::getOutputFromPackedColumns(
-    const PackedColPtr* colsPtr) {
-  if (*colsPtr == nullptr) {
+RowVectorPtr HybridExchange::getOutputFromTable(const TablePtr* tablePtr) {
+  if (*tablePtr == nullptr) {
     return nullptr;
   }
-  // Convert the cudf::packed_columns into a RowVectorPtr.
-  cudf::table_view tblView = cudf::unpack(**colsPtr);
-  // create a new table from the table view and convert that into
-  // a CudfVector.
+  // The table is already unpacked - directly construct a CudfVector from it.
+  // This avoids the expensive cudf::unpack() operation.
   auto stream =
       facebook::velox::cudf_velox::cudfGlobalStreamPool().get_stream();
-  auto mr = cudf::get_current_device_resource_ref();
-  std::unique_ptr<cudf::table> tbl =
-      std::make_unique<cudf::table>(tblView, stream, mr);
 
-  stream.synchronize();
+  // We need to move the table out of the variant, which requires a const_cast
+  // since the variant gives us a const pointer. This is safe because we're
+  // about to empty the result anyway.
+  auto& mutableTablePtr = const_cast<TablePtr&>(*tablePtr);
+  auto numRows = mutableTablePtr->num_rows();
+  auto tableSize = mutableTablePtr->alloc_size();
 
-  auto numRows = tbl->num_rows();
   // outputType_ is declared in the Operator base class.
   auto result = std::make_shared<cudf_velox::CudfVector>(
-      pool(), outputType_, numRows, std::move(tbl), stream);
+      pool(), outputType_, numRows, std::move(mutableTablePtr), stream);
 
-  recordInputStats((*colsPtr)->gpu_data->size(), result);
-  // free the memory owned by packed_columns and set it to nullptr;
+  recordInputStats(tableSize, result);
+  // free the memory and set it to nullptr;
   emptyResult();
 
   return result;
 }
 
 RowVectorPtr HybridExchange::getOutput() {
-  const PackedColPtr* cols = getResultPackedColumns();
-  if (cols) {
-    return getOutputFromPackedColumns(cols);
+  const TablePtr* tablePtr = getResultTable();
+  if (tablePtr) {
+    return getOutputFromTable(tablePtr);
   }
   return getOutputFromPages(getResultPages());
 }

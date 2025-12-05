@@ -16,7 +16,11 @@
 
 #include <thread>
 
+#include <cudf/column/column.hpp>
+#include <cudf/column/column_factories.hpp>
 #include <cudf/contiguous_split.hpp>
+#include <cudf/structs/structs_column_view.hpp>
+#include <cudf/table/table.hpp>
 #include <folly/String.h>
 #include <folly/Uri.h>
 #include "velox/experimental/cudf-exchange/CudfExchangeSource.h"
@@ -209,13 +213,13 @@ std::shared_ptr<CudfExchangeSource> CudfExchangeSource::getSelfPtr() {
 }
 
 void CudfExchangeSource::enqueue(
-    std::unique_ptr<cudf::packed_columns> columns,
+    std::unique_ptr<cudf::table> table,
     MetadataMsg& metadata) {
   std::vector<velox::ContinuePromise> queuePromises;
   {
     std::lock_guard<std::mutex> l(queue_->mutex());
 
-    queue_->enqueueLocked(std::move(columns), queuePromises);
+    queue_->enqueueLocked(std::move(table), queuePromises);
   }
   // wake up consumers of the CudfExchangeQueue
   for (auto& promise : queuePromises) {
@@ -343,7 +347,6 @@ void CudfExchangeSource::onMetadata(
 
     ptr->metadata =
         std::move(MetadataMsg::deserializeMetadataMsg(metadataMsg->data()));
-    // auto m = std::unique_ptr<MetadataMsg>(new MetadataMsg(msg));
 
     VLOG(3) << toString() << " Datasize bytes == "
             << ptr->metadata.dataSizeBytes;
@@ -355,22 +358,75 @@ void CudfExchangeSource::onMetadata(
       VLOG(3) << "There is no more data to transfer for " << toString();
       setStateIf(ReceiverState::WaitingForMetadata, ReceiverState::Done);
       communicator_->addToWorkQueue(getSelfPtr());
-      enqueue(nullptr, ptr->metadata);
+      enqueue(nullptr, ptr->metadata); // nullptr table marks end
       // jump out of this function.
       return;
     }
 
-    // Now allocate memory for the CudaVector
+    VLOG(3) << toString() << " Expecting " << ptr->metadata.numColumns
+            << " columns using per-column transfer";
+
+    // Parse the per-column metadata from cudfMetadata
+    std::vector<ColumnMetadata> columnMetadata;
+    if (ptr->metadata.cudfMetadata && !ptr->metadata.cudfMetadata->empty()) {
+      columnMetadata = TableMetadata::deserialize(*ptr->metadata.cudfMetadata);
+    }
+
+    if (columnMetadata.empty()) {
+      VLOG(0) << toString() << " No column metadata, cannot receive data";
+      queue_->setError("No column metadata in message");
+      setState(ReceiverState::Done);
+      communicator_->addToWorkQueue(getSelfPtr());
+      return;
+    }
+
+    // Create a structure to hold all the per-column buffers
+    struct PerColumnData {
+      MetadataMsg metadata;
+      std::vector<ColumnMetadata> columnMeta;
+      std::vector<std::unique_ptr<rmm::device_buffer>> dataBuffers;
+      std::vector<std::unique_ptr<rmm::device_buffer>> nullMaskBuffers;
+      std::atomic<size_t> pendingReceives{0};
+      std::atomic<bool> hasError{false};
+    };
+
+    auto perColData = std::make_shared<PerColumnData>();
+    perColData->metadata = std::move(ptr->metadata);
+    perColData->columnMeta = std::move(columnMetadata);
+    perColData->dataBuffers.resize(perColData->columnMeta.size());
+    perColData->nullMaskBuffers.resize(perColData->columnMeta.size());
+
     // Get a stream from the global stream pool
     auto stream =
         facebook::velox::cudf_velox::cudfGlobalStreamPool().get_stream();
+
+    // Allocate buffers for each column based on metadata
+    VLOG(3) << toString() << " Allocating buffers for " << perColData->columnMeta.size() << " columns";
     try {
-      ptr->dataBuf = std::make_unique<rmm::device_buffer>(
-          ptr->metadata.dataSizeBytes, stream);
+      for (size_t i = 0; i < perColData->columnMeta.size(); ++i) {
+        const auto& colMeta = perColData->columnMeta[i];
+
+        VLOG(3) << toString() << " Column " << i << " type=" << static_cast<int>(colMeta.typeId)
+                << " size=" << colMeta.size << " dataSize=" << colMeta.dataSize
+                << " nullMaskSize=" << colMeta.nullMaskSize << " numChildren=" << colMeta.numChildren;
+
+        // Allocate data buffer if needed
+        if (colMeta.dataSize > 0) {
+          perColData->dataBuffers[i] = std::make_unique<rmm::device_buffer>(
+              static_cast<size_t>(colMeta.dataSize), stream);
+          VLOG(3) << toString() << " Allocated data buffer " << i << " size " << colMeta.dataSize
+                  << " ptr=" << perColData->dataBuffers[i]->data();
+        }
+
+        // Allocate null mask buffer if needed
+        if (colMeta.nullMaskSize > 0) {
+          perColData->nullMaskBuffers[i] = std::make_unique<rmm::device_buffer>(
+              static_cast<size_t>(colMeta.nullMaskSize), stream);
+        }
+      }
     } catch (const rmm::bad_alloc& e) {
-      VLOG(0) << toString() << " *** RMM  failed to allocate: " << e.what();
-      queue_->setError(
-          "Failed to alloc GPU memory"); // Let the operator know via the queue
+      VLOG(0) << toString() << " *** RMM failed to allocate: " << e.what();
+      queue_->setError("Failed to alloc GPU memory");
       setState(ReceiverState::Done);
       communicator_->addToWorkQueue(getSelfPtr());
       return;
@@ -379,75 +435,298 @@ void CudfExchangeSource::onMetadata(
     // sync after allocating.
     stream.synchronize();
 
-    VLOG(3) << toString() << " Allocated " << ptr->metadata.dataSizeBytes
-            << " bytes of device memory";
-
-    // Initiate the transfer of the actual data from GPU-2-GPU
-    uint64_t dataTag = getDataTag(partitionKeyHash_, sequenceNumber_);
-    VLOG(3) << toString() << " waiting for data for chunk: " << sequenceNumber_
-            << " using tag: " << std::hex << dataTag << std::dec;
-
     if (!setStateIf(
             ReceiverState::WaitingForMetadata, ReceiverState::WaitingForData)) {
       VLOG(1) << toString() << " onMetadata Invalid previous state ";
       return;
     }
-    // Use weak_ptr to prevent use-after-free if close() is called during callback
+
+    // Base tag for data - matches the sender's tag encoding
+    uint64_t baseDataTag = getDataTag(partitionKeyHash_, sequenceNumber_);
+
+    // Initiate receives for each column's buffers
+    // Tag encoding: baseDataTag + (columnIndex * 2) for data,
+    //               baseDataTag + (columnIndex * 2) + 1 for null_mask
     std::weak_ptr<CudfExchangeSource> weak = weak_from_this();
-    request_ = endpointRef_->endpoint_->tagRecv(
-        ptr->dataBuf->data(),
-        ptr->metadata.dataSizeBytes,
-        ucxx::Tag{dataTag},
-        ucxx::TagMaskFull,
-        false,
-        [weak](ucs_status_t status, std::shared_ptr<void> arg) {
-          if (auto self = weak.lock()) {
-            self->onData(status, arg);
-          }
-        },
-        ptr // DataAndMetadata
-    );
+
+    // Verify endpoint is still valid
+    if (!endpointRef_ || !endpointRef_->endpoint_) {
+      VLOG(0) << toString() << " Endpoint is invalid, cannot receive data";
+      queue_->setError("Endpoint is invalid");
+      setState(ReceiverState::Done);
+      communicator_->addToWorkQueue(getSelfPtr());
+      return;
+    }
+
+    // Store all requests to keep them alive until completion
+    auto requests = std::make_shared<std::vector<std::shared_ptr<ucxx::Request>>>();
+    requests->reserve(perColData->columnMeta.size() * 2);  // data + null_mask per column
+
+    // Pre-calculate total pending receives BEFORE starting any tagRecv calls.
+    // This is critical because tagRecv callbacks can fire synchronously during
+    // the call, and we need pendingReceives to be fully initialized before any
+    // callback can decrement it.
+    size_t totalPendingReceives = 0;
+    for (size_t i = 0; i < perColData->columnMeta.size(); ++i) {
+      const auto& colMeta = perColData->columnMeta[i];
+      if (colMeta.dataSize > 0 && perColData->dataBuffers[i]) {
+        ++totalPendingReceives;
+      }
+      if (colMeta.nullMaskSize > 0 && perColData->nullMaskBuffers[i]) {
+        ++totalPendingReceives;
+      }
+    }
+
+    // If no buffers to receive (e.g., empty table), complete immediately
+    if (totalPendingReceives == 0) {
+      onPerColumnDataComplete(perColData);
+      return;
+    }
+
+    // Initialize the counter with the total count before any tagRecv calls
+    perColData->pendingReceives.store(totalPendingReceives);
+
+    for (size_t i = 0; i < perColData->columnMeta.size(); ++i) {
+      const auto& colMeta = perColData->columnMeta[i];
+
+      // Receive data buffer if expected
+      if (colMeta.dataSize > 0 && perColData->dataBuffers[i]) {
+        void* bufferPtr = perColData->dataBuffers[i]->data();
+
+        uint64_t dataTag = baseDataTag + (i * 2);
+
+        VLOG(3) << toString() << " Receiving data buffer " << i << " size "
+                << colMeta.dataSize << " tag " << std::hex << dataTag
+                << std::dec << " bufferPtr=" << bufferPtr;
+
+        auto req = endpointRef_->endpoint_->tagRecv(
+            bufferPtr,
+            static_cast<size_t>(colMeta.dataSize),
+            ucxx::Tag{dataTag},
+            ucxx::TagMaskFull,
+            false,
+            [weak, perColData, requests, i](
+                ucs_status_t status, std::shared_ptr<void> arg) {
+              if (status != UCS_OK) {
+                perColData->hasError.store(true);
+              }
+              size_t remaining = perColData->pendingReceives.fetch_sub(1) - 1;
+              if (remaining == 0) {
+                if (auto self = weak.lock()) {
+                  self->onPerColumnDataComplete(perColData);
+                }
+              }
+            });
+        requests->push_back(req);
+      }
+
+      // Receive null mask buffer if expected
+      if (colMeta.nullMaskSize > 0 && perColData->nullMaskBuffers[i]) {
+        void* nullBufPtr = perColData->nullMaskBuffers[i]->data();
+
+        uint64_t nullTag = baseDataTag + (i * 2) + 1;
+
+        VLOG(3) << toString() << " Receiving null_mask buffer " << i << " size "
+                << colMeta.nullMaskSize << " tag " << std::hex << nullTag
+                << std::dec << " bufferPtr=" << nullBufPtr;
+
+        auto req = endpointRef_->endpoint_->tagRecv(
+            nullBufPtr,
+            static_cast<size_t>(colMeta.nullMaskSize),
+            ucxx::Tag{nullTag},
+            ucxx::TagMaskFull,
+            false,
+            [weak, perColData, requests, i](
+                ucs_status_t status, std::shared_ptr<void> arg) {
+              if (status != UCS_OK) {
+                perColData->hasError.store(true);
+              }
+              size_t remaining = perColData->pendingReceives.fetch_sub(1) - 1;
+              if (remaining == 0) {
+                if (auto self = weak.lock()) {
+                  self->onPerColumnDataComplete(perColData);
+                }
+              }
+            });
+        requests->push_back(req);
+      }
+    }
   }
 }
 
-void CudfExchangeSource::onData(
-    ucs_status_t status,
-    std::shared_ptr<void> arg) {
+void CudfExchangeSource::onPerColumnDataComplete(std::shared_ptr<void> arg) {
+
   // Check if close() was called - avoid processing if we're shutting down
   if (closed_.load(std::memory_order_acquire)) {
-    VLOG(3) << toString() << " onData called after close, ignoring";
+    VLOG(3) << toString()
+            << " onPerColumnDataComplete called after close, ignoring";
     return;
   }
-  VLOG(3) << toString() << " + onData " << ucs_status_string(status);
 
-  if (status != UCS_OK) {
+  // Structure definition must match what was created in onMetadata
+  struct PerColumnData {
+    MetadataMsg metadata;
+    std::vector<ColumnMetadata> columnMeta;
+    std::vector<std::unique_ptr<rmm::device_buffer>> dataBuffers;
+    std::vector<std::unique_ptr<rmm::device_buffer>> nullMaskBuffers;
+    std::atomic<size_t> pendingReceives{0};
+    std::atomic<bool> hasError{false};
+  };
+
+  auto perColData = std::static_pointer_cast<PerColumnData>(arg);
+
+  if (perColData->hasError.load()) {
     std::string errorMsg = fmt::format(
-        "Failed to receive data from host {}:{}, task {}: {}",
+        "Failed to receive column data from host {}:{}, task {}",
         host_,
         port_,
-        partitionKey_.toString(),
-        ucs_status_string(status));
+        partitionKey_.toString());
     VLOG(0) << toString() << errorMsg;
     setState(ReceiverState::Done);
-    queue_->setError(errorMsg); // Let the operator know via the queue
-  } else {
-    VLOG(3) << toString() << "+ onData " << ucs_status_string(status)
-            << " got chunk: " << sequenceNumber_;
-
-    this->sequenceNumber_++;
-
-    std::shared_ptr<DataAndMetadata> ptr =
-        std::static_pointer_cast<DataAndMetadata>(arg);
-
-    metrics_.numPackedColumns_.addValue(1);
-    metrics_.totalBytes_.addValue(ptr->metadata.dataSizeBytes);
-
-    std::unique_ptr<cudf::packed_columns> columns =
-        std::make_unique<cudf::packed_columns>(
-            std::move(ptr->metadata.cudfMetadata), std::move(ptr->dataBuf));
-    enqueue(std::move(columns), ptr->metadata);
-    setStateIf(ReceiverState::WaitingForData, ReceiverState::ReadyToReceive);
+    queue_->setError(errorMsg);
+    communicator_->addToWorkQueue(getSelfPtr());
+    return;
   }
+
+  VLOG(3) << toString() << " + onPerColumnDataComplete got chunk: "
+          << sequenceNumber_;
+
+  this->sequenceNumber_++;
+
+  // Calculate total bytes received for metrics
+  int64_t totalBytes = 0;
+  for (const auto& colMeta : perColData->columnMeta) {
+    if (colMeta.dataSize > 0) {
+      totalBytes += colMeta.dataSize;
+    }
+    if (colMeta.nullMaskSize > 0) {
+      totalBytes += colMeta.nullMaskSize;
+    }
+  }
+
+  metrics_.numPackedColumns_.addValue(1);
+  metrics_.totalBytes_.addValue(totalBytes);
+
+  // Reconstruct the table from per-column buffers.
+  // The columns are stored in depth-first order in the metadata.
+  // We need to rebuild the column hierarchy.
+
+  int32_t numRootColumns = perColData->metadata.numColumns;
+  const auto& columnMeta = perColData->columnMeta;
+
+  // Helper function to recursively build a column from metadata and buffers
+  size_t bufferIndex = 0;
+  std::function<std::unique_ptr<cudf::column>(size_t&)> buildColumn =
+      [&](size_t& idx) -> std::unique_ptr<cudf::column> {
+    if (idx >= columnMeta.size()) {
+      return nullptr;
+    }
+
+    const auto& meta = columnMeta[idx];
+    auto& dataBuf = perColData->dataBuffers[idx];
+    auto& nullBuf = perColData->nullMaskBuffers[idx];
+
+    // Get data type
+    cudf::data_type dtype(meta.typeId, meta.typeScale);
+
+    // Log buffer status before moving
+    VLOG(3) << "buildColumn " << idx << " type=" << static_cast<int>(meta.typeId)
+            << " size=" << meta.size << " metaDataSize=" << meta.dataSize
+            << " dataBuf=" << (dataBuf ? "exists" : "null")
+            << " dataBufSize=" << (dataBuf ? dataBuf->size() : 0);
+
+    // Move buffers
+    rmm::device_buffer data;
+    if (dataBuf && dataBuf->size() > 0) {
+      data = std::move(*dataBuf);
+    }
+
+    rmm::device_buffer null_mask;
+    if (nullBuf && nullBuf->size() > 0) {
+      null_mask = std::move(*nullBuf);
+    }
+
+    // Build children recursively
+    std::vector<std::unique_ptr<cudf::column>> children;
+    size_t childIdx = idx + 1;
+    for (int32_t c = 0; c < meta.numChildren; ++c) {
+      auto child = buildColumn(childIdx);
+      if (child) {
+        children.push_back(std::move(child));
+      }
+    }
+    idx = childIdx;
+
+    VLOG(3) << "Building column " << idx << " type=" << static_cast<int>(meta.typeId)
+            << " size=" << meta.size << " nullCount=" << meta.nullCount
+            << " dataSize=" << data.size() << " nullMaskSize=" << null_mask.size()
+            << " numChildren=" << children.size();
+
+    // For types that don't have data (like STRUCT), we need to create them differently
+    // Also for columns with size=0, no data buffer is needed
+    std::unique_ptr<cudf::column> column;
+    if (meta.size == 0) {
+      // Empty column
+      column = cudf::make_empty_column(dtype);
+    } else if (meta.typeId == cudf::type_id::STRUCT) {
+      // STRUCT columns don't have data buffers, only children and null mask
+      column = cudf::make_structs_column(
+          meta.size,
+          std::move(children),
+          meta.nullCount,
+          std::move(null_mask));
+    } else if (meta.typeId == cudf::type_id::STRING) {
+      // STRING columns: data buffer contains chars, child(0) contains offsets
+      // data.size() can be 0 for columns of empty strings (valid case!)
+      // We need to create the column with the offsets child and chars data
+      column = std::make_unique<cudf::column>(
+          dtype,
+          meta.size,
+          std::move(data),  // chars (can be empty)
+          std::move(null_mask),
+          meta.nullCount,
+          std::move(children));  // offsets child
+    } else if (data.size() == 0 && meta.size > 0) {
+      // This shouldn't happen - we have a non-empty column but no data
+      // Log error and create an empty column as fallback
+      VLOG(0) << "ERROR: Column " << idx << " has size " << meta.size
+              << " but no data buffer!";
+      column = cudf::make_empty_column(dtype);
+    } else {
+      // Normal column with data
+      column = std::make_unique<cudf::column>(
+          dtype,
+          meta.size,
+          std::move(data),
+          std::move(null_mask),
+          meta.nullCount,
+          std::move(children));
+    }
+
+    return column;
+  };
+
+  // Build all root columns
+  std::vector<std::unique_ptr<cudf::column>> rootColumns;
+  rootColumns.reserve(numRootColumns);
+
+  size_t idx = 0;
+  for (int32_t i = 0; i < numRootColumns; ++i) {
+    auto col = buildColumn(idx);
+    if (col) {
+      rootColumns.push_back(std::move(col));
+    }
+  }
+
+  // Create the table from the columns
+  auto table = std::make_unique<cudf::table>(std::move(rootColumns));
+
+  VLOG(3) << toString() << " Reconstructed table with "
+          << table->num_columns() << " columns, " << table->num_rows()
+          << " rows from per-column data";
+
+  enqueue(std::move(table), perColData->metadata);
+  setStateIf(ReceiverState::WaitingForData, ReceiverState::ReadyToReceive);
   communicator_->addToWorkQueue(getSelfPtr());
 }
 

@@ -66,13 +66,13 @@ class CudfExchangeClient
     return queue_;
   }
 
-  /// Returns a packed_columns object from the queue or null.
+  /// Returns a cudf::table from the queue or null.
   ///
   /// If no data is available returns a nullptr and sets 'atEnd' to true if no
   /// more data is expected. If data is still expected, sets 'atEnd' to false
   /// and sets 'future' to a Future that will complete when data arrives.
   ///
-  std::unique_ptr<cudf::packed_columns>
+  std::unique_ptr<cudf::table>
   next(int consumerId, bool* atEnd, ContinueFuture* future);
 
   std::string toString() const;
@@ -100,8 +100,8 @@ class CudfExchangeClient
   std::vector<std::shared_ptr<CudfExchangeSource>> sources_;
   bool closed_{false};
 
-  // Total number of packed_clumns in flight.
-  int64_t totalPendingColumns_{0};
+  // Total number of tables in flight.
+  int64_t totalPendingTables_{0};
 };
 
 } // namespace facebook::velox::cudf_exchange

@@ -56,9 +56,8 @@ void CudfOutputQueueManager::initializeTask(
 void CudfOutputQueueManager::enqueue(
     const std::string& taskId,
     int destination,
-    std::unique_ptr<cudf::packed_columns> txData,
-    int numRows) {
-  getQueue(taskId)->enqueue(destination, std::move(txData), numRows);
+    std::unique_ptr<TableWithMetadata> txData) {
+  getQueue(taskId)->enqueue(destination, std::move(txData));
 }
 
 bool CudfOutputQueueManager::checkBlocked(

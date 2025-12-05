@@ -18,31 +18,30 @@
 namespace facebook::velox::cudf_exchange {
 
 void CudfDestinationQueue::Stats::recordEnqueue(
-    const cudf::packed_columns* data) {
+    const TableWithMetadata* data) {
   if (data != nullptr) {
-    bytesQueued += data->gpu_data->size();
-    packedColumnsQueued++;
+    bytesQueued += data->gpuDataSize();
+    tablesQueued++;
   }
 }
 
 void CudfDestinationQueue::Stats::recordDequeue(
-    const cudf::packed_columns* data) {
+    const TableWithMetadata* data) {
   if (data != nullptr) {
-    const int64_t size = data->gpu_data->size();
+    const int64_t size = data->gpuDataSize();
 
     bytesQueued -= size;
     VELOX_DCHECK_GE(bytesQueued, 0, "bytesQueued must be non-negative");
-    --packedColumnsQueued;
-    VELOX_DCHECK_GE(
-        packedColumnsQueued, 0, "packedColumnsQueued must be non-negative");
+    --tablesQueued;
+    VELOX_DCHECK_GE(tablesQueued, 0, "tablesQueued must be non-negative");
 
     bytesSent += size;
-    packedColumnsSent++;
+    tablesSent++;
   }
 }
 
 void CudfDestinationQueue::enqueueBack(
-    std::unique_ptr<cudf::packed_columns> data) {
+    std::unique_ptr<TableWithMetadata> data) {
   // drop duplicate end markers.
   if (data == nullptr && !queue_.empty() && queue_.back() == nullptr) {
     return;
@@ -55,7 +54,7 @@ void CudfDestinationQueue::enqueueBack(
 }
 
 void CudfDestinationQueue::enqueueFront(
-    std::unique_ptr<cudf::packed_columns> data) {
+    std::unique_ptr<TableWithMetadata> data) {
   // ignore nullptr.
   if (data == nullptr) {
     return;
@@ -86,7 +85,7 @@ CudfDestinationQueue::Data CudfDestinationQueue::getData(
       VELOX_CHECK_EQ(i, queue_.size() - 1, "null marker found in the middle");
       break;
     }
-    remainingBytes.push_back(queue_[i]->gpu_data->size());
+    remainingBytes.push_back(queue_[i]->gpuDataSize());
   }
   return {std::move(data), std::move(remainingBytes), true};
 }
@@ -192,8 +191,7 @@ void CudfOutputQueue::updateNumDrivers(uint32_t newNumDrivers) {
 
 void CudfOutputQueue::enqueue(
     int destination,
-    std::unique_ptr<cudf::packed_columns> data,
-    int32_t numRows) {
+    std::unique_ptr<TableWithMetadata> data) {
   VELOX_CHECK_NOT_NULL(data);
   VELOX_CHECK_NOT_NULL(task_);
   VELOX_CHECK(
@@ -204,7 +202,8 @@ void CudfOutputQueue::enqueue(
     VELOX_CHECK_LT(destination, queues_.size());
 
     // TODO: Support other output modes as well. This is only for partitioned.
-    auto numBytes = data->gpu_data->size();
+    auto numBytes = data->gpuDataSize();
+    auto numRows = data->numRows;
     if (enqueuePartitionedOutputLocked(
             destination, std::move(data), dataAvailableCallbacks)) {
       // enqueueing was successful - update the stats.
@@ -246,10 +245,10 @@ void CudfOutputQueue::getData(
     // have been removed. In this case, no data is returned.
     if (queue) {
       data = queue->getData([notify, this](
-                                std::unique_ptr<cudf::packed_columns> data,
+                                std::unique_ptr<TableWithMetadata> data,
                                 std::vector<int64_t> remainingBytes) {
         std::vector<ContinuePromise> promises;
-        int64_t bytes = data ? data->gpu_data->size() : -1L;
+        int64_t bytes = data ? data->gpuDataSize() : -1L;
         notify(std::move(data), std::move(remainingBytes));
         if (bytes >= 0L) {
           std::lock_guard<std::mutex> l(mutex_);
@@ -269,7 +268,7 @@ void CudfOutputQueue::getData(
       if (data.data) {
         // This implies data.immediate and no notify upcall will be done.
         // Need to update the stats here.
-        updateStatsWithFreedLocked(data.data->gpu_data->size(), 1L, promises);
+        updateStatsWithFreedLocked(data.data->gpuDataSize(), 1L, promises);
       }
     } else {
       data = CudfDestinationQueue::Data{nullptr, {}, true};
@@ -325,7 +324,7 @@ void CudfOutputQueue::checkIfDone(bool oneDriverFinished) {
 
 bool CudfOutputQueue::enqueuePartitionedOutputLocked(
     int destination,
-    std::unique_ptr<cudf::packed_columns> data,
+    std::unique_ptr<TableWithMetadata> data,
     std::vector<CudfDataAvailable>& dataAvailableCbs) {
   VELOX_DCHECK(dataAvailableCbs.empty());
   VELOX_CHECK_LT(destination, queues_.size());
@@ -367,14 +366,14 @@ void CudfOutputQueue::deleteResults(int destination) {
     }
     // remember destination queue fill stats
     int64_t bytes = queue->stats().bytesQueued;
-    int64_t packedCols = queue->stats().packedColumnsQueued;
+    int64_t numTables = queue->stats().tablesQueued;
     queue->deleteResults();
     dataAvailable = queue->getAndClearNotify();
     queue->finish();
     queues_[destination] = nullptr;
     isFinished = isFinishedLocked();
     // update CudfOutputQueue stats
-    updateStatsWithFreedLocked(bytes, packedCols, promises);
+    updateStatsWithFreedLocked(bytes, numTables, promises);
   }
 
   // Outside of mutex.
@@ -409,10 +408,10 @@ exec::OutputBuffer::Stats CudfOutputQueue::stats() {
       atEnd_,
       isFinishedLocked(),
       queuedBytes_,
-      queuedPackedColumns_,
+      queuedTables_,
       totalBytesSent_,
       totalRowsSent_,
-      totalPackedColumnsSent_,
+      totalTablesSent_,
       getAverageQueueTimeMsLocked(),
       0 /* FIXME: compute num top buffers. */,
       {/* FIXME: transition queueStats to exec::DestinationBuffer::Stats */});
@@ -425,24 +424,24 @@ void CudfOutputQueue::updateStatsWithEnqueuedLocked(
   updateTotalQueuedBytesMsLocked();
 
   queuedBytes_ += bytes;
-  queuedPackedColumns_++;
+  queuedTables_++;
 
   totalBytesSent_ += bytes;
   totalRowsSent_ += rows;
-  totalPackedColumnsSent_++;
+  totalTablesSent_++;
 }
 
 void CudfOutputQueue::updateStatsWithFreedLocked(
     int64_t bytes,
-    int64_t numPackedCols,
+    int64_t numTables,
     std::vector<ContinuePromise>& promises) {
   updateTotalQueuedBytesMsLocked();
 
   queuedBytes_ -= bytes;
-  queuedPackedColumns_ -= numPackedCols;
+  queuedTables_ -= numTables;
 
   VELOX_CHECK_GE(queuedBytes_, 0);
-  VELOX_CHECK_GE(queuedPackedColumns_, 0);
+  VELOX_CHECK_GE(queuedTables_, 0);
 
   // Check whether queue is below low-water mark and return outstanding
   // promises

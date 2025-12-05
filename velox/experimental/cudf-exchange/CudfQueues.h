@@ -16,6 +16,7 @@
 #pragma once
 
 #include <cudf/contiguous_split.hpp>
+#include <cudf/table/table.hpp>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -26,17 +27,35 @@
 
 namespace facebook::velox::cudf_exchange {
 
+/// @brief Holds an unpacked cudf::table along with its metadata.
+/// This avoids the expensive pack/unpack operations by keeping the table
+/// in its native form and only serializing the metadata.
+struct TableWithMetadata {
+  /// Metadata obtained from cudf::pack_metadata() - describes the table
+  /// structure without copying data.
+  std::unique_ptr<std::vector<uint8_t>> metadata;
+  /// The actual cudf::table with GPU-resident column data.
+  std::unique_ptr<cudf::table> table;
+  /// Number of rows in the table.
+  cudf::size_type numRows;
+
+  /// Returns the total GPU memory size of the table.
+  size_t gpuDataSize() const {
+    return table ? table->alloc_size() : 0;
+  }
+};
+
 /// @brief  Callback function for getting data from the queues.
 /// A nullptr indicates that there is no more data.
 /// The remainingBytes vector contains the sizes for the
-/// packed_columns elements remaining in the queue.
+/// TableWithMetadata elements remaining in the queue.
 using CudfDataAvailableCallback = std::function<void(
-    std::unique_ptr<cudf::packed_columns> data,
+    std::unique_ptr<TableWithMetadata> data,
     std::vector<int64_t> remainingBytes)>;
 
 struct CudfDataAvailable {
   CudfDataAvailableCallback callback{nullptr};
-  std::unique_ptr<cudf::packed_columns> data;
+  std::unique_ptr<TableWithMetadata> data;
   std::vector<int64_t> remainingBytes;
 
   void notify() {
@@ -46,39 +65,39 @@ struct CudfDataAvailable {
   }
 };
 
-/// @brief The CudfDestinationQueue stores cudf::packed_columns for a single
+/// @brief The CudfDestinationQueue stores TableWithMetadata for a single
 /// downstream task. The data is enqueued by one or more parallel
 /// CudfPartitionedOutput operators and dequeued again by the
 /// CudfExchangeServer. The CudfDestinationQueue corresponds to the
 /// DestinationBuffer of Velox. In Cudf, no serialization/deserialization is
-/// needed, only packing of data nor is the data segmented and re-assembled.
+/// needed, the table data is kept in its native form.
 class CudfDestinationQueue {
  public:
   struct Stats {
-    void recordEnqueue(const cudf::packed_columns* data);
+    void recordEnqueue(const TableWithMetadata* data);
 
-    void recordDequeue(const cudf::packed_columns* data);
+    void recordDequeue(const TableWithMetadata* data);
 
     // what has been queued
     int64_t bytesQueued{0};
-    int64_t packedColumnsQueued{0};
+    int64_t tablesQueued{0};
 
     // what has been dequeued
     int64_t bytesSent{0};
-    int64_t packedColumnsSent{0};
+    int64_t tablesSent{0};
   };
 
   /// @brief Enqueues the data to the back of the queue.
   /// @param data Corresponds to a RowVector
-  void enqueueBack(std::unique_ptr<cudf::packed_columns> data);
+  void enqueueBack(std::unique_ptr<TableWithMetadata> data);
 
   /// @brief Enqueues the data to the front of the queue. This is needed when
   /// a transfer fails.
   /// @param data
-  void enqueueFront(std::unique_ptr<cudf::packed_columns> data);
+  void enqueueFront(std::unique_ptr<TableWithMetadata> data);
 
   struct Data {
-    std::unique_ptr<cudf::packed_columns> data;
+    std::unique_ptr<TableWithMetadata> data;
     std::vector<int64_t> remainingBytes;
     /// Whether the result is returned immediately without invoking the `notify'
     /// callback.
@@ -109,7 +128,7 @@ class CudfDestinationQueue {
  private:
   void clearNotify();
 
-  std::deque<std::unique_ptr<cudf::packed_columns>> queue_;
+  std::deque<std::unique_ptr<TableWithMetadata>> queue_;
   CudfDataAvailableCallback notify_{nullptr};
   Stats stats_;
 };
@@ -163,11 +182,7 @@ class CudfOutputQueue {
   /// in OutputQueue.
   /// @param destination The destination, must be < numDestinations.
   /// @param data The data.
-  /// @param numRows The number of rows in the data.
-  void enqueue(
-      int destination,
-      std::unique_ptr<cudf::packed_columns> data,
-      int32_t numRows);
+  void enqueue(int destination, std::unique_ptr<TableWithMetadata> data);
 
   /// @brief Checks if the queue is over capacity and returns a future if so.
   /// This should be called after enqueueing all partitions for a batch.
@@ -221,7 +236,7 @@ class CudfOutputQueue {
   // realized outside the lock.
   void updateStatsWithFreedLocked(
       int64_t bytes,
-      int64_t numPackedCols,
+      int64_t numTables,
       std::vector<ContinuePromise>& promises);
 
   void updateTotalQueuedBytesMsLocked();
@@ -238,7 +253,7 @@ class CudfOutputQueue {
 
   bool enqueuePartitionedOutputLocked(
       int destination,
-      std::unique_ptr<cudf::packed_columns> data,
+      std::unique_ptr<TableWithMetadata> data,
       std::vector<CudfDataAvailable>& dataAvailableCbs);
 
   // Reference to the task that owns this CudfQueue.
@@ -276,12 +291,12 @@ class CudfOutputQueue {
 
   // actual data in 'queues_'
   int64_t queuedBytes_{0};
-  int64_t queuedPackedColumns_{0};
+  int64_t queuedTables_{0};
 
-  // The total number of bytes/rows/packedColumns sent via this output queue.
+  // The total number of bytes/rows/tables sent via this output queue.
   int64_t totalBytesSent_{0};
   int64_t totalRowsSent_{0};
-  int64_t totalPackedColumnsSent_{0};
+  int64_t totalTablesSent_{0};
 
   // Time since last change in queuedBytes_. Used to compute total time data
   // is queued. Ignored if queuedBytes_ is zero.

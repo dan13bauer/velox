@@ -82,7 +82,7 @@ class CudfExchange : public SourceOperator {
   // there are more splits available or no-more-splits signal has arrived.
   ContinueFuture splitFuture_{ContinueFuture::makeEmpty()};
 
-  std::unique_ptr<cudf::packed_columns> currentColumns_;
+  std::unique_ptr<cudf::table> currentTable_;
   bool atEnd_{false};
 
   std::default_random_engine rng_{std::random_device{}()};

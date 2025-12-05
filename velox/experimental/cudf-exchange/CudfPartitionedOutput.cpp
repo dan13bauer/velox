@@ -19,6 +19,8 @@
 #include "velox/exec/Driver.h"
 #include "velox/exec/Operator.h"
 #include "velox/experimental/cudf/vector/CudfVector.h"
+#include "velox/experimental/cudf-exchange/CudfExchangeProtocol.h"
+#include "velox/experimental/cudf-exchange/CudfQueues.h"
 
 #include <cudf/contiguous_split.hpp>
 #include <cudf/copying.hpp>
@@ -112,21 +114,32 @@ void CudfPartitionedOutput::addInput(RowVectorPtr input) {
         equalPartition(tableView, stream);
       }
     } else {
-      // Single partition case. No need to hash, assume queue zero
-      auto packedCols = cudf::pack(tableView, stream);
+      // Single partition case. No need to hash, assume queue zero.
+      // Use zero-copy transfer: release the table and generate metadata only.
+      auto numRows = tableView.num_rows();
+
       // Sync the stream since UCXX/UCX is not stream oriented and without
-      // syncing, data could get lost. Syncing here is  easy but notthe most
+      // syncing, data could get lost. Syncing here is easy but not the most
       // efficient. A better approach is to create an event and pass it along
       // the data through the queue and synchronize on the event before calling
       // into UCXX.
       // TODO: change stream sync and move to event sync
       // Thanks to Lawrence Mitchel for pointing this out!
       stream.synchronize();
-      std::unique_ptr<cudf::packed_columns> packedColsPtr =
-          std::make_unique<cudf::packed_columns>(
-              std::move(packedCols.metadata), std::move(packedCols.gpu_data));
-      queueManager->enqueue(
-          this->taskId(), 0, std::move(packedColsPtr), tableView.num_rows());
+
+      // Release the table from CudfVector - this avoids data copy
+      auto table = cudfVector->release();
+
+      // Generate custom metadata for the table (no contiguous buffer required)
+      auto metadata = TableMetadata::buildFromTable(table->view());
+
+      // Create unpacked table data
+      auto unpackedData = std::make_unique<TableWithMetadata>();
+      unpackedData->metadata = std::move(metadata);
+      unpackedData->table = std::move(table);
+      unpackedData->numRows = numRows;
+
+      queueManager->enqueue(this->taskId(), 0, std::move(unpackedData));
     }
     // Check once after all enqueues if we're blocked
     blocked = queueManager->checkBlocked(this->taskId(), &future_);
@@ -285,6 +298,10 @@ void CudfPartitionedOutput::splitAndEnqueue(
 
   VELOX_CHECK_EQ(
       offsets.size() + 1, numPartitions_, "mismatch in numPartitions_");
+
+  // Synchronize stream before sending data
+  stream.synchronize();
+
   auto queueManager = sharedQueueManager();
   for (int i = 0; i < numPartitions_; ++i) {
     auto const& partitionTable = contiguousTables[i];
@@ -293,13 +310,24 @@ void CudfPartitionedOutput::splitAndEnqueue(
       continue;
     }
 
-    auto packedColsPtr = std::make_unique<cudf::packed_columns>(
-        std::move(contiguousTables[i].data.metadata),
-        std::move(contiguousTables[i].data.gpu_data));
+    // Create a new table from the table_view in the packed_table.
+    // TODO: This creates a copy. In a future optimization, we could
+    // avoid this copy by transferring columns directly from the contiguous
+    // split result.
+    auto mr = cudf::get_current_device_resource_ref();
+    auto table = std::make_unique<cudf::table>(partitionTable.table, stream, mr);
+
+    // Generate custom metadata for the table (no contiguous buffer required)
+    auto metadata = TableMetadata::buildFromTable(table->view());
+
+    // Create unpacked table data
+    auto unpackedData = std::make_unique<TableWithMetadata>();
+    unpackedData->metadata = std::move(metadata);
+    unpackedData->table = std::move(table);
+    unpackedData->numRows = partitionTable.table.num_rows();
 
     // enqueue partition data on Cudf Output Buffer
-    queueManager->enqueue(
-        this->taskId(), i, std::move(packedColsPtr), partitionTable.table.num_rows());
+    queueManager->enqueue(this->taskId(), i, std::move(unpackedData));
   }
 }
 

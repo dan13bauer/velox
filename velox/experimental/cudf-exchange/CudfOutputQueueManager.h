@@ -15,7 +15,6 @@
  */
 #pragma once
 
-#include <cudf/contiguous_split.hpp>
 #include <velox/exec/Task.h>
 #include <functional>
 #include "velox/experimental/cudf-exchange/CudfQueues.h"
@@ -46,17 +45,15 @@ class CudfOutputQueueManager {
       int numDestinations,
       int numDrivers);
 
-  /// @brief Enqueues a cudf packed column into the queue.
+  /// @brief Enqueues unpacked table data into the queue.
   /// @param taskId The unique task Id.
   /// @param destination The destination (partition, queue number) into which
   /// the data is queued.
   /// @param txData The data to enqueue.
-  /// @param numRows The number of rows in the data.
   void enqueue(
       const std::string& taskId,
       int destination,
-      std::unique_ptr<cudf::packed_columns> txData,
-      int32_t numRows);
+      std::unique_ptr<TableWithMetadata> txData);
 
   /// @brief Checks if the queue for a task is over capacity.
   /// Should be called after enqueueing all partitions for a batch.

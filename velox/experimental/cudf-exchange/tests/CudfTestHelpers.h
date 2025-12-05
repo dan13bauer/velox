@@ -72,18 +72,27 @@ std::shared_ptr<facebook::velox::exec::Task> createExchangeTask(
     int partitionId,
     core::PlanNodeId& exchangeNodeId);
 
-/// Helper function to create cudf::packed_columns for testing.
-/// Creates a packed table with two columns: INT32 and FLOAT64.
+/// Helper function to create cudf::table for testing.
+/// Creates a table with columns based on the given rowType.
 ///
-/// @param numRows Number of rows to create in the packed columns
-/// @return Unique pointer to the created packed columns
+/// @param numRows Number of rows to create in the table
+/// @param rowType The row type specifying the columns
+/// @param stream The CUDA stream to use
+/// @return Unique pointer to the created table
 ///
-std::unique_ptr<cudf::packed_columns> makePackedColumns(
+std::unique_ptr<cudf::table> makeTable(
     std::size_t numRows,
     facebook::velox::RowTypePtr rowType,
     rmm::cuda_stream_view stream);
 
-std::unique_ptr<cudf::packed_columns> makeFilledPackedColumns(
+/// Helper function to create cudf::table with filled data for testing.
+/// Creates a table with columns based on the test row type (INT32, DOUBLE, VARCHAR).
+///
+/// @param numRows Number of rows to create in the table
+/// @param dataToSend The test data to fill the table with
+/// @param stream The CUDA stream to use
+/// @return Unique pointer to the created table
+std::unique_ptr<cudf::table> makeFilledTable(
     std::size_t numRows,
     std::shared_ptr<CudfTestData> dataToSend,
     rmm::cuda_stream_view stream);
@@ -95,6 +104,12 @@ std::vector<std::string> getStringCol(
     const cudf::strings_column_view& str_column_view,
     cudf::size_type max_rows,
     rmm::cuda_stream_view stream);
+
+/// @brief Helper function to create a strings column from a vector of host strings.
+/// @param host_strings The vector of strings to use for creating the column.
+/// @return A unique pointer to the created strings column.
+std::unique_ptr<cudf::column> make_strings_column_from_host(
+    const std::vector<std::string>& host_strings);
 
 /// @brief Template function for retrieving the contents of a fixed-size column.
 /// @param column_view The column view to be dumped.

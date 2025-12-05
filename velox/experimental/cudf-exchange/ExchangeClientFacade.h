@@ -15,6 +15,7 @@
  */
 #pragma once
 
+#include <cudf/table/table.hpp>
 #include <folly/Uri.h>
 #include "velox/exec/ExchangeClient.h"
 #include "velox/experimental/cudf-exchange/CudfExchangeClient.h"
@@ -26,8 +27,8 @@ namespace facebook::velox::cudf_exchange {
 // Define the return types from the two types of exchange clients as a variant
 using SerPageVector =
     std::vector<std::unique_ptr<facebook::velox::exec::SerializedPage>>;
-using PackedColPtr = std::unique_ptr<cudf::packed_columns>;
-using ResultVariant = std::variant<SerPageVector, PackedColPtr>;
+using TablePtr = std::unique_ptr<cudf::table>;
+using ResultVariant = std::variant<SerPageVector, TablePtr>;
 
 // The exchange client facade encapsulates both the cudf exchange client and the
 // http exchange client.

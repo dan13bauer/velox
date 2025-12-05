@@ -122,7 +122,6 @@ class CudfExchangeSource
 
   struct DataAndMetadata {
     MetadataMsg metadata;
-    std::unique_ptr<rmm::device_buffer> dataBuf;
   };
 
   /// @brief The constructor is private in order to ensure that exchange sources
@@ -150,9 +149,7 @@ class CudfExchangeSource
   std::shared_ptr<CudfExchangeSource> getSelfPtr();
 
   // Put the received data into the exchange queue.
-  void enqueue(
-      std::unique_ptr<cudf::packed_columns> columns,
-      MetadataMsg& metadata);
+  void enqueue(std::unique_ptr<cudf::table> table, MetadataMsg& metadata);
 
   /// @brief Sets the endpoint for this receiver.
   void setEndpoint(std::shared_ptr<EndpointRef> endpointRef);
@@ -173,10 +170,11 @@ class CudfExchangeSource
   /// @param arg the serialized form of the metadata
   void onMetadata(ucs_status_t status, std::shared_ptr<void> arg);
 
-  /// @brief Called by the transport layer when data is available
-  /// @param status indication by transport layer of transfer status
-  /// @param arg
-  void onData(ucs_status_t status, std::shared_ptr<void> arg);
+  /// @brief Called when all per-column data buffers have been received.
+  /// Reconstructs the cudf::table from the individual column buffers.
+  /// @param arg Shared pointer to PerColumnData structure containing the
+  /// buffers
+  void onPerColumnDataComplete(std::shared_ptr<void> arg);
 
   /// @brief Sets the new state of this exchange source using
   /// sequential consistency.
