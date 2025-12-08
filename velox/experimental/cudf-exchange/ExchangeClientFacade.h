@@ -27,8 +27,7 @@ namespace facebook::velox::cudf_exchange {
 // Define the return types from the two types of exchange clients as a variant
 using SerPageVector =
     std::vector<std::unique_ptr<facebook::velox::exec::SerializedPage>>;
-using TablePtr = std::unique_ptr<cudf::table>;
-using ResultVariant = std::variant<SerPageVector, TablePtr>;
+using ResultVariant = std::variant<SerPageVector, TableWithStream>;
 
 // The exchange client facade encapsulates both the cudf exchange client and the
 // http exchange client.

@@ -37,9 +37,9 @@ void CudfExchangeQueue::close() {
 }
 
 void CudfExchangeQueue::enqueueLocked(
-    std::unique_ptr<cudf::table>&& table,
+    TableWithStream&& tableWithStream,
     std::vector<ContinuePromise>& promises) {
-  if (table == nullptr) {
+  if (tableWithStream.table == nullptr) {
     ++numCompleted_;
     auto completedPromises = checkCompleteLocked();
     promises.reserve(promises.size() + completedPromises.size());
@@ -49,7 +49,7 @@ void CudfExchangeQueue::enqueueLocked(
     return;
   }
 
-  auto tableSize = table->alloc_size();
+  auto tableSize = tableWithStream.table->alloc_size();
   totalBytes_ += tableSize;
   if (peakBytes_ < totalBytes_) {
     peakBytes_ = totalBytes_;
@@ -58,7 +58,7 @@ void CudfExchangeQueue::enqueueLocked(
   ++receivedTables_;
   receivedBytes_ += tableSize;
 
-  queue_.push_back(std::move(table));
+  queue_.push_back(std::move(tableWithStream));
   while (!promises_.empty()) {
     VELOX_CHECK_LE(promises_.size(), numberOfConsumers_);
     const int32_t unblockedConsumers = numberOfConsumers_ - promises_.size();
@@ -90,7 +90,7 @@ void CudfExchangeQueue::addPromiseLocked(
   VELOX_CHECK_LE(promises_.size(), numberOfConsumers_);
 }
 
-std::unique_ptr<cudf::table> CudfExchangeQueue::dequeueLocked(
+TableWithStream CudfExchangeQueue::dequeueLocked(
     int consumerId,
     bool* atEnd,
     ContinueFuture* future,
@@ -104,21 +104,21 @@ std::unique_ptr<cudf::table> CudfExchangeQueue::dequeueLocked(
   *atEnd = false;
 
   // check whether the queue is empty.
-  std::unique_ptr<cudf::table> table = nullptr;
+  TableWithStream tableWithStream;
   if (queue_.empty()) {
     if (atEnd_) {
       *atEnd = true;
     } else {
       addPromiseLocked(consumerId, future, stalePromise);
     }
-    return table;
+    return tableWithStream;
   }
 
-  table = std::move(queue_.front());
+  tableWithStream = std::move(queue_.front());
   queue_.pop_front();
-  totalBytes_ -= table->alloc_size();
+  totalBytes_ -= tableWithStream.table->alloc_size();
 
-  return table;
+  return tableWithStream;
 }
 
 void CudfExchangeQueue::setError(const std::string& error) {

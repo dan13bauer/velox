@@ -148,8 +148,12 @@ class CudfExchangeSource
   /// @return A shared pointer to itself.
   std::shared_ptr<CudfExchangeSource> getSelfPtr();
 
-  // Put the received data into the exchange queue.
-  void enqueue(std::unique_ptr<cudf::table> table, MetadataMsg& metadata);
+  // Put the received data into the exchange queue along with the stream
+  // used to allocate the table's buffers.
+  void enqueue(
+      std::unique_ptr<cudf::table> table,
+      rmm::cuda_stream_view stream,
+      MetadataMsg& metadata);
 
   /// @brief Sets the endpoint for this receiver.
   void setEndpoint(std::shared_ptr<EndpointRef> endpointRef);
@@ -174,7 +178,10 @@ class CudfExchangeSource
   /// Reconstructs the cudf::table from the individual column buffers.
   /// @param arg Shared pointer to PerColumnData structure containing the
   /// buffers
-  void onPerColumnDataComplete(std::shared_ptr<void> arg);
+  /// @param stream The CUDA stream used for buffer allocations
+  void onPerColumnDataComplete(
+      std::shared_ptr<void> arg,
+      rmm::cuda_stream_view stream);
 
   /// @brief Sets the new state of this exchange source using
   /// sequential consistency.

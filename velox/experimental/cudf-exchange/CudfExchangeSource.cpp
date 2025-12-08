@@ -214,12 +214,14 @@ std::shared_ptr<CudfExchangeSource> CudfExchangeSource::getSelfPtr() {
 
 void CudfExchangeSource::enqueue(
     std::unique_ptr<cudf::table> table,
+    rmm::cuda_stream_view stream,
     MetadataMsg& metadata) {
   std::vector<velox::ContinuePromise> queuePromises;
   {
     std::lock_guard<std::mutex> l(queue_->mutex());
 
-    queue_->enqueueLocked(std::move(table), queuePromises);
+    TableWithStream tableWithStream(std::move(table), stream);
+    queue_->enqueueLocked(std::move(tableWithStream), queuePromises);
   }
   // wake up consumers of the CudfExchangeQueue
   for (auto& promise : queuePromises) {
@@ -358,7 +360,8 @@ void CudfExchangeSource::onMetadata(
       VLOG(3) << "There is no more data to transfer for " << toString();
       setStateIf(ReceiverState::WaitingForMetadata, ReceiverState::Done);
       communicator_->addToWorkQueue(getSelfPtr());
-      enqueue(nullptr, ptr->metadata); // nullptr table marks end
+      // nullptr table marks end, use default stream
+      enqueue(nullptr, rmm::cuda_stream_view{}, ptr->metadata);
       // jump out of this function.
       return;
     }
@@ -441,12 +444,10 @@ void CudfExchangeSource::onMetadata(
       return;
     }
 
-    // Base tag for data - matches the sender's tag encoding
-    uint64_t baseDataTag = getDataTag(partitionKeyHash_, sequenceNumber_);
+    // Single tag for all column data within this table transfer.
+    // Since all transfers use the same stream, sequence is maintained.
+    uint64_t tagRecv = getDataTag(partitionKeyHash_, sequenceNumber_);
 
-    // Initiate receives for each column's buffers
-    // Tag encoding: baseDataTag + (columnIndex * 2) for data,
-    //               baseDataTag + (columnIndex * 2) + 1 for null_mask
     std::weak_ptr<CudfExchangeSource> weak = weak_from_this();
 
     // Verify endpoint is still valid
@@ -479,7 +480,7 @@ void CudfExchangeSource::onMetadata(
 
     // If no buffers to receive (e.g., empty table), complete immediately
     if (totalPendingReceives == 0) {
-      onPerColumnDataComplete(perColData);
+      onPerColumnDataComplete(perColData, stream);
       return;
     }
 
@@ -493,19 +494,17 @@ void CudfExchangeSource::onMetadata(
       if (colMeta.dataSize > 0 && perColData->dataBuffers[i]) {
         void* bufferPtr = perColData->dataBuffers[i]->data();
 
-        uint64_t dataTag = baseDataTag + (i * 2);
-
         VLOG(3) << toString() << " Receiving data buffer " << i << " size "
-                << colMeta.dataSize << " tag " << std::hex << dataTag
+                << colMeta.dataSize << " tag " << std::hex << tagRecv
                 << std::dec << " bufferPtr=" << bufferPtr;
 
         auto req = endpointRef_->endpoint_->tagRecv(
             bufferPtr,
             static_cast<size_t>(colMeta.dataSize),
-            ucxx::Tag{dataTag},
+            ucxx::Tag{tagRecv},
             ucxx::TagMaskFull,
             false,
-            [weak, perColData, requests, i](
+            [weak, perColData, requests, stream](
                 ucs_status_t status, std::shared_ptr<void> arg) {
               if (status != UCS_OK) {
                 perColData->hasError.store(true);
@@ -513,7 +512,7 @@ void CudfExchangeSource::onMetadata(
               size_t remaining = perColData->pendingReceives.fetch_sub(1) - 1;
               if (remaining == 0) {
                 if (auto self = weak.lock()) {
-                  self->onPerColumnDataComplete(perColData);
+                  self->onPerColumnDataComplete(perColData, stream);
                 }
               }
             });
@@ -524,19 +523,17 @@ void CudfExchangeSource::onMetadata(
       if (colMeta.nullMaskSize > 0 && perColData->nullMaskBuffers[i]) {
         void* nullBufPtr = perColData->nullMaskBuffers[i]->data();
 
-        uint64_t nullTag = baseDataTag + (i * 2) + 1;
-
         VLOG(3) << toString() << " Receiving null_mask buffer " << i << " size "
-                << colMeta.nullMaskSize << " tag " << std::hex << nullTag
+                << colMeta.nullMaskSize << " tag " << std::hex << tagRecv
                 << std::dec << " bufferPtr=" << nullBufPtr;
 
         auto req = endpointRef_->endpoint_->tagRecv(
             nullBufPtr,
             static_cast<size_t>(colMeta.nullMaskSize),
-            ucxx::Tag{nullTag},
+            ucxx::Tag{tagRecv},
             ucxx::TagMaskFull,
             false,
-            [weak, perColData, requests, i](
+            [weak, perColData, requests, stream](
                 ucs_status_t status, std::shared_ptr<void> arg) {
               if (status != UCS_OK) {
                 perColData->hasError.store(true);
@@ -544,7 +541,7 @@ void CudfExchangeSource::onMetadata(
               size_t remaining = perColData->pendingReceives.fetch_sub(1) - 1;
               if (remaining == 0) {
                 if (auto self = weak.lock()) {
-                  self->onPerColumnDataComplete(perColData);
+                  self->onPerColumnDataComplete(perColData, stream);
                 }
               }
             });
@@ -554,8 +551,9 @@ void CudfExchangeSource::onMetadata(
   }
 }
 
-void CudfExchangeSource::onPerColumnDataComplete(std::shared_ptr<void> arg) {
-
+void CudfExchangeSource::onPerColumnDataComplete(
+    std::shared_ptr<void> arg,
+    rmm::cuda_stream_view stream) {
   // Check if close() was called - avoid processing if we're shutting down
   if (closed_.load(std::memory_order_acquire)) {
     VLOG(3) << toString()
@@ -725,7 +723,7 @@ void CudfExchangeSource::onPerColumnDataComplete(std::shared_ptr<void> arg) {
           << table->num_columns() << " columns, " << table->num_rows()
           << " rows from per-column data";
 
-  enqueue(std::move(table), perColData->metadata);
+  enqueue(std::move(table), stream, perColData->metadata);
   setStateIf(ReceiverState::WaitingForData, ReceiverState::ReadyToReceive);
   communicator_->addToWorkQueue(getSelfPtr());
 }

@@ -97,7 +97,7 @@ bool CudfExchange::getSplits(ContinueFuture* future) {
 
 BlockingReason CudfExchange::isBlocked(ContinueFuture* future) {
   // check whether there is data or whether this is at the end.
-  if (currentTable_ != nullptr || atEnd_) {
+  if (currentTableWithStream_.table != nullptr || atEnd_) {
     return BlockingReason::kNotBlocked;
   }
 
@@ -107,10 +107,11 @@ BlockingReason CudfExchange::isBlocked(ContinueFuture* future) {
   }
 
   // No data! Ask the client for the next table.
-  VELOX_CHECK_NULL(currentTable_);
+  VELOX_CHECK_NULL(currentTableWithStream_.table);
   ContinueFuture dataFuture;
-  currentTable_ = exchangeClient_->next(driverId_, &atEnd_, &dataFuture);
-  if (currentTable_ != nullptr || atEnd_) {
+  currentTableWithStream_ =
+      exchangeClient_->next(driverId_, &atEnd_, &dataFuture);
+  if (currentTableWithStream_.table != nullptr || atEnd_) {
     if (atEnd_ && noMoreSplits_) {
       const auto numSplits = stats_.rlock()->numSplits;
       operatorCtx_->task()->multipleSplitsFinished(false, numSplits, 0);
@@ -136,26 +137,29 @@ BlockingReason CudfExchange::isBlocked(ContinueFuture* future) {
 }
 
 bool CudfExchange::isFinished() {
-  return atEnd_ && currentTable_ == nullptr;
+  return atEnd_ && currentTableWithStream_.table == nullptr;
 }
 
 RowVectorPtr CudfExchange::getOutput() {
   VLOG(3) << "@" << taskId() << " CudfExchange::getOutput() has data: "
-          << (currentTable_ != nullptr);
-  if (currentTable_ == nullptr) {
+          << (currentTableWithStream_.table != nullptr);
+  if (currentTableWithStream_.table == nullptr) {
     return nullptr;
   }
   // The data is already a cudf::table - no need to unpack.
-  auto stream =
-      facebook::velox::cudf_velox::cudfGlobalStreamPool().get_stream();
-  auto numRows = currentTable_->num_rows();
-  auto gpuDataSize = currentTable_->alloc_size();
+  // Use the stream from the queue (same stream used to allocate buffers)
+  auto numRows = currentTableWithStream_.table->num_rows();
+  auto gpuDataSize = currentTableWithStream_.table->alloc_size();
   // outputType_ is declared in the Operator base class.
   auto result = std::make_shared<cudf_velox::CudfVector>(
-      pool(), outputType_, numRows, std::move(currentTable_), stream);
+      pool(),
+      outputType_,
+      numRows,
+      std::move(currentTableWithStream_.table),
+      currentTableWithStream_.stream);
 
   recordInputStats(gpuDataSize, result);
-  // currentTable_ is now nullptr after the move.
+  // currentTableWithStream_.table is now nullptr after the move.
 
   return result;
 }
@@ -172,8 +176,8 @@ void CudfExchange::recordInputStats(
 
 void CudfExchange::close() {
   SourceOperator::close();
-  if (currentTable_ != nullptr) {
-    currentTable_.reset();
+  if (currentTableWithStream_.table != nullptr) {
+    currentTableWithStream_.table.reset();
   }
   if (exchangeClient_) {
     recordExchangeClientStats();

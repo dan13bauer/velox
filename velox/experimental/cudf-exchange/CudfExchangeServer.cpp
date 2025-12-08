@@ -235,8 +235,9 @@ void CudfExchangeServer::sendData() {
 
       setState(ServerState::WaitingForSendComplete);
 
-      // Base tag for data - we'll add offsets for each column/buffer
-      uint64_t baseDataTag =
+      // Single tag for all column data within this table transfer.
+      // Since all transfers use the same stream, sequence is maintained.
+      uint64_t tagSend =
           getDataTag(this->partitionKeyHash_, this->sequenceNumber_);
 
       dataRequests_.clear();
@@ -249,11 +250,6 @@ void CudfExchangeServer::sendData() {
       auto releasedContents =
           std::make_shared<std::vector<cudf::column::contents>>();
       releasedContents->reserve(numColumns);
-
-      // We send buffers in depth-first order to match metadata order.
-      // Tag encoding: baseDataTag + (columnIndex * 2) for data,
-      //               baseDataTag + (columnIndex * 2) + 1 for null_mask
-      uint32_t bufferIndex = 0;
 
       std::function<void(std::unique_ptr<cudf::column>)> sendColumn =
           [&](std::unique_ptr<cudf::column> col) {
@@ -272,13 +268,12 @@ void CudfExchangeServer::sendData() {
 
             // Send data buffer if present
             if (contents.data && contents.data->size() > 0) {
-              uint64_t dataTag = baseDataTag + (bufferIndex * 2);
               auto dataSize = contents.data->size();
               bytes_ += dataSize;
 
               VLOG(3) << "@" << partitionKey_.taskId << " Sending data buffer "
-                      << bufferIndex << " size " << dataSize << " tag "
-                      << std::hex << dataTag << std::dec;
+                      << " size " << dataSize << " tag " << std::hex << tagSend
+                      << std::dec;
 
               // Keep buffer alive - move to shared container
               auto dataBuffer = std::shared_ptr<rmm::device_buffer>(
@@ -288,7 +283,7 @@ void CudfExchangeServer::sendData() {
               auto req = endpointRef_->endpoint_->tagSend(
                   dataBuffer->data(),
                   dataBuffer->size(),
-                  ucxx::Tag{dataTag},
+                  ucxx::Tag{tagSend},
                   false,
                   [weakData, dataBuffer](
                       ucs_status_t status, std::shared_ptr<void> arg) {
@@ -306,13 +301,13 @@ void CudfExchangeServer::sendData() {
 
             // Send null mask buffer if present
             if (contents.null_mask && contents.null_mask->size() > 0) {
-              uint64_t nullTag = baseDataTag + (bufferIndex * 2) + 1;
               auto nullSize = contents.null_mask->size();
               bytes_ += nullSize;
 
               VLOG(3) << "@" << partitionKey_.taskId
-                      << " Sending null_mask buffer " << bufferIndex << " size "
-                      << nullSize << " tag " << std::hex << nullTag << std::dec;
+                      << " Sending null_mask buffer "
+                      << " size " << nullSize << " tag " << std::hex << tagSend
+                      << std::dec;
 
               // Keep buffer alive
               auto nullBuffer = std::shared_ptr<rmm::device_buffer>(
@@ -322,7 +317,7 @@ void CudfExchangeServer::sendData() {
               auto req = endpointRef_->endpoint_->tagSend(
                   nullBuffer->data(),
                   nullBuffer->size(),
-                  ucxx::Tag{nullTag},
+                  ucxx::Tag{tagSend},
                   false,
                   [weakData, nullBuffer](
                       ucs_status_t status, std::shared_ptr<void> arg) {
@@ -337,8 +332,6 @@ void CudfExchangeServer::sendData() {
               dataRequests_.push_back(req);
               pendingDataRequests_.fetch_add(1);
             }
-
-            bufferIndex++;
 
             // Recursively process children (depth-first order)
             for (auto& child : contents.children) {

@@ -66,14 +66,16 @@ class CudfExchangeClient
     return queue_;
   }
 
-  /// Returns a cudf::table from the queue or null.
+  /// Returns a TableWithStream (table + stream pair) from the queue.
   ///
-  /// If no data is available returns a nullptr and sets 'atEnd' to true if no
-  /// more data is expected. If data is still expected, sets 'atEnd' to false
-  /// and sets 'future' to a Future that will complete when data arrives.
+  /// If no data is available returns a TableWithStream with nullptr table and
+  /// sets 'atEnd' to true if no more data is expected. If data is still
+  /// expected, sets 'atEnd' to false and sets 'future' to a Future that will
+  /// complete when data arrives. The returned stream should be used for any
+  /// subsequent GPU operations on the table data. For CPU access to table
+  /// data, explicit stream synchronization is required.
   ///
-  std::unique_ptr<cudf::table>
-  next(int consumerId, bool* atEnd, ContinueFuture* future);
+  TableWithStream next(int consumerId, bool* atEnd, ContinueFuture* future);
 
   std::string toString() const;
 

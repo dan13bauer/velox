@@ -104,32 +104,35 @@ folly::F14FastMap<std::string, RuntimeMetric> CudfExchangeClient::stats()
   return stats;
 }
 
-std::unique_ptr<cudf::table>
-CudfExchangeClient::next(int consumerId, bool* atEnd, ContinueFuture* future) {
+TableWithStream CudfExchangeClient::next(
+    int consumerId,
+    bool* atEnd,
+    ContinueFuture* future) {
   VLOG(3) << "@" << taskId_ << " CudfExchangeClient::next called for consumerId "
           << consumerId;
-  std::unique_ptr<cudf::table> table;
+  TableWithStream tableWithStream;
   ContinuePromise stalePromise = ContinuePromise::makeEmpty();
   {
     std::lock_guard<std::mutex> l(queue_->mutex());
     if (closed_) {
       *atEnd = true;
-      return table;
+      return tableWithStream;
     }
 
     // not closed, get table from the queue.
     *atEnd = false;
-    table = queue_->dequeueLocked(consumerId, atEnd, future, &stalePromise);
+    tableWithStream =
+        queue_->dequeueLocked(consumerId, atEnd, future, &stalePromise);
     if (*atEnd) {
       // queue is closed!
-      return table;
+      return tableWithStream;
     }
 
     // TODO: Review this primitive form of flow control.
     // Maybe need to inspect the #bytes rather than the #tables?
     // Don't request more data when queue size exceeds the configured limit.
-    if (table != nullptr && queue_->size() > maxQueuedColumns_) {
-      return table;
+    if (tableWithStream.table != nullptr && queue_->size() > maxQueuedColumns_) {
+      return tableWithStream;
     }
   }
 
@@ -137,7 +140,7 @@ CudfExchangeClient::next(int consumerId, bool* atEnd, ContinueFuture* future) {
   if (stalePromise.valid()) {
     stalePromise.setValue();
   }
-  return table;
+  return tableWithStream;
 }
 
 CudfExchangeClient::~CudfExchangeClient() {

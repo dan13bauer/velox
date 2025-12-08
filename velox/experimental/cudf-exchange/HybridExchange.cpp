@@ -146,8 +146,8 @@ bool HybridExchange::resultIsEmpty() {
     if constexpr (std::is_same_v<std::decay_t<decltype(res)>, SerPageVector>) {
       return res.empty();
     } else {
-      // TablePtr
-      return res == nullptr;
+      // TableWithStream
+      return res.table == nullptr;
     }
   };
   return std::visit(checkEmpty, currentData_);
@@ -160,8 +160,8 @@ void HybridExchange::emptyResult() {
     if constexpr (std::is_same_v<std::decay_t<decltype(res)>, SerPageVector>) {
       res.clear();
     } else {
-      // TablePtr
-      res.reset();
+      // TableWithStream
+      res.table.reset();
     }
   };
   return std::visit(empty, currentData_);
@@ -171,8 +171,8 @@ const SerPageVector* HybridExchange::getResultPages() {
   return std::get_if<SerPageVector>(&currentData_);
 }
 
-const TablePtr* HybridExchange::getResultTable() {
-  return std::get_if<TablePtr>(&currentData_);
+const TableWithStream* HybridExchange::getResultTable() {
+  return std::get_if<TableWithStream>(&currentData_);
 }
 
 BlockingReason HybridExchange::isBlocked(ContinueFuture* future) {
@@ -354,25 +354,29 @@ RowVectorPtr HybridExchange::getOutputFromUnsafeRows(
   return result;
 }
 
-RowVectorPtr HybridExchange::getOutputFromTable(const TablePtr* tablePtr) {
-  if (*tablePtr == nullptr) {
+RowVectorPtr HybridExchange::getOutputFromTable(
+    const TableWithStream* tableWithStream) {
+  if (tableWithStream->table == nullptr) {
     return nullptr;
   }
   // The table is already unpacked - directly construct a CudfVector from it.
   // This avoids the expensive cudf::unpack() operation.
-  auto stream =
-      facebook::velox::cudf_velox::cudfGlobalStreamPool().get_stream();
+  // Use the stream from the queue (same stream used to allocate buffers).
 
   // We need to move the table out of the variant, which requires a const_cast
   // since the variant gives us a const pointer. This is safe because we're
   // about to empty the result anyway.
-  auto& mutableTablePtr = const_cast<TablePtr&>(*tablePtr);
-  auto numRows = mutableTablePtr->num_rows();
-  auto tableSize = mutableTablePtr->alloc_size();
+  auto& mutableTableWithStream = const_cast<TableWithStream&>(*tableWithStream);
+  auto numRows = mutableTableWithStream.table->num_rows();
+  auto tableSize = mutableTableWithStream.table->alloc_size();
 
   // outputType_ is declared in the Operator base class.
   auto result = std::make_shared<cudf_velox::CudfVector>(
-      pool(), outputType_, numRows, std::move(mutableTablePtr), stream);
+      pool(),
+      outputType_,
+      numRows,
+      std::move(mutableTableWithStream.table),
+      mutableTableWithStream.stream);
 
   recordInputStats(tableSize, result);
   // free the memory and set it to nullptr;
@@ -382,9 +386,9 @@ RowVectorPtr HybridExchange::getOutputFromTable(const TablePtr* tablePtr) {
 }
 
 RowVectorPtr HybridExchange::getOutput() {
-  const TablePtr* tablePtr = getResultTable();
-  if (tablePtr) {
-    return getOutputFromTable(tablePtr);
+  const TableWithStream* tableWithStream = getResultTable();
+  if (tableWithStream) {
+    return getOutputFromTable(tableWithStream);
   }
   return getOutputFromPages(getResultPages());
 }

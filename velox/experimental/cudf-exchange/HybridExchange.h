@@ -86,9 +86,9 @@ class HybridExchange : public SourceOperator {
   // result does not contain a vector of pages.
   const SerPageVector* getResultPages();
 
-  // Returns the table pointer from the result variant. This fails if
-  // the result does not contain a table pointer.
-  const TablePtr* getResultTable();
+  // Returns the table with stream from the result variant. This fails if
+  // the result does not contain a table with stream.
+  const TableWithStream* getResultTable();
 
   // Invoked to create exchange client for remote tasks. The function shuffles
   // the source task ids first to randomize the source tasks we fetch data from.
@@ -119,7 +119,7 @@ class HybridExchange : public SourceOperator {
       const SerPageVector* pages);
 
   // Converts the results from the Cudf exchange client into a cudf vector.
-  RowVectorPtr getOutputFromTable(const TablePtr* tablePtr);
+  RowVectorPtr getOutputFromTable(const TableWithStream* tableWithStream);
 
   // Fetches runtime stats from ExchangeClient and replaces these in this
   // operator's stats.

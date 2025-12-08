@@ -16,12 +16,43 @@
 #pragma once
 
 #include <cudf/table/table.hpp>
+#include <rmm/cuda_stream_view.hpp>
 #include <cinttypes>
 #include <memory>
 #include "velox/common/base/Exceptions.h"
 #include "velox/common/future/VeloxPromise.h"
 
 namespace facebook::velox::cudf_exchange {
+
+/// @brief A struct that holds a cudf::table along with the CUDA stream
+/// used to allocate its buffers. The consumer must synchronize on this
+/// stream before accessing the table data.
+struct TableWithStream {
+  std::unique_ptr<cudf::table> table;
+  rmm::cuda_stream_view stream;
+
+  TableWithStream() : table(nullptr), stream(rmm::cuda_stream_view{}) {}
+
+  TableWithStream(
+      std::unique_ptr<cudf::table> t,
+      rmm::cuda_stream_view s)
+      : table(std::move(t)), stream(s) {}
+
+  // Move constructor
+  TableWithStream(TableWithStream&& other) noexcept
+      : table(std::move(other.table)), stream(other.stream) {}
+
+  // Move assignment
+  TableWithStream& operator=(TableWithStream&& other) noexcept {
+    table = std::move(other.table);
+    stream = other.stream;
+    return *this;
+  }
+
+  // Delete copy operations
+  TableWithStream(const TableWithStream&) = delete;
+  TableWithStream& operator=(const TableWithStream&) = delete;
+};
 
 class CudfExchangeQueue {
  public:
@@ -42,14 +73,15 @@ class CudfExchangeQueue {
     return queue_.empty();
   }
 
-  /// Enqueues 'table' to the queue. One random promise(top of promise queue)
-  /// associated with the future that is waiting for the data from the queue
-  /// is returned in 'promises' if 'table' is not nullptr. When 'table' is
-  /// nullptr and the queue is completed serving data, all left over promises
-  /// will be returned in 'promises'. When 'table' is nullptr and the queue is
-  /// not completed serving data, no 'promises' will be added and returned.
+  /// Enqueues 'tableWithStream' to the queue. One random promise(top of promise
+  /// queue) associated with the future that is waiting for the data from the
+  /// queue is returned in 'promises' if 'tableWithStream.table' is not nullptr.
+  /// When 'tableWithStream.table' is nullptr and the queue is completed serving
+  /// data, all left over promises will be returned in 'promises'. When
+  /// 'tableWithStream.table' is nullptr and the queue is not completed serving
+  /// data, no 'promises' will be added and returned.
   void enqueueLocked(
-      std::unique_ptr<cudf::table>&& table,
+      TableWithStream&& tableWithStream,
       std::vector<ContinuePromise>& promises);
 
   /// If data is permanently not available, e.g. the source cannot be
@@ -60,15 +92,17 @@ class CudfExchangeQueue {
   bool isInError() {
     return !error_.empty();
   }
-  /// Returns a cudf::table.
+  /// Returns a TableWithStream (table + stream pair).
   ///
-  /// Returns a nullptr if no data is available. If data is still expected,
-  /// sets 'atEnd' to false and 'future' to a Future that will complete when
-  /// data arrives. If no more data is expected, sets 'atEnd' to true. Returns
-  /// one cudf::table if data is available.
+  /// Returns a TableWithStream with nullptr table if no data is available.
+  /// If data is still expected, sets 'atEnd' to false and 'future' to a Future
+  /// that will complete when data arrives. If no more data is expected, sets
+  /// 'atEnd' to true. Returns one TableWithStream if data is available.
   /// It's possible that the same consumer is already waiting for data. In this
   /// case, a stalePromise is returned which needs to be cleaned up.
-  std::unique_ptr<cudf::table> dequeueLocked(
+  /// The consumer must synchronize on the returned stream before accessing
+  /// the table data.
+  TableWithStream dequeueLocked(
       int consumerId,
       bool* atEnd,
       ContinueFuture* future,
@@ -161,7 +195,7 @@ class CudfExchangeQueue {
   bool atEnd_{false};
 
   std::mutex mutex_;
-  std::deque<std::unique_ptr<cudf::table>> queue_;
+  std::deque<TableWithStream> queue_;
   // The map from consumer id to the waiting promise
   folly::F14FastMap<int, ContinuePromise> promises_;
 
