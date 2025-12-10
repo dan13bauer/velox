@@ -22,6 +22,7 @@ add_executable(
   CudfTestData.cpp
   CudfPartitionedOutputMock.cpp
   SinkDriverMock.cpp
+  SourceDriverMock.cpp
 )
 
 add_test(

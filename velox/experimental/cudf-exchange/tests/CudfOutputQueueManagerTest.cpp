@@ -70,10 +70,12 @@ class CudfOutputQueueManagerTest : public testing::Test {
         numRows, CudfTestData::kTestRowType, stream);
     stream.synchronize();
 
-    // Build TableWithMetadata
+    // Build TableWithMetadata with tableView + sourceTable pattern
     auto tableData = std::make_unique<TableWithMetadata>();
-    tableData->metadata = TableMetadata::buildFromTable(table->view());
-    tableData->table = std::move(table);
+    auto sourceTable = std::shared_ptr<cudf::table>(std::move(table));
+    tableData->metadata = TableMetadata::buildFromTable(sourceTable->view());
+    tableData->tableView = sourceTable->view();
+    tableData->sourceTable = std::move(sourceTable);
     tableData->numRows = static_cast<cudf::size_type>(numRows);
     return tableData;
   }

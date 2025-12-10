@@ -27,6 +27,7 @@
 #include "velox/exec/Task.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/experimental/cudf-exchange/tests/CudfTestData.h"
+#include "velox/experimental/cudf/vector/CudfVector.h"
 
 #include <cudf/binaryop.hpp>
 #include <cudf/strings/strings_column_view.hpp>
@@ -71,6 +72,41 @@ std::shared_ptr<facebook::velox::exec::Task> createExchangeTask(
     facebook::velox::RowTypePtr rowType,
     int partitionId,
     core::PlanNodeId& exchangeNodeId);
+
+/// @brief Helper function to create a source task with PartitionedOutput for
+/// testing. Creates a task with a plan fragment: Values -> PartitionedOutput.
+/// This is used by SourceDriverMock to drive real CudfPartitionedOutput
+/// operators.
+/// @param taskId The unique identifier for the task
+/// @param pool Shared pointer to the memory pool
+/// @param rowType The row type to use for the task
+/// @param numPartitions The number of output partitions
+/// @param partitionKeys The keys to use for hash partitioning (empty for
+/// round-robin)
+/// @param kMaxOutputBufferSize Maximum output buffer size
+/// @return Shared pointer to the created Task
+std::shared_ptr<facebook::velox::exec::Task> createPartitionedOutputTask(
+    const std::string& taskId,
+    std::shared_ptr<facebook::velox::memory::MemoryPool> pool,
+    facebook::velox::RowTypePtr rowType,
+    int numPartitions,
+    const std::vector<std::string>& partitionKeys = {},
+    uint64_t kMaxOutputBufferSize = FOUR_GBYTES);
+
+/// @brief Helper function to create a CudfVector for testing.
+/// Uses makeTable when dataToSend is null, or makeFilledTable when provided.
+/// @param pool The memory pool to use for the CudfVector
+/// @param numRows Number of rows to create
+/// @param rowType The row type for the vector
+/// @param dataToSend Optional test data to fill the table with
+/// @param stream The CUDA stream to use
+/// @return Shared pointer to the created CudfVector
+std::shared_ptr<facebook::velox::cudf_velox::CudfVector> makeCudfVector(
+    facebook::velox::memory::MemoryPool* pool,
+    size_t numRows,
+    facebook::velox::RowTypePtr rowType,
+    std::shared_ptr<CudfTestData> dataToSend,
+    rmm::cuda_stream_view stream);
 
 /// Helper function to create cudf::table for testing.
 /// Creates a table with columns based on the given rowType.

@@ -15,6 +15,8 @@
  */
 #include <cudf/column/column_factories.hpp>
 #include <cudf/contiguous_split.hpp>
+#include <cudf/partitioning.hpp>
+#include <cudf/strings/strings_column_view.hpp>
 #include <cudf/table/table.hpp>
 #include <cudf/types.hpp>
 #include <folly/Executor.h>
@@ -35,6 +37,7 @@
 #include "velox/experimental/cudf-exchange/tests/CudfTestData.h"
 #include "velox/experimental/cudf-exchange/tests/CudfTestHelpers.h"
 #include "velox/experimental/cudf-exchange/tests/SinkDriverMock.h"
+#include "velox/experimental/cudf-exchange/tests/SourceDriverMock.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec;
@@ -71,7 +74,11 @@ static std::vector<ExchangeTestParams> generateTestParams() {
       // Test to check parallelism at source
       {"SourceDrivers", 10, 1, 1, 10, 1000 * 1000},
       // Test to check parallelism at source and sink
-      {"SourceSinkDrivers", 10, 10, 1, 10, 1000}};
+      {"SourceSinkDrivers", 10, 10, 1, 10, 1000},
+      // Test with multiple partitions (hash partitioning)
+      {"MultiPartition", 1, 1, 4, 100, 100 * 1000},
+      // Test with multiple partitions and multiple drivers
+      {"MultiPartitionDrivers", 4, 4, 4, 25, 10 * 1000}};
 
   // Generate variants with different number of upstream tasks.
   std::vector<int> upstreamTaskCounts = {1, 10};
@@ -113,6 +120,13 @@ class CudfExchangeTest : public testing::TestWithParam<ExchangeTestParams> {
   static std::shared_ptr<CudfOutputQueueManager> queueManager_;
   static std::shared_ptr<std::thread> communicatorThread_;
   static std::shared_ptr<Communicator> communicator_;
+  static std::atomic<uint32_t> testCounter_;
+
+  // Generate a unique task ID prefix for this test run to avoid collisions
+  // between parametrized tests
+  std::string getUniqueTaskPrefix() {
+    return "t" + std::to_string(testCounter_.fetch_add(1)) + "_";
+  }
 
   static void SetUpTestCase() {
     VLOG(0) << "setup test case, creating queue manager, communicator, etc..";
@@ -168,11 +182,16 @@ TEST_P(CudfExchangeTest, basicTest) {
   ExchangeTestParams p = GetParam();
   int numUpstreamTasks = p.numUpstreamTasks;
 
+  // Use unique task prefix to avoid collisions between parametrized tests
+  const std::string taskPrefix = getUniqueTaskPrefix();
+  std::vector<std::string> srcTaskIds;
+
   std::vector<std::shared_ptr<CudfPartitionedOutputMock>> sourceMocks;
 
   // Create n upstream tasks.
   for (int i = 0; i < numUpstreamTasks; i++) {
-    const std::string srcTaskId = "sourceTask" + std::to_string(i);
+    const std::string srcTaskId = taskPrefix + "sourceTask" + std::to_string(i);
+    srcTaskIds.push_back(srcTaskId);
     auto srcTask =
         createSourceTask(srcTaskId, pool_, CudfTestData::kTestRowType);
 
@@ -188,46 +207,61 @@ TEST_P(CudfExchangeTest, basicTest) {
             p.numRowsPerChunk));
   }
 
-  const std::string sinkTaskId = "sinkTask";
-  int partitionId = 0;
-  core::PlanNodeId exchangeNodeId;
-  auto sinkTask = createExchangeTask(
-      sinkTaskId, CudfTestData::kTestRowType, partitionId, exchangeNodeId);
+  // Create one sink task per partition to receive data from each partition
+  std::vector<std::shared_ptr<SinkDriverMock>> sinkDrivers;
+  for (int partitionId = 0; partitionId < p.numPartitions; ++partitionId) {
+    const std::string sinkTaskId =
+        taskPrefix + "sinkTask" + std::to_string(partitionId);
+    core::PlanNodeId exchangeNodeId;
+    auto sinkTask = createExchangeTask(
+        sinkTaskId, CudfTestData::kTestRowType, partitionId, exchangeNodeId);
 
-  SinkDriverMock sinkDriver(sinkTask, p.numDstDrivers);
+    auto sinkDriver =
+        std::make_shared<SinkDriverMock>(sinkTask, p.numDstDrivers);
 
-  // create n remote splits and add it to the sink driver mock.
-  std::vector<facebook::velox::exec::Split> splits;
-  for (int i = 0; i < numUpstreamTasks; i++) {
-    const std::string srcTaskId = "sourceTask" + std::to_string(i);
-    splits.emplace_back(remoteSplit(srcTaskId, partitionId));
+    // Add remote splits for all upstream tasks to this partition
+    std::vector<facebook::velox::exec::Split> splits;
+    for (int i = 0; i < numUpstreamTasks; i++) {
+      splits.emplace_back(remoteSplit(srcTaskIds[i], partitionId));
+    }
+    sinkDriver->addSplits(splits);
+
+    sinkDrivers.push_back(sinkDriver);
   }
-  sinkDriver.addSplits(splits);
 
   // Start the mocks.
   VLOG(3) << "Starting source tasks";
   for (int i = 0; i < numUpstreamTasks; i++) {
     sourceMocks[i]->run();
   }
-  VLOG(3) << "Starting sink task";
-  sinkDriver.run();
+  VLOG(3) << "Starting " << p.numPartitions << " sink tasks";
+  for (auto& sinkDriver : sinkDrivers) {
+    sinkDriver->run();
+  }
 
   for (int i = 0; i < numUpstreamTasks; i++) {
     sourceMocks[i]->joinThreads();
   }
   VLOG(3) << "Source tasks done.";
-  sinkDriver.joinThreads();
-  VLOG(3) << "Sink task done.";
+  for (auto& sinkDriver : sinkDrivers) {
+    sinkDriver->joinThreads();
+  }
+  VLOG(3) << "All sink tasks done.";
 
-  size_t expectedRows =
-      p.numChunks * p.numRowsPerChunk * numUpstreamTasks * p.numSrcDrivers;
-  size_t effectiveRows = sinkDriver.numRows();
+  // Total rows received across all partitions should equal total rows sent.
+  // CudfPartitionedOutputMock sends numChunks * numRowsPerChunk to EACH partition,
+  // so total rows = chunks * rowsPerChunk * partitions * upstreamTasks * srcDrivers
+  size_t expectedRows = static_cast<size_t>(p.numChunks) * p.numRowsPerChunk *
+      p.numPartitions * numUpstreamTasks * p.numSrcDrivers;
+  size_t totalReceivedRows = 0;
+  for (auto& sinkDriver : sinkDrivers) {
+    totalReceivedRows += sinkDriver->numRows();
+  }
 
-  GTEST_ASSERT_EQ(expectedRows, effectiveRows);
+  GTEST_ASSERT_EQ(expectedRows, totalReceivedRows);
 
   // Remove the srcTasks from the queue manager, so queue get freed
-  for (int i = 0; i < numUpstreamTasks; i++) {
-    const std::string srcTaskId = "sourceTask" + std::to_string(i);
+  for (const auto& srcTaskId : srcTaskIds) {
     queueManager_->removeTask(srcTaskId);
   }
 
@@ -239,6 +273,10 @@ TEST_P(CudfExchangeTest, dataIntegrityTest) {
   ExchangeTestParams p = GetParam();
   int numUpstreamTasks = p.numUpstreamTasks;
 
+  // Use unique task prefix to avoid collisions between parametrized tests
+  const std::string taskPrefix = getUniqueTaskPrefix();
+  std::vector<std::string> srcTaskIds;
+
   // Create some reference data to send which we will check against at the
   // receiver
   std::shared_ptr<CudfTestData> dataToSend = std::make_shared<CudfTestData>();
@@ -248,7 +286,8 @@ TEST_P(CudfExchangeTest, dataIntegrityTest) {
 
   // Create n upstream tasks.
   for (int i = 0; i < numUpstreamTasks; i++) {
-    const std::string srcTaskId = "sourceTask" + std::to_string(i);
+    const std::string srcTaskId = taskPrefix + "sourceTask" + std::to_string(i);
+    srcTaskIds.push_back(srcTaskId);
     auto srcTask =
         createSourceTask(srcTaskId, pool_, CudfTestData::kTestRowType);
 
@@ -268,21 +307,27 @@ TEST_P(CudfExchangeTest, dataIntegrityTest) {
             dataToSend));
   }
 
-  const std::string sinkTaskId = "sinkTask";
-  int partitionId = 0;
-  core::PlanNodeId exchangeNodeId;
-  auto sinkTask = createExchangeTask(
-      sinkTaskId, CudfTestData::kTestRowType, partitionId, exchangeNodeId);
+  // Create one sink task per partition to receive data from each partition
+  std::vector<std::shared_ptr<SinkDriverMock>> sinkDrivers;
+  for (int partitionId = 0; partitionId < p.numPartitions; ++partitionId) {
+    const std::string sinkTaskId =
+        taskPrefix + "sinkTask" + std::to_string(partitionId);
+    core::PlanNodeId exchangeNodeId;
+    auto sinkTask = createExchangeTask(
+        sinkTaskId, CudfTestData::kTestRowType, partitionId, exchangeNodeId);
 
-  SinkDriverMock sinkDriver(sinkTask, p.numDstDrivers, dataToSend);
+    auto sinkDriver =
+        std::make_shared<SinkDriverMock>(sinkTask, p.numDstDrivers, dataToSend);
 
-  // create n remote splits and add it to the sink driver mock.
-  std::vector<facebook::velox::exec::Split> splits;
-  for (int i = 0; i < numUpstreamTasks; i++) {
-    const std::string srcTaskId = "sourceTask" + std::to_string(i);
-    splits.emplace_back(remoteSplit(srcTaskId, partitionId));
+    // Add remote splits for all upstream tasks to this partition
+    std::vector<facebook::velox::exec::Split> splits;
+    for (int i = 0; i < numUpstreamTasks; i++) {
+      splits.emplace_back(remoteSplit(srcTaskIds[i], partitionId));
+    }
+    sinkDriver->addSplits(splits);
+
+    sinkDrivers.push_back(sinkDriver);
   }
-  sinkDriver.addSplits(splits);
 
   // Start the mocks.
   VLOG(3) << "Starting source tasks";
@@ -290,25 +335,37 @@ TEST_P(CudfExchangeTest, dataIntegrityTest) {
     sourceMocks[i]->run();
   }
 
-  VLOG(3) << "Starting sink task";
-  sinkDriver.run();
+  VLOG(3) << "Starting " << p.numPartitions << " sink tasks";
+  for (auto& sinkDriver : sinkDrivers) {
+    sinkDriver->run();
+  }
 
   for (int i = 0; i < numUpstreamTasks; i++) {
     sourceMocks[i]->joinThreads();
   }
   VLOG(3) << "Source tasks done.";
 
-  sinkDriver.joinThreads();
-  VLOG(3) << "Sink task done.";
+  for (auto& sinkDriver : sinkDrivers) {
+    sinkDriver->joinThreads();
+  }
+  VLOG(3) << "All sink tasks done.";
 
   // Remove the srcTasks from the queue manager, so queue get freed
-  for (int i = 0; i < numUpstreamTasks; i++) {
-    const std::string srcTaskId = "sourceTask" + std::to_string(i);
+  for (const auto& srcTaskId : srcTaskIds) {
     queueManager_->removeTask(srcTaskId);
   }
 
+  // Check data integrity across all partitions
+  bool allDataValid = true;
+  for (auto& sinkDriver : sinkDrivers) {
+    if (!sinkDriver->dataIsValid()) {
+      allDataValid = false;
+      break;
+    }
+  }
+
   VLOG(3) << "- CudfExchangeTest::dataIntegrityTest";
-  GTEST_ASSERT_EQ(sinkDriver.dataIsValid(), true);
+  GTEST_ASSERT_EQ(allDataValid, true);
 }
 
 TEST_P(CudfExchangeTest, bandwidthTest) {
@@ -324,6 +381,10 @@ TEST_P(CudfExchangeTest, bandwidthTest) {
   ExchangeTestParams p = GetParam();
   int numUpstreamTasks = p.numUpstreamTasks;
 
+  // Use unique task prefix to avoid collisions between parametrized tests
+  const std::string taskPrefix = getUniqueTaskPrefix();
+  std::vector<std::string> srcTaskIds;
+
   // Create some reference data to send which we will check against at the
   // receiver
   std::shared_ptr<CudfTestData> dataToSend = std::make_shared<CudfTestData>();
@@ -333,7 +394,8 @@ TEST_P(CudfExchangeTest, bandwidthTest) {
 
   // Create n upstream tasks.
   for (int i = 0; i < numUpstreamTasks; i++) {
-    const std::string srcTaskId = "sourceTask" + std::to_string(i);
+    const std::string srcTaskId = taskPrefix + "sourceTask" + std::to_string(i);
+    srcTaskIds.push_back(srcTaskId);
 
     // Create a source task with a large maximum queue size so that we don't
     // block sending
@@ -354,7 +416,7 @@ TEST_P(CudfExchangeTest, bandwidthTest) {
             dataToSend));
   }
 
-  const std::string sinkTaskId = "sinkTask";
+  const std::string sinkTaskId = taskPrefix + "sinkTask";
   int partitionId = 0;
   core::PlanNodeId exchangeNodeId;
   auto sinkTask = createExchangeTask(
@@ -366,8 +428,7 @@ TEST_P(CudfExchangeTest, bandwidthTest) {
   // create n remote splits and add it to the sink driver mock.
   std::vector<facebook::velox::exec::Split> splits;
   for (int i = 0; i < numUpstreamTasks; i++) {
-    const std::string srcTaskId = "sourceTask" + std::to_string(i);
-    splits.emplace_back(remoteSplit(srcTaskId, partitionId));
+    splits.emplace_back(remoteSplit(srcTaskIds[i], partitionId));
   }
   sinkDriver.addSplits(splits);
 
@@ -409,8 +470,7 @@ TEST_P(CudfExchangeTest, bandwidthTest) {
   VLOG(3) << "Sink task done.";
 
   // Remove the srcTasks from the queue manager, so queue get freed
-  for (int i = 0; i < numUpstreamTasks; i++) {
-    const std::string srcTaskId = "sourceTask" + std::to_string(i);
+  for (const auto& srcTaskId : srcTaskIds) {
     queueManager_->removeTask(srcTaskId);
   }
 
@@ -418,8 +478,269 @@ TEST_P(CudfExchangeTest, bandwidthTest) {
   GTEST_ASSERT_EQ(sinkDriver.dataIsValid(), true);
 }
 
+// Test using real CudfPartitionedOutput operator via SourceDriverMock
+TEST_P(CudfExchangeTest, realPartitionedOutputTest) {
+  VLOG(3) << "+ CudfExchangeTest::realPartitionedOutputTest";
+  ExchangeTestParams p = GetParam();
+
+  // Use unique task prefix to avoid collisions between parametrized tests
+  const std::string taskPrefix = getUniqueTaskPrefix();
+
+  // For this test, we use a single upstream task to keep it simple
+  const int numUpstreamTasks = 1;
+  const std::string srcTaskId = taskPrefix + "sourceTask0";
+
+  // Specify partition keys when numPartitions > 1 to enable hash partitioning.
+  // Use "c0" (INTEGER column) as the partition key.
+  std::vector<std::string> partitionKeys;
+  if (p.numPartitions > 1) {
+    partitionKeys = {"c0"};
+  }
+
+  // Create source task with PartitionedOutput plan node
+  auto srcTask = createPartitionedOutputTask(
+      srcTaskId, pool_, CudfTestData::kTestRowType, p.numPartitions,
+      partitionKeys);
+
+  // Tell the queue manager that a new source task exists
+  queueManager_->initializeTask(srcTask, p.numPartitions, p.numSrcDrivers);
+
+  // Create SourceDriverMock to drive real CudfPartitionedOutput operators
+  auto sourceDriver = std::make_shared<SourceDriverMock>(
+      srcTask, p.numSrcDrivers, p.numChunks, p.numRowsPerChunk);
+
+  // Create one sink task per partition to receive data from each partition
+  std::vector<std::shared_ptr<SinkDriverMock>> sinkDrivers;
+  for (int partitionId = 0; partitionId < p.numPartitions; ++partitionId) {
+    const std::string sinkTaskId =
+        taskPrefix + "sinkTask" + std::to_string(partitionId);
+    core::PlanNodeId exchangeNodeId;
+    auto sinkTask = createExchangeTask(
+        sinkTaskId, CudfTestData::kTestRowType, partitionId, exchangeNodeId);
+
+    auto sinkDriver = std::make_shared<SinkDriverMock>(sinkTask, p.numDstDrivers);
+
+    // Add remote split for this partition
+    std::vector<facebook::velox::exec::Split> splits;
+    splits.emplace_back(remoteSplit(srcTaskId, partitionId));
+    sinkDriver->addSplits(splits);
+
+    sinkDrivers.push_back(sinkDriver);
+  }
+
+  // Start the drivers
+  VLOG(3) << "Starting source task with real CudfPartitionedOutput";
+  sourceDriver->run();
+
+  VLOG(3) << "Starting " << p.numPartitions << " sink tasks";
+  for (auto& sinkDriver : sinkDrivers) {
+    sinkDriver->run();
+  }
+
+  sourceDriver->joinThreads();
+  VLOG(3) << "Source task done.";
+
+  for (auto& sinkDriver : sinkDrivers) {
+    sinkDriver->joinThreads();
+  }
+  VLOG(3) << "All sink tasks done.";
+
+  // Total rows received across all partitions should equal total rows sent
+  size_t expectedRows = p.numChunks * p.numRowsPerChunk * p.numSrcDrivers;
+  size_t totalReceivedRows = 0;
+  for (auto& sinkDriver : sinkDrivers) {
+    totalReceivedRows += sinkDriver->numRows();
+  }
+
+  VLOG(3) << "Expected rows: " << expectedRows
+          << ", received rows: " << totalReceivedRows;
+  GTEST_ASSERT_EQ(expectedRows, totalReceivedRows);
+
+  // Cleanup
+  queueManager_->removeTask(srcTaskId);
+
+  VLOG(3) << "- CudfExchangeTest::realPartitionedOutputTest";
+}
+
+// Test using real CudfPartitionedOutput with data integrity verification.
+// This test:
+// 1. Creates reference data (CudfTestData) - same as dataIntegrityTest
+// 2. Partitions that data using cudf::hash_partition (same algorithm as
+//    CudfPartitionedOutput) to create per-partition reference data
+// 3. Sends data through SourceDriverMock (which uses CudfPartitionedOutput)
+// 4. Each SinkDriverMock verifies received data against its partition's
+//    expected data using row-by-row comparison
+TEST_P(CudfExchangeTest, realPartitionedOutputDataIntegrityTest) {
+  VLOG(3) << "+ CudfExchangeTest::realPartitionedOutputDataIntegrityTest";
+  ExchangeTestParams p = GetParam();
+
+  // Use unique task prefix to avoid collisions between parametrized tests
+  const std::string taskPrefix = getUniqueTaskPrefix();
+
+  // For this test, use a single upstream task and single driver for simplicity
+  // This allows deterministic data verification
+  const int numUpstreamTasks = 1;
+  const int numSrcDrivers = 1;
+  const std::string srcTaskId = taskPrefix + "sourceTask0";
+
+  // Create reference data that will be sent - same as dataIntegrityTest
+  auto dataToSend = std::make_shared<CudfTestData>();
+  dataToSend->initialize(p.numRowsPerChunk);
+
+  // Specify partition keys when numPartitions > 1 to enable hash partitioning.
+  // Use "c0" (INTEGER column) as the partition key (column index 0).
+  std::vector<std::string> partitionKeys;
+  std::vector<cudf::size_type> partitionKeyIndices;
+  if (p.numPartitions > 1) {
+    partitionKeys = {"c0"};
+    partitionKeyIndices = {0}; // c0 is column 0
+  }
+
+  // Create per-partition reference data by applying cudf::hash_partition
+  // to the source data - same algorithm as CudfPartitionedOutput uses
+  auto stream = rmm::cuda_stream_default;
+  std::vector<std::shared_ptr<CudfTestData>> partitionedDataToVerify(
+      p.numPartitions);
+
+  // Create a reference table using the same data that SourceDriverMock will use
+  auto refTable = makeFilledTable(p.numRowsPerChunk, dataToSend, stream);
+  stream.synchronize();
+
+  if (p.numPartitions > 1 && !partitionKeyIndices.empty()) {
+    // Apply hash partitioning - same as CudfPartitionedOutput::hashPartition
+    auto [partitionedTable, partitionOffsets] = cudf::hash_partition(
+        refTable->view(),
+        partitionKeyIndices,
+        p.numPartitions,
+        cudf::hash_id::HASH_MURMUR3,
+        cudf::DEFAULT_HASH_SEED,
+        stream);
+    stream.synchronize();
+
+    // Extract data from each partition to create partitioned CudfTestData
+    cudf::column_view iCol = partitionedTable->view().column(0);
+    cudf::column_view dCol = partitionedTable->view().column(1);
+    cudf::strings_column_view sCol{partitionedTable->view().column(2)};
+
+    auto allIntegers =
+        getColVector<uint32_t>(iCol, partitionedTable->num_rows(), stream);
+    auto allDoubles =
+        getColVector<float>(dCol, partitionedTable->num_rows(), stream);
+    auto allStrings =
+        getStringCol(sCol, partitionedTable->num_rows(), stream);
+
+    // partitionOffsets[i] is the END offset of partition i
+    for (int partId = 0; partId < p.numPartitions; ++partId) {
+      cudf::size_type startOffset =
+          (partId == 0) ? 0 : partitionOffsets[partId - 1];
+      cudf::size_type endOffset = partitionOffsets[partId];
+      cudf::size_type partSize = endOffset - startOffset;
+
+      auto partIntegers = std::make_shared<std::vector<uint32_t>>();
+      auto partDoubles = std::make_shared<std::vector<float>>();
+      auto partStrings = std::make_shared<std::vector<std::string>>();
+
+      for (cudf::size_type i = startOffset; i < endOffset; ++i) {
+        partIntegers->push_back(allIntegers[i]);
+        partDoubles->push_back(allDoubles[i]);
+        partStrings->push_back(allStrings[i]);
+      }
+
+      partitionedDataToVerify[partId] = std::make_shared<CudfTestData>();
+      partitionedDataToVerify[partId]->setData(
+          partIntegers, partDoubles, partStrings);
+
+      VLOG(3) << "Partition " << partId << ": " << partSize << " rows";
+    }
+  } else {
+    // Single partition: all data goes to partition 0
+    partitionedDataToVerify[0] = dataToSend;
+  }
+
+  // Create source task with PartitionedOutput plan node
+  auto srcTask = createPartitionedOutputTask(
+      srcTaskId,
+      pool_,
+      CudfTestData::kTestRowType,
+      p.numPartitions,
+      partitionKeys);
+
+  // Tell the queue manager that a new source task exists
+  queueManager_->initializeTask(srcTask, p.numPartitions, numSrcDrivers);
+
+  // Create SourceDriverMock with the original (non-partitioned) dataToSend
+  auto sourceDriver = std::make_shared<SourceDriverMock>(
+      srcTask, numSrcDrivers, p.numChunks, p.numRowsPerChunk, dataToSend);
+
+  // Create one SinkDriverMock per partition, each with its partition's
+  // expected data for row-by-row verification
+  std::vector<std::shared_ptr<SinkDriverMock>> sinkDrivers;
+  for (int partitionId = 0; partitionId < p.numPartitions; ++partitionId) {
+    const std::string sinkTaskId =
+        taskPrefix + "sinkTask" + std::to_string(partitionId);
+    core::PlanNodeId exchangeNodeId;
+    auto sinkTask = createExchangeTask(
+        sinkTaskId, CudfTestData::kTestRowType, partitionId, exchangeNodeId);
+
+    // Pass the partitioned reference data for this partition
+    auto sinkDriver = std::make_shared<SinkDriverMock>(
+        sinkTask, p.numDstDrivers, partitionedDataToVerify[partitionId]);
+
+    std::vector<facebook::velox::exec::Split> splits;
+    splits.emplace_back(remoteSplit(srcTaskId, partitionId));
+    sinkDriver->addSplits(splits);
+
+    sinkDrivers.push_back(sinkDriver);
+  }
+
+  // Start the drivers
+  VLOG(3) << "Starting source task with real CudfPartitionedOutput";
+  sourceDriver->run();
+
+  VLOG(3) << "Starting " << p.numPartitions << " sink tasks";
+  for (auto& sinkDriver : sinkDrivers) {
+    sinkDriver->run();
+  }
+
+  sourceDriver->joinThreads();
+  VLOG(3) << "Source task done.";
+
+  for (auto& sinkDriver : sinkDrivers) {
+    sinkDriver->joinThreads();
+  }
+  VLOG(3) << "All sink tasks done.";
+
+  // Verify total row count
+  size_t expectedTotalRows = p.numChunks * p.numRowsPerChunk * numSrcDrivers;
+  size_t totalReceivedRows = 0;
+  for (auto& sinkDriver : sinkDrivers) {
+    totalReceivedRows += sinkDriver->numRows();
+  }
+  GTEST_ASSERT_EQ(expectedTotalRows, totalReceivedRows);
+
+  // Verify data integrity - SinkDriverMock sets dataIsValid() to false
+  // if any row doesn't match the reference data
+  bool allDataValid = true;
+  for (int partId = 0; partId < p.numPartitions; ++partId) {
+    if (!sinkDrivers[partId]->dataIsValid()) {
+      VLOG(0) << "Partition " << partId << ": data validation failed";
+      allDataValid = false;
+    } else {
+      VLOG(3) << "Partition " << partId << ": data validated successfully";
+    }
+  }
+
+  GTEST_ASSERT_EQ(allDataValid, true);
+
+  // Cleanup
+  queueManager_->removeTask(srcTaskId);
+
+  VLOG(3) << "- CudfExchangeTest::realPartitionedOutputDataIntegrityTest";
+}
+
 std::shared_ptr<CudfOutputQueueManager> CudfExchangeTest::queueManager_;
 std::shared_ptr<std::thread> CudfExchangeTest::communicatorThread_;
 std::shared_ptr<Communicator> CudfExchangeTest::communicator_;
+std::atomic<uint32_t> CudfExchangeTest::testCounter_{0};
 
 } // namespace facebook::velox::cudf_exchange

@@ -96,6 +96,86 @@ std::shared_ptr<facebook::velox::exec::Task> createExchangeTask(
   return task;
 }
 
+std::shared_ptr<Task> createPartitionedOutputTask(
+    const std::string& taskId,
+    std::shared_ptr<memory::MemoryPool> pool,
+    RowTypePtr rowType,
+    int numPartitions,
+    const std::vector<std::string>& partitionKeys,
+    uint64_t kMaxOutputBufferSize) {
+  VLOG(3) << "Creating PartitionedOutput task with " << numPartitions
+          << " partitions";
+
+  const size_t vectorSize = 10;
+
+  // Create a dummy row vector for the Values node (required by PlanBuilder)
+  auto typeParams = rowType->parameters();
+  std::vector<VectorPtr> vecPtrs;
+  for (auto& typeParam : typeParams) {
+    vecPtrs.emplace_back(
+        BaseVector::create(typeParam.type, vectorSize, pool.get()));
+  }
+
+  auto rowVector = std::make_shared<RowVector>(
+      pool.get(),
+      rowType,
+      BufferPtr(nullptr),
+      vectorSize,
+      vecPtrs);
+
+  // Build the plan: Values -> PartitionedOutput
+  auto planFragment = exec::test::PlanBuilder()
+                          .values({rowVector})
+                          .partitionedOutput(partitionKeys, numPartitions)
+                          .planFragment();
+
+  std::shared_ptr<folly::Executor> executor(
+      std::make_shared<folly::CPUThreadPoolExecutor>(
+          std::thread::hardware_concurrency()));
+
+  std::unordered_map<std::string, std::string> configSettings{
+      {velox::core::QueryConfig::kMaxOutputBufferSize,
+       std::to_string(kMaxOutputBufferSize)}};
+
+  auto queryCtx = core::QueryCtx::create(
+      executor.get(), core::QueryConfig(std::move(configSettings)));
+
+  auto task = Task::create(
+      taskId,
+      std::move(planFragment),
+      0, // partition number
+      std::move(queryCtx),
+      Task::ExecutionMode::kParallel);
+
+  return task;
+}
+
+std::shared_ptr<cudf_velox::CudfVector> makeCudfVector(
+    memory::MemoryPool* pool,
+    size_t numRows,
+    RowTypePtr rowType,
+    std::shared_ptr<CudfTestData> dataToSend,
+    rmm::cuda_stream_view stream) {
+  // Create table using either makeTable or makeFilledTable
+  std::unique_ptr<cudf::table> table;
+  if (dataToSend == nullptr) {
+    table = makeTable(numRows, rowType, stream);
+  } else {
+    table = makeFilledTable(numRows, dataToSend, stream);
+  }
+
+  // Sync the stream before creating CudfVector
+  stream.synchronize();
+
+  // Create and return CudfVector
+  return std::make_shared<cudf_velox::CudfVector>(
+      pool,
+      rowType,
+      static_cast<vector_size_t>(numRows),
+      std::move(table),
+      stream);
+}
+
 template <typename T>
 std::unique_ptr<cudf::column> make_numeric_column_from_vector(
     const std::vector<T>& host_values,

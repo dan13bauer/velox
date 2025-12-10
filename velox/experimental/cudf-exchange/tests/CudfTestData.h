@@ -69,6 +69,20 @@ class CudfTestData {
     return numRows_;
   }
 
+  /// @brief Sets the data directly (used for creating partitioned test data).
+  /// @param integers The integer values for column c0.
+  /// @param doubles The double values for column c1.
+  /// @param strings The string values for column c2.
+  void setData(
+      std::shared_ptr<std::vector<uint32_t>> integers,
+      std::shared_ptr<std::vector<float>> doubles,
+      std::shared_ptr<std::vector<std::string>> strings) {
+    integers_ = std::move(integers);
+    doubles_ = std::move(doubles);
+    strings_ = std::move(strings);
+    numRows_ = integers_->size();
+  }
+
  protected:
   std::string genRandomStr(const size_t len);
 
