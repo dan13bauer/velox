@@ -111,7 +111,12 @@ void CudfPartitionedOutput::addInput(RowVectorPtr input) {
       if (partitionKeyIndices_.size() > 0 || spec_ == "gather") {
         hashPartition(tableView, stream);
       } else {
-        equalPartition(tableView, stream);
+        // For equal partition, we need to release the table from CudfVector
+        // since cudf::split returns views that reference the source table.
+        stream.synchronize();
+        auto sourceTable =
+            std::shared_ptr<cudf::table>(cudfVector->release());
+        equalPartition(std::move(sourceTable), stream);
       }
     } else {
       // Single partition case. No need to hash, assume queue zero.
@@ -128,15 +133,17 @@ void CudfPartitionedOutput::addInput(RowVectorPtr input) {
       stream.synchronize();
 
       // Release the table from CudfVector - this avoids data copy
-      auto table = cudfVector->release();
+      auto sourceTable =
+          std::shared_ptr<cudf::table>(cudfVector->release());
 
       // Generate custom metadata for the table (no contiguous buffer required)
-      auto metadata = TableMetadata::buildFromTable(table->view());
+      auto metadata = TableMetadata::buildFromTable(sourceTable->view());
 
-      // Create unpacked table data
+      // Create unpacked table data with view + shared ownership
       auto unpackedData = std::make_unique<TableWithMetadata>();
       unpackedData->metadata = std::move(metadata);
-      unpackedData->table = std::move(table);
+      unpackedData->tableView = sourceTable->view();
+      unpackedData->sourceTable = std::move(sourceTable);
       unpackedData->numRows = numRows;
 
       queueManager->enqueue(this->taskId(), 0, std::move(unpackedData));
@@ -268,63 +275,62 @@ void CudfPartitionedOutput::hashPartition(
       cudf::DEFAULT_HASH_SEED,
       stream);
 
+  // hash_partition is async, sync before splitting to ensure data is ready
+  stream.synchronize();
+
   VELOX_CHECK(partitionOffsets.size() == numPartitions_);
   VELOX_CHECK(partitionOffsets[0] == 0);
 
   // Erase first element since it's always 0 and we don't need it.
   partitionOffsets.erase(partitionOffsets.begin());
 
-  splitAndEnqueue(partitionedTable->view(), partitionOffsets, stream);
+  // Convert to shared_ptr for shared ownership across partitions
+  auto sourceTable =
+      std::shared_ptr<cudf::table>(std::move(partitionedTable));
+  splitAndEnqueue(std::move(sourceTable), partitionOffsets, stream);
 }
 
 void CudfPartitionedOutput::equalPartition(
-    cudf::table_view tableView,
+    std::shared_ptr<cudf::table> sourceTable,
     rmm::cuda_stream_view stream) {
   VLOG(3) << "@" << taskId() << "#" << pipelineId_ << "/" << driverId_ << " Splitting into " << numPartitions_ << " chunks";
   std::vector<cudf::size_type> offsets;
-  cudf::size_type size = tableView.num_rows();
+  cudf::size_type size = sourceTable->num_rows();
   for (int i = 1; i < numPartitions_; ++i) {
     cudf::size_type idx = size / (numPartitions_ / (double)i);
     offsets.push_back(idx);
   }
-  splitAndEnqueue(tableView, offsets, stream);
+  splitAndEnqueue(std::move(sourceTable), offsets, stream);
 }
 
 void CudfPartitionedOutput::splitAndEnqueue(
-    cudf::table_view tableView,
+    std::shared_ptr<cudf::table> sourceTable,
     std::vector<cudf::size_type> offsets,
     rmm::cuda_stream_view stream) {
-  auto contiguousTables = cudf::contiguous_split(tableView, offsets, stream);
+  // Use cudf::split for zero-copy splitting. Returns vector of table_views
+  // that reference the source table's data.
+  auto tableViews = cudf::split(sourceTable->view(), offsets, stream);
 
   VELOX_CHECK_EQ(
       offsets.size() + 1, numPartitions_, "mismatch in numPartitions_");
 
-  // Synchronize stream before sending data
-  stream.synchronize();
-
   auto queueManager = sharedQueueManager();
   for (int i = 0; i < numPartitions_; ++i) {
-    auto const& partitionTable = contiguousTables[i];
-    if (partitionTable.table.num_rows() == 0) {
+    auto const& partitionView = tableViews[i];
+    if (partitionView.num_rows() == 0) {
       // Skip empty partitions.
       continue;
     }
 
-    // Create a new table from the table_view in the packed_table.
-    // TODO: This creates a copy. In a future optimization, we could
-    // avoid this copy by transferring columns directly from the contiguous
-    // split result.
-    auto mr = cudf::get_current_device_resource_ref();
-    auto table = std::make_unique<cudf::table>(partitionTable.table, stream, mr);
+    // Generate custom metadata for the partition view
+    auto metadata = TableMetadata::buildFromTable(partitionView);
 
-    // Generate custom metadata for the table (no contiguous buffer required)
-    auto metadata = TableMetadata::buildFromTable(table->view());
-
-    // Create unpacked table data
+    // Create unpacked table data with view + shared ownership of source
     auto unpackedData = std::make_unique<TableWithMetadata>();
     unpackedData->metadata = std::move(metadata);
-    unpackedData->table = std::move(table);
-    unpackedData->numRows = partitionTable.table.num_rows();
+    unpackedData->tableView = partitionView;
+    unpackedData->sourceTable = sourceTable; // All partitions share ownership
+    unpackedData->numRows = partitionView.num_rows();
 
     // enqueue partition data on Cudf Output Buffer
     queueManager->enqueue(this->taskId(), i, std::move(unpackedData));

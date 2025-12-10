@@ -39,6 +39,6 @@ target_link_libraries(
   PRIVATE cudf::cudf CUDA::cudart CUDA::cuda_driver Folly::folly velox_core
 )
 
-#if(VELOX_BUILD_TESTING)
+if(VELOX_BUILD_TESTING)
   add_subdirectory(tests)
-#endif()
+endif()

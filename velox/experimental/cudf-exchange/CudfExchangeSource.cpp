@@ -293,7 +293,7 @@ void CudfExchangeSource::onHandshake(
 }
 
 void CudfExchangeSource::getMetadata() {
-  uint32_t sizeMetadata = 4096; // shouldn't be a fixed size.
+  uint32_t sizeMetadata = 65536; // shouldn't be a fixed size.
   auto metadataReq = std::make_shared<std::vector<uint8_t>>(sizeMetadata);
   uint64_t metadataTag = getMetadataTag(partitionKeyHash_, sequenceNumber_);
 
@@ -353,6 +353,10 @@ void CudfExchangeSource::onMetadata(
     VLOG(3) << toString() << " Datasize bytes == "
             << ptr->metadata.dataSizeBytes;
 
+    // Get a stream from the global stream pool - used for all operations
+    auto stream =
+        facebook::velox::cudf_velox::cudfGlobalStreamPool().get_stream();
+
     if (ptr->metadata.atEnd) {
       // It seems that all data has been transferred
       atEnd_ = true;
@@ -360,8 +364,8 @@ void CudfExchangeSource::onMetadata(
       VLOG(3) << "There is no more data to transfer for " << toString();
       setStateIf(ReceiverState::WaitingForMetadata, ReceiverState::Done);
       communicator_->addToWorkQueue(getSelfPtr());
-      // nullptr table marks end, use default stream
-      enqueue(nullptr, rmm::cuda_stream_view{}, ptr->metadata);
+      // nullptr table marks end
+      enqueue(nullptr, stream, ptr->metadata);
       // jump out of this function.
       return;
     }
@@ -398,10 +402,6 @@ void CudfExchangeSource::onMetadata(
     perColData->columnMeta = std::move(columnMetadata);
     perColData->dataBuffers.resize(perColData->columnMeta.size());
     perColData->nullMaskBuffers.resize(perColData->columnMeta.size());
-
-    // Get a stream from the global stream pool
-    auto stream =
-        facebook::velox::cudf_velox::cudfGlobalStreamPool().get_stream();
 
     // Allocate buffers for each column based on metadata
     VLOG(3) << toString() << " Allocating buffers for " << perColData->columnMeta.size() << " columns";
@@ -444,9 +444,10 @@ void CudfExchangeSource::onMetadata(
       return;
     }
 
-    // Single tag for all column data within this table transfer.
-    // Since all transfers use the same stream, sequence is maintained.
-    uint64_t tagRecv = getDataTag(partitionKeyHash_, sequenceNumber_);
+    // Each buffer gets a unique tag by incrementing the sequence number.
+    // This ensures that UCXX matches send/receive pairs correctly.
+    // bufferSeq starts at sequenceNumber_ and increments for each buffer.
+    uint64_t bufferSeq = sequenceNumber_;
 
     std::weak_ptr<CudfExchangeSource> weak = weak_from_this();
 
@@ -494,14 +495,15 @@ void CudfExchangeSource::onMetadata(
       if (colMeta.dataSize > 0 && perColData->dataBuffers[i]) {
         void* bufferPtr = perColData->dataBuffers[i]->data();
 
+        uint64_t tag = getDataTag(partitionKeyHash_, bufferSeq++);
         VLOG(3) << toString() << " Receiving data buffer " << i << " size "
-                << colMeta.dataSize << " tag " << std::hex << tagRecv
-                << std::dec << " bufferPtr=" << bufferPtr;
+                << colMeta.dataSize << " tag " << std::hex << tag << std::dec
+                << " bufferPtr=" << bufferPtr;
 
         auto req = endpointRef_->endpoint_->tagRecv(
             bufferPtr,
             static_cast<size_t>(colMeta.dataSize),
-            ucxx::Tag{tagRecv},
+            ucxx::Tag{tag},
             ucxx::TagMaskFull,
             false,
             [weak, perColData, requests, stream](
@@ -523,14 +525,15 @@ void CudfExchangeSource::onMetadata(
       if (colMeta.nullMaskSize > 0 && perColData->nullMaskBuffers[i]) {
         void* nullBufPtr = perColData->nullMaskBuffers[i]->data();
 
+        uint64_t tag = getDataTag(partitionKeyHash_, bufferSeq++);
         VLOG(3) << toString() << " Receiving null_mask buffer " << i << " size "
-                << colMeta.nullMaskSize << " tag " << std::hex << tagRecv
+                << colMeta.nullMaskSize << " tag " << std::hex << tag
                 << std::dec << " bufferPtr=" << nullBufPtr;
 
         auto req = endpointRef_->endpoint_->tagRecv(
             nullBufPtr,
             static_cast<size_t>(colMeta.nullMaskSize),
-            ucxx::Tag{tagRecv},
+            ucxx::Tag{tag},
             ucxx::TagMaskFull,
             false,
             [weak, perColData, requests, stream](
@@ -589,18 +592,23 @@ void CudfExchangeSource::onPerColumnDataComplete(
   VLOG(3) << toString() << " + onPerColumnDataComplete got chunk: "
           << sequenceNumber_;
 
-  this->sequenceNumber_++;
-
-  // Calculate total bytes received for metrics
+  // Calculate total bytes received for metrics and count buffers
   int64_t totalBytes = 0;
+  size_t numBuffersReceived = 0;
   for (const auto& colMeta : perColData->columnMeta) {
     if (colMeta.dataSize > 0) {
       totalBytes += colMeta.dataSize;
+      ++numBuffersReceived;
     }
     if (colMeta.nullMaskSize > 0) {
       totalBytes += colMeta.nullMaskSize;
+      ++numBuffersReceived;
     }
   }
+
+  // Increment sequence number by the number of buffers received (each buffer used one sequence)
+  // For empty tables, increment by at least 1 to advance the sequence
+  this->sequenceNumber_ += std::max(numBuffersReceived, static_cast<size_t>(1));
 
   metrics_.numPackedColumns_.addValue(1);
   metrics_.totalBytes_.addValue(totalBytes);
@@ -701,6 +709,14 @@ void CudfExchangeSource::onPerColumnDataComplete(
           std::move(children));
     }
 
+    // Verify that the constructed column has the expected number of rows
+    VELOX_CHECK_EQ(
+        column->size(),
+        meta.size,
+        "Column row count mismatch: expected {} rows from metadata, got {} rows",
+        meta.size,
+        column->size());
+
     return column;
   };
 
@@ -716,8 +732,30 @@ void CudfExchangeSource::onPerColumnDataComplete(
     }
   }
 
+  // Verify we got the expected number of root columns
+  VELOX_CHECK_EQ(
+      rootColumns.size(),
+      static_cast<size_t>(numRootColumns),
+      "Root column count mismatch: expected {} columns, got {}",
+      numRootColumns,
+      rootColumns.size());
+
   // Create the table from the columns
   auto table = std::make_unique<cudf::table>(std::move(rootColumns));
+
+  // Verify all columns have consistent row counts
+  if (table->num_columns() > 0) {
+    auto expectedRows = table->get_column(0).size();
+    for (cudf::size_type i = 1; i < table->num_columns(); ++i) {
+      VELOX_CHECK_EQ(
+          table->get_column(i).size(),
+          expectedRows,
+          "Column {} has {} rows, but column 0 has {} rows - row count inconsistency",
+          i,
+          table->get_column(i).size(),
+          expectedRows);
+    }
+  }
 
   VLOG(3) << toString() << " Reconstructed table with "
           << table->num_columns() << " columns, " << table->num_rows()

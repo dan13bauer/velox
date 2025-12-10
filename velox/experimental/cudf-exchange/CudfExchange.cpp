@@ -111,6 +111,7 @@ BlockingReason CudfExchange::isBlocked(ContinueFuture* future) {
   ContinueFuture dataFuture;
   currentTableWithStream_ =
       exchangeClient_->next(driverId_, &atEnd_, &dataFuture);
+
   if (currentTableWithStream_.table != nullptr || atEnd_) {
     if (atEnd_ && noMoreSplits_) {
       const auto numSplits = stats_.rlock()->numSplits;
@@ -146,6 +147,12 @@ RowVectorPtr CudfExchange::getOutput() {
   if (currentTableWithStream_.table == nullptr) {
     return nullptr;
   }
+  currentTableWithStream_.stream.synchronize();
+  VLOG(3) << "@" << taskId() << " Dequeued table with "
+          << currentTableWithStream_.table->num_columns() 
+          << " columns, " << currentTableWithStream_.table->num_rows()
+          << " rows from per-column data";
+
   // The data is already a cudf::table - no need to unpack.
   // Use the stream from the queue (same stream used to allocate buffers)
   auto numRows = currentTableWithStream_.table->num_rows();

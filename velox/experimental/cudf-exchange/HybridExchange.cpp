@@ -362,6 +362,11 @@ RowVectorPtr HybridExchange::getOutputFromTable(
   // The table is already unpacked - directly construct a CudfVector from it.
   // This avoids the expensive cudf::unpack() operation.
   // Use the stream from the queue (same stream used to allocate buffers).
+  tableWithStream->stream.synchronize();
+  VLOG(3) << "@" << taskId() << " Dequeued table with "
+          << tableWithStream->table->num_columns() 
+          << " columns, " << tableWithStream->table->num_rows()
+          << " rows from per-column data";
 
   // We need to move the table out of the variant, which requires a const_cast
   // since the variant gives us a const pointer. This is safe because we're

@@ -120,6 +120,8 @@ class CudfExchangeServer
   // For column-based transfer, we have multiple data requests (one per buffer)
   std::vector<std::shared_ptr<ucxx::Request>> dataRequests_;
   std::atomic<size_t> pendingDataRequests_{0};
+  // Track total buffers sent for updating sequence number
+  size_t numBuffersSent_{0};
 
   std::chrono::time_point<std::chrono::high_resolution_clock> sendStart_;
   std::size_t bytes_;

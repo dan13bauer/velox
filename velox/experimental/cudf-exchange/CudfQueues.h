@@ -27,21 +27,50 @@
 
 namespace facebook::velox::cudf_exchange {
 
-/// @brief Holds an unpacked cudf::table along with its metadata.
-/// This avoids the expensive pack/unpack operations by keeping the table
-/// in its native form and only serializing the metadata.
+/// @brief Holds a view into a cudf::table along with shared ownership of the
+/// source table. This enables zero-copy partitioning using cudf::split() where
+/// multiple partitions share the same underlying table data.
 struct TableWithMetadata {
-  /// Metadata obtained from cudf::pack_metadata() - describes the table
-  /// structure without copying data.
+  /// Metadata describing the table structure.
   std::unique_ptr<std::vector<uint8_t>> metadata;
-  /// The actual cudf::table with GPU-resident column data.
-  std::unique_ptr<cudf::table> table;
-  /// Number of rows in the table.
+  /// View into the source table's data. Does not own the data.
+  cudf::table_view tableView;
+  /// Shared ownership of the source table. Keeps GPU memory alive until all
+  /// partitions referencing this table have been sent.
+  std::shared_ptr<cudf::table> sourceTable;
+  /// Number of rows in this partition (may be subset of sourceTable).
   cudf::size_type numRows;
 
-  /// Returns the total GPU memory size of the table.
+  /// Returns the GPU memory size of the tableView's columns.
+  /// Note: This returns the size of the viewed data, not the entire sourceTable.
   size_t gpuDataSize() const {
-    return table ? table->alloc_size() : 0;
+    if (!sourceTable) {
+      return 0;
+    }
+    // Recursive lambda to calculate column size including nested children
+    std::function<size_t(cudf::column_view const&)> columnSize =
+        [&](cudf::column_view const& col) -> size_t {
+      size_t size = 0;
+      // Data buffer size for fixed-width types only
+      if (col.size() > 0 && cudf::is_fixed_width(col.type())) {
+        size += col.size() * cudf::size_of(col.type());
+      }
+      // Null mask size if present
+      if (col.nullable()) {
+        size += cudf::bitmask_allocation_size_bytes(col.size());
+      }
+      // Recursively add children sizes (e.g., for strings: offsets + chars)
+      for (int c = 0; c < col.num_children(); ++c) {
+        size += columnSize(col.child(c));
+      }
+      return size;
+    };
+
+    size_t totalSize = 0;
+    for (int i = 0; i < tableView.num_columns(); ++i) {
+      totalSize += columnSize(tableView.column(i));
+    }
+    return totalSize;
   }
 };
 
