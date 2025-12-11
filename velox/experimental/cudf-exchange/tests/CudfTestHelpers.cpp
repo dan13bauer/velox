@@ -154,14 +154,14 @@ std::shared_ptr<cudf_velox::CudfVector> makeCudfVector(
     memory::MemoryPool* pool,
     size_t numRows,
     RowTypePtr rowType,
-    std::shared_ptr<CudfTestData> dataToSend,
+    std::shared_ptr<BaseTableGenerator> tableGenerator,
     rmm::cuda_stream_view stream) {
-  // Create table using either makeTable or makeFilledTable
+  // Create table using either makeTable or tableGenerator->makeTable()
   std::unique_ptr<cudf::table> table;
-  if (dataToSend == nullptr) {
+  if (tableGenerator == nullptr) {
     table = makeTable(numRows, rowType, stream);
   } else {
-    table = makeFilledTable(numRows, dataToSend, stream);
+    table = tableGenerator->makeTable(stream);
   }
 
   // Sync the stream before creating CudfVector
@@ -268,49 +268,6 @@ std::unique_ptr<cudf::column> make_strings_column_from_host(
       std::move(chars_buffer),
       0, // null_count
       rmm::device_buffer{}); // null mask
-}
-
-std::unique_ptr<cudf::table> makeFilledTable(
-    std::size_t numRows,
-    std::shared_ptr<CudfTestData> dataToSend,
-    rmm::cuda_stream_view stream) {
-  // Create table with filled data
-  std::vector<std::unique_ptr<cudf::column>> columns;
-
-  facebook::velox::RowTypePtr rowType = CudfTestData::kTestRowType;
-
-  for (size_t i = 0; i < rowType->size(); ++i) {
-    const std::string& name = rowType->nameOf(i);
-    const auto& type = rowType->childAt(i);
-
-    cudf::type_id cudfType;
-    std::unique_ptr<cudf::column> col;
-
-    switch (type->kind()) {
-      case TypeKind::INTEGER: {
-        cudfType = cudf::type_id::INT32;
-        col = make_numeric_column_from_vector(*dataToSend->getIntegers());
-        break;
-      }
-      case TypeKind::DOUBLE: {
-        cudfType = cudf::type_id::FLOAT64;
-        col = make_numeric_column_from_vector(*dataToSend->getDoubles());
-
-        break;
-      }
-      case TypeKind::VARCHAR: {
-        col = make_strings_column_from_host(*dataToSend->getStrings());
-        break;
-      }
-      default:
-        VLOG(0) << "Unhandled type " << type->kind();
-        break;
-    }
-
-    columns.push_back(std::move(col));
-  }
-
-  return std::make_unique<cudf::table>(std::move(columns));
 }
 
 std::unique_ptr<cudf::table> makeTable(

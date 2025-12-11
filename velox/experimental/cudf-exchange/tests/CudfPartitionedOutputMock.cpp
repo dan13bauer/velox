@@ -26,14 +26,14 @@ CudfPartitionedOutputMock::CudfPartitionedOutputMock(
     const size_t numPartitions,
     const uint32_t numDataChunks,
     const size_t numRowsPerChunk,
-    std::shared_ptr<CudfTestData> dataToSend)
+    std::shared_ptr<BaseTableGenerator> tableGenerator)
     : queueManager_(CudfOutputQueueManager::getInstanceRef()),
       taskId_(taskId),
       numDrivers_(numDrivers),
       numPartitions_(numPartitions),
       numDataChunks_(numDataChunks),
       numRowsPerChunk_(numRowsPerChunk),
-      dataToSend_(dataToSend) {}
+      tableGenerator_(tableGenerator) {}
 
 void CudfPartitionedOutputMock::run() {
   threads_.clear();
@@ -63,10 +63,10 @@ void CudfPartitionedOutputMock::publishDataChunks() {
       // and push it into the destination queue identified by the taskId.
 
       std::unique_ptr<cudf::table> table;
-      if (dataToSend_ == nullptr) {
+      if (tableGenerator_ == nullptr) {
         table = makeTable(numRowsPerChunk_, CudfTestData::kTestRowType, stream);
       } else {
-        table = makeFilledTable(numRowsPerChunk_, dataToSend_, stream);
+        table = tableGenerator_->makeTable(stream);
       }
       // Sync the stream since UCXX/UCX is not stream oriented and without
       // syncing, data could get lost. Syncing here is  easy but not the most

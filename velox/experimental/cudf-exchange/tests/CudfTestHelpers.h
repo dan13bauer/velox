@@ -94,18 +94,19 @@ std::shared_ptr<facebook::velox::exec::Task> createPartitionedOutputTask(
     uint64_t kMaxOutputBufferSize = FOUR_GBYTES);
 
 /// @brief Helper function to create a CudfVector for testing.
-/// Uses makeTable when dataToSend is null, or makeFilledTable when provided.
+/// Uses makeTable when tableGenerator is null, or tableGenerator->makeTable()
+/// when provided.
 /// @param pool The memory pool to use for the CudfVector
 /// @param numRows Number of rows to create
 /// @param rowType The row type for the vector
-/// @param dataToSend Optional test data to fill the table with
+/// @param tableGenerator Optional table generator to create the table data
 /// @param stream The CUDA stream to use
 /// @return Shared pointer to the created CudfVector
 std::shared_ptr<facebook::velox::cudf_velox::CudfVector> makeCudfVector(
     facebook::velox::memory::MemoryPool* pool,
     size_t numRows,
     facebook::velox::RowTypePtr rowType,
-    std::shared_ptr<CudfTestData> dataToSend,
+    std::shared_ptr<BaseTableGenerator> tableGenerator,
     rmm::cuda_stream_view stream);
 
 /// Helper function to create cudf::table for testing.
@@ -119,18 +120,6 @@ std::shared_ptr<facebook::velox::cudf_velox::CudfVector> makeCudfVector(
 std::unique_ptr<cudf::table> makeTable(
     std::size_t numRows,
     facebook::velox::RowTypePtr rowType,
-    rmm::cuda_stream_view stream);
-
-/// Helper function to create cudf::table with filled data for testing.
-/// Creates a table with columns based on the test row type (INT32, DOUBLE, VARCHAR).
-///
-/// @param numRows Number of rows to create in the table
-/// @param dataToSend The test data to fill the table with
-/// @param stream The CUDA stream to use
-/// @return Unique pointer to the created table
-std::unique_ptr<cudf::table> makeFilledTable(
-    std::size_t numRows,
-    std::shared_ptr<CudfTestData> dataToSend,
     rmm::cuda_stream_view stream);
 
 /// @brief testing utility for dumping the contents of a string column.

@@ -26,12 +26,12 @@ SourceDriverMock::SourceDriverMock(
     uint32_t numDrivers,
     uint32_t numChunks,
     size_t numRowsPerChunk,
-    std::shared_ptr<CudfTestData> dataToSend)
+    std::shared_ptr<BaseTableGenerator> tableGenerator)
     : task_{std::move(task)},
       numDrivers_{numDrivers},
       numChunks_{numChunks},
       numRowsPerChunk_{numRowsPerChunk},
-      dataToSend_(dataToSend) {
+      tableGenerator_(tableGenerator) {
   // Get the plan node - should be a PartitionedOutputNode
   auto planNode = task_->planFragment().planNode;
   auto partitionedOutputNode =
@@ -65,7 +65,9 @@ void SourceDriverMock::run() {
 
 void SourceDriverMock::sendAllData(CudfPartitionedOutput* partitionedOutput) {
   auto stream = rmm::cuda_stream_default;
-  auto rowType = CudfTestData::kTestRowType;
+  // Use tableGenerator's rowType if available, otherwise get from task
+  auto rowType = tableGenerator_ ? tableGenerator_->getRowType()
+                                 : task_->planFragment().planNode->outputType();
 
   // Get memory pool from the operator
   auto* pool = partitionedOutput->pool();
@@ -73,7 +75,7 @@ void SourceDriverMock::sendAllData(CudfPartitionedOutput* partitionedOutput) {
   for (uint32_t chunk = 0; chunk < numChunks_; ++chunk) {
     // 1. Create CudfVector with test data using makeCudfVector helper
     auto cudfVector = makeCudfVector(
-        pool, numRowsPerChunk_, rowType, dataToSend_, stream);
+        pool, numRowsPerChunk_, rowType, tableGenerator_, stream);
 
     // 2. Check isBlocked() - if blocked, wait on future
     while (true) {
