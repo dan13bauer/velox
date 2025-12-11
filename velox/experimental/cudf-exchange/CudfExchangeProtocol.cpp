@@ -18,6 +18,7 @@
 
 #include <cudf/null_mask.hpp>
 #include <cudf/strings/strings_column_view.hpp>
+#include <cudf/structs/structs_column_view.hpp>
 #include <rmm/cuda_stream_view.hpp>
 #include "velox/experimental/cudf-exchange/CudfExchangeProtocol.h"
 
@@ -179,9 +180,19 @@ void TableMetadata::buildColumnMetadata(
 
   // Recursively process children (depth-first)
   // For STRING columns, only process offsets child (child 0), skip chars child.
+  // For STRUCT columns, use structs_column_view::get_sliced_child() to get
+  // children with the parent's offset/size applied (needed after cudf::split).
   if (col.type().id() == cudf::type_id::STRING) {
     if (col.num_children() > 0) {
       buildColumnMetadata(col.child(0), metadata);
+    }
+  } else if (col.type().id() == cudf::type_id::STRUCT) {
+    // Use structs_column_view::get_sliced_child() for proper offset handling
+    // after cudf::split. The child() method returns children with original
+    // sizes, but get_sliced_child() returns children adjusted to parent's slice.
+    cudf::structs_column_view scv(col);
+    for (cudf::size_type i = 0; i < col.num_children(); ++i) {
+      buildColumnMetadata(scv.get_sliced_child(i), metadata);
     }
   } else {
     for (cudf::size_type i = 0; i < col.num_children(); ++i) {

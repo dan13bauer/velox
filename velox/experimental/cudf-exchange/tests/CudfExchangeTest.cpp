@@ -527,12 +527,9 @@ TEST_P(CudfExchangeTest, realPartitionedOutputTest) {
   VLOG(3) << "+ CudfExchangeTest::realPartitionedOutputTest";
   ExchangeTestParams p = GetParam();
 
-  // Skip wide table with multi-partition - cudf::hash_partition has issues with STRUCT columns
-  // TODO: Re-enable when cudf properly handles nested types in hash_partition/split
-  if (p.tableType == TableType::WIDE && p.numPartitions > 1) {
-    GTEST_SKIP() << "realPartitionedOutputTest skipped for WideTable with multi-partition - "
-                 << "cudf has issues with STRUCT columns in hash_partition/split";
-  }
+  // Wide table multi-partition tests work by using structs_column_view::get_sliced_child()
+  // in CudfExchangeServer/CudfExchangeProtocol to get STRUCT children with the
+  // parent's offset/size applied after cudf::split.
 
   // Use unique task prefix to avoid collisions between parametrized tests
   const std::string taskPrefix = getUniqueTaskPrefix();
@@ -636,12 +633,9 @@ TEST_P(CudfExchangeTest, realPartitionedOutputDataIntegrityTest) {
   VLOG(3) << "+ CudfExchangeTest::realPartitionedOutputDataIntegrityTest";
   ExchangeTestParams p = GetParam();
 
-  // Skip wide table with multi-partition - cudf::hash_partition has issues with STRUCT columns
-  // TODO: Re-enable when cudf properly handles nested types in hash_partition/split
-  if (p.tableType == TableType::WIDE && p.numPartitions > 1) {
-    GTEST_SKIP() << "realPartitionedOutputDataIntegrityTest skipped for WideTable with multi-partition - "
-                 << "cudf has issues with STRUCT columns in hash_partition/split";
-  }
+  // Wide table multi-partition tests work by using structs_column_view::get_sliced_child()
+  // in CudfExchangeServer/CudfExchangeProtocol to get STRUCT children with the
+  // parent's offset/size applied after cudf::split.
 
   // Use unique task prefix to avoid collisions between parametrized tests
   const std::string taskPrefix = getUniqueTaskPrefix();

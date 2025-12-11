@@ -17,6 +17,7 @@
 #include <cudf/contiguous_split.hpp>
 #include <cudf/null_mask.hpp>
 #include <cudf/strings/strings_column_view.hpp>
+#include <cudf/structs/structs_column_view.hpp>
 #include <glog/logging.h>
 #include <sstream>
 #include "cuda_runtime.h"
@@ -296,9 +297,16 @@ void CudfExchangeServer::sendData() {
             // Recursively count children
             // For STRING columns, skip the chars child (child 1) since chars are
             // sent via strings_column_view. Only process offsets child (child 0).
+            // For STRUCT columns, use structs_column_view::get_sliced_child() to
+            // get children with parent's offset/size applied (needed after split).
             if (dataType.id() == cudf::type_id::STRING) {
               if (numChildren > 0) {
                 countBuffers(colView.child(0));  // offsets only
+              }
+            } else if (dataType.id() == cudf::type_id::STRUCT) {
+              cudf::structs_column_view scv(colView);
+              for (cudf::size_type i = 0; i < numChildren; ++i) {
+                countBuffers(scv.get_sliced_child(i));
               }
             } else {
               for (cudf::size_type i = 0; i < numChildren; ++i) {
@@ -455,9 +463,16 @@ void CudfExchangeServer::sendData() {
               // Recursively process children (depth-first order)
               // For STRING columns, skip the chars child (child 1) since chars are
               // sent via strings_column_view. Only process offsets child (child 0).
+              // For STRUCT columns, use structs_column_view::get_sliced_child() to
+              // get children with parent's offset/size applied (needed after split).
               if (dataType.id() == cudf::type_id::STRING) {
                 if (numChildren > 0) {
                   sendColumnView(colView.child(0));  // offsets only
+                }
+              } else if (dataType.id() == cudf::type_id::STRUCT) {
+                cudf::structs_column_view scv(colView);
+                for (cudf::size_type i = 0; i < numChildren; ++i) {
+                  sendColumnView(scv.get_sliced_child(i));
                 }
               } else {
                 for (cudf::size_type i = 0; i < numChildren; ++i) {
