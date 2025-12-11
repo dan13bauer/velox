@@ -35,6 +35,10 @@ CudfExchange::CudfExchange(
           operatorType),
       processSplits_{operatorCtx_->driverCtx()->driverId == 0},
       driverId_{driverCtx->driverId} {
+  // Log planNode outputType for debugging column order issues
+  VLOG(3) << "@" << taskId() << " CudfExchange expected outputType: "
+          << planNode->outputType()->toString();
+
   if (exchangeClient) {
     // exchangeClient is provided externally when this is a "plain"
     // CudfExchange.

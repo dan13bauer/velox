@@ -72,8 +72,10 @@ class CudfPartitionedOutput : public exec::Operator,
   // Splits the cudf table into equal sizes. This is used when
   // RoundRobin partitioning is requested but round robin on a
   // row-by-row basis is not meaningful for cudf exchange.
-  // Takes shared ownership of the source table for zero-copy splitting.
+  // Takes the remapped tableView for correct column order and
+  // shared ownership of the source table for zero-copy splitting.
   void equalPartition(
+      cudf::table_view tableView,
       std::shared_ptr<cudf::table> sourceTable,
       rmm::cuda_stream_view stream);
 
@@ -81,7 +83,17 @@ class CudfPartitionedOutput : public exec::Operator,
   // to the corresponding partition, i.e. first split to partition 0,
   // second split to partition 1 etc. Uses cudf::split for zero-copy.
   // All partitions share ownership of sourceTable.
+  // This overload uses sourceTable->view() directly.
   void splitAndEnqueue(
+      std::shared_ptr<cudf::table> sourceTable,
+      std::vector<cudf::size_type> offsets,
+      rmm::cuda_stream_view stream);
+
+  // Splits the table view along the given offsets and enqueues each split
+  // to the corresponding partition. Uses the provided tableView which may
+  // be a remapped view of sourceTable for correct column ordering.
+  void splitAndEnqueue(
+      cudf::table_view tableView,
       std::shared_ptr<cudf::table> sourceTable,
       std::vector<cudf::size_type> offsets,
       rmm::cuda_stream_view stream);

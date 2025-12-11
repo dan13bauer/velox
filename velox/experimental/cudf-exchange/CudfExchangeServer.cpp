@@ -15,8 +15,10 @@
  */
 #include "velox/experimental/cudf-exchange/CudfExchangeServer.h"
 #include <cudf/contiguous_split.hpp>
+#include <cudf/null_mask.hpp>
 #include <cudf/strings/strings_column_view.hpp>
 #include <glog/logging.h>
+#include <sstream>
 #include "cuda_runtime.h"
 #include "velox/experimental/cudf-exchange/Communicator.h"
 #include "velox/experimental/cudf-exchange/CudfExchangeProtocol.h"
@@ -235,6 +237,18 @@ void CudfExchangeServer::sendData() {
               << " rows to task " << partitionKey_.toString()
               << ":" << this->sequenceNumber_ << " using per-column transfer";
 
+      // Log column types being sent for debugging column order issues
+      {
+        std::stringstream ss;
+        ss << "@" << partitionKey_.taskId << " CudfExchangeServer sending column types: [";
+        for (cudf::size_type i = 0; i < numColumns; ++i) {
+          if (i > 0) ss << ", ";
+          ss << static_cast<int>(dataPtr_->tableView.column(i).type().id());
+        }
+        ss << "]";
+        VLOG(3) << ss.str();
+      }
+
       setState(ServerState::WaitingForSendComplete);
 
       // Each buffer gets a unique tag by incrementing the sequence number.
@@ -273,13 +287,23 @@ void CudfExchangeServer::sendData() {
             }
 
             // Count null mask buffer
-            if (colView.nullable() && size > 0 && colView.null_mask() != nullptr) {
+            // Only count if the column has nulls AND has a valid null mask pointer
+            // Note: nullable() can be true but null_mask() nullptr if no nulls exist
+            if (size > 0 && colView.null_mask() != nullptr) {
               ++bufferCount;
             }
 
             // Recursively count children
-            for (cudf::size_type i = 0; i < numChildren; ++i) {
-              countBuffers(colView.child(i));
+            // For STRING columns, skip the chars child (child 1) since chars are
+            // sent via strings_column_view. Only process offsets child (child 0).
+            if (dataType.id() == cudf::type_id::STRING) {
+              if (numChildren > 0) {
+                countBuffers(colView.child(0));  // offsets only
+              }
+            } else {
+              for (cudf::size_type i = 0; i < numChildren; ++i) {
+                countBuffers(colView.child(i));
+              }
             }
           };
 
@@ -383,17 +407,21 @@ void CudfExchangeServer::sendData() {
               }
 
               // Send null mask buffer if present
-              if (colView.nullable() && size > 0) {
-                const void* nullPtr = colView.null_mask();
-                if (nullPtr != nullptr) {
-                  // Calculate null mask size for this slice
-                  size_t nullSize = cudf::bitmask_allocation_size_bytes(size);
-                  // Adjust pointer for word-aligned offset
-                  // Note: null masks are stored as 32-bit words
-                  size_t wordOffset = colView.offset() / 32;
-                  nullPtr = static_cast<const void*>(
-                      static_cast<const cudf::bitmask_type*>(nullPtr) +
-                      wordOffset);
+              // Only send if the column has a valid null mask pointer
+              // Note: nullable() can be true but null_mask() nullptr if no nulls exist
+              if (size > 0 && colView.null_mask() != nullptr) {
+                // For split views, the null_mask pointer points to the original
+                // buffer and offset() indicates where this slice's bits start.
+                // We use copy_bitmask to extract just the bits for this slice
+                // into a new contiguous buffer aligned at bit 0.
+                auto nullMaskCopy = cudf::copy_bitmask(colView);
+                size_t nullSize = nullMaskCopy.size();
+
+                // Only send if the buffer is non-empty
+                if (nullSize > 0) {
+                  // Store the buffer to keep it alive during transfer
+                  auto nullMaskPtr = std::make_shared<rmm::device_buffer>(
+                      std::move(nullMaskCopy));
                   bytes_ += nullSize;
 
                   uint64_t tag = getDataTag(partitionKeyHash_, bufferSeq++);
@@ -404,13 +432,13 @@ void CudfExchangeServer::sendData() {
 
                   std::weak_ptr<CudfExchangeServer> weakData = weak_from_this();
                   auto req = endpointRef_->endpoint_->tagSend(
-                      const_cast<void*>(nullPtr),
+                      nullMaskPtr->data(),
                       nullSize,
                       ucxx::Tag{tag},
                       false,
-                      [weakData, sourceTable](
+                      [weakData, sourceTable, nullMaskPtr](
                           ucs_status_t status, std::shared_ptr<void> arg) {
-                        // sourceTable captured to keep data alive
+                        // sourceTable and nullMaskPtr captured to keep data alive
                         if (auto self = weakData.lock()) {
                           size_t remaining =
                               self->pendingDataRequests_.fetch_sub(1) - 1;
@@ -425,8 +453,16 @@ void CudfExchangeServer::sendData() {
               }
 
               // Recursively process children (depth-first order)
-              for (cudf::size_type i = 0; i < numChildren; ++i) {
-                sendColumnView(colView.child(i));
+              // For STRING columns, skip the chars child (child 1) since chars are
+              // sent via strings_column_view. Only process offsets child (child 0).
+              if (dataType.id() == cudf::type_id::STRING) {
+                if (numChildren > 0) {
+                  sendColumnView(colView.child(0));  // offsets only
+                }
+              } else {
+                for (cudf::size_type i = 0; i < numChildren; ++i) {
+                  sendColumnView(colView.child(i));
+                }
               }
             };
 

@@ -57,6 +57,9 @@ HybridExchange::HybridExchange(
       processSplits_{driverCtx->driverId == 0},
       pipelineId_{driverCtx->pipelineId},
       driverId_{driverCtx->driverId} {
+  // Log planNode outputType for debugging column order issues
+  VLOG(3) << "@" << taskId() << " HybridExchange expected outputType: "
+          << planNode->outputType()->toString();
   if (exchangeClientFacade) {
     // cudfExchangeClient is provided externally when this is a "plain"
     // CudfExchange.

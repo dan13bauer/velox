@@ -153,7 +153,9 @@ void TableMetadata::buildColumnMetadata(
   }
 
   // Null mask size
-  if (col.nullable() && col.null_mask() != nullptr) {
+  // Only set nullMaskSize if the column has a valid null mask pointer
+  // Note: nullable() can be true but null_mask() nullptr if no nulls exist
+  if (col.size() > 0 && col.null_mask() != nullptr) {
     // Null mask size is determined by number of elements
     // cudf uses 1 bit per element, rounded up to 64-byte alignment
     meta.nullMaskSize =
@@ -163,14 +165,28 @@ void TableMetadata::buildColumnMetadata(
   }
 
   // Number of children
-  meta.numChildren = col.num_children();
+  // For STRING columns, we only transfer the offsets child (child 0).
+  // The chars child (child 1) is handled specially via strings_column_view,
+  // so we report only 1 child in metadata.
+  if (col.type().id() == cudf::type_id::STRING) {
+    meta.numChildren = col.num_children() > 0 ? 1 : 0;
+  } else {
+    meta.numChildren = col.num_children();
+  }
 
   // Add this column's metadata
   metadata.push_back(meta);
 
   // Recursively process children (depth-first)
-  for (cudf::size_type i = 0; i < col.num_children(); ++i) {
-    buildColumnMetadata(col.child(i), metadata);
+  // For STRING columns, only process offsets child (child 0), skip chars child.
+  if (col.type().id() == cudf::type_id::STRING) {
+    if (col.num_children() > 0) {
+      buildColumnMetadata(col.child(0), metadata);
+    }
+  } else {
+    for (cudf::size_type i = 0; i < col.num_children(); ++i) {
+      buildColumnMetadata(col.child(i), metadata);
+    }
   }
 }
 

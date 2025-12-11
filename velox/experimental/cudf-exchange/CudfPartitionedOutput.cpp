@@ -15,6 +15,7 @@
  */
 #include "velox/experimental/cudf-exchange/CudfPartitionedOutput.h"
 #include <fmt/format.h>
+#include <sstream>
 #include "velox/core/PlanNode.h"
 #include "velox/exec/Driver.h"
 #include "velox/exec/Operator.h"
@@ -82,6 +83,22 @@ CudfPartitionedOutput::CudfPartitionedOutput(
   if (inNames != outNames) {
     getRemapping(inNames, outNames, remap_);
   }
+
+  // Log planNode input and output types
+  VLOG(3) << "@" << taskId() << " CudfPartitionedOutput inputType: "
+          << planNode->inputType()->toString();
+  VLOG(3) << "@" << taskId() << " CudfPartitionedOutput outputType: "
+          << planNode->outputType()->toString();
+  if (!remap_.empty()) {
+    std::stringstream ss;
+    ss << "@" << taskId() << " CudfPartitionedOutput remap: [";
+    for (size_t i = 0; i < remap_.size(); ++i) {
+      if (i > 0) ss << ", ";
+      ss << remap_[i];
+    }
+    ss << "]";
+    VLOG(3) << ss.str();
+  }
 }
 
 void CudfPartitionedOutput::addInput(RowVectorPtr input) {
@@ -106,6 +123,19 @@ void CudfPartitionedOutput::addInput(RowVectorPtr input) {
           cudfVector->getTableView().select(remap_.begin(), remap_.end());
     }
 
+    // Log column types after remap is applied
+    {
+      std::stringstream ss;
+      ss << "@" << taskId() << "#" << pipelineId_ << "/" << driverId_
+         << " CudfPartitionedOutput column types after remap: [";
+      for (cudf::size_type i = 0; i < tableView.num_columns(); ++i) {
+        if (i > 0) ss << ", ";
+        ss << static_cast<int>(tableView.column(i).type().id());
+      }
+      ss << "]";
+      VLOG(3) << ss.str();
+    }
+
     auto queueManager = sharedQueueManager();
     if (numPartitions_ > 1) {
       if (partitionKeyIndices_.size() > 0 || spec_ == "gather") {
@@ -116,7 +146,8 @@ void CudfPartitionedOutput::addInput(RowVectorPtr input) {
         stream.synchronize();
         auto sourceTable =
             std::shared_ptr<cudf::table>(cudfVector->release());
-        equalPartition(std::move(sourceTable), stream);
+        // Pass the remapped tableView for correct column order
+        equalPartition(tableView, std::move(sourceTable), stream);
       }
     } else {
       // Single partition case. No need to hash, assume queue zero.
@@ -136,13 +167,14 @@ void CudfPartitionedOutput::addInput(RowVectorPtr input) {
       auto sourceTable =
           std::shared_ptr<cudf::table>(cudfVector->release());
 
-      // Generate custom metadata for the table (no contiguous buffer required)
-      auto metadata = TableMetadata::buildFromTable(sourceTable->view());
+      // Generate custom metadata for the table using the REMAPPED tableView
+      // (not sourceTable->view()) to ensure correct column order
+      auto metadata = TableMetadata::buildFromTable(tableView);
 
-      // Create unpacked table data with view + shared ownership
+      // Create unpacked table data with remapped view + shared ownership
       auto unpackedData = std::make_unique<TableWithMetadata>();
       unpackedData->metadata = std::move(metadata);
-      unpackedData->tableView = sourceTable->view();
+      unpackedData->tableView = tableView;  // Use remapped view
       unpackedData->sourceTable = std::move(sourceTable);
       unpackedData->numRows = numRows;
 
@@ -291,25 +323,38 @@ void CudfPartitionedOutput::hashPartition(
 }
 
 void CudfPartitionedOutput::equalPartition(
+    cudf::table_view tableView,
     std::shared_ptr<cudf::table> sourceTable,
     rmm::cuda_stream_view stream) {
   VLOG(3) << "@" << taskId() << "#" << pipelineId_ << "/" << driverId_ << " Splitting into " << numPartitions_ << " chunks";
   std::vector<cudf::size_type> offsets;
-  cudf::size_type size = sourceTable->num_rows();
+  cudf::size_type size = tableView.num_rows();
   for (int i = 1; i < numPartitions_; ++i) {
     cudf::size_type idx = size / (numPartitions_ / (double)i);
     offsets.push_back(idx);
   }
-  splitAndEnqueue(std::move(sourceTable), offsets, stream);
+  // Pass the remapped tableView for correct column order
+  splitAndEnqueue(tableView, std::move(sourceTable), offsets, stream);
 }
 
 void CudfPartitionedOutput::splitAndEnqueue(
     std::shared_ptr<cudf::table> sourceTable,
     std::vector<cudf::size_type> offsets,
     rmm::cuda_stream_view stream) {
+  // This overload uses sourceTable->view() directly (for hashPartition where
+  // the table is already in the correct column order after hash_partition)
+  auto tableView = sourceTable->view();
+  splitAndEnqueue(tableView, std::move(sourceTable), offsets, stream);
+}
+
+void CudfPartitionedOutput::splitAndEnqueue(
+    cudf::table_view tableView,
+    std::shared_ptr<cudf::table> sourceTable,
+    std::vector<cudf::size_type> offsets,
+    rmm::cuda_stream_view stream) {
   // Use cudf::split for zero-copy splitting. Returns vector of table_views
-  // that reference the source table's data.
-  auto tableViews = cudf::split(sourceTable->view(), offsets, stream);
+  // that reference the source table's data (via tableView which may be remapped).
+  auto tableViews = cudf::split(tableView, offsets, stream);
 
   VELOX_CHECK_EQ(
       offsets.size() + 1, numPartitions_, "mismatch in numPartitions_");

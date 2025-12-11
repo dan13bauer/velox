@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <sstream>
 #include <thread>
 
 #include <cudf/column/column.hpp>
@@ -760,6 +761,18 @@ void CudfExchangeSource::onPerColumnDataComplete(
   VLOG(3) << toString() << " Reconstructed table with "
           << table->num_columns() << " columns, " << table->num_rows()
           << " rows from per-column data";
+
+  // Log column types received for debugging column order issues
+  {
+    std::stringstream ss;
+    ss << toString() << " CudfExchangeSource received column types: [";
+    for (cudf::size_type i = 0; i < table->num_columns(); ++i) {
+      if (i > 0) ss << ", ";
+      ss << static_cast<int>(table->get_column(i).type().id());
+    }
+    ss << "]";
+    VLOG(3) << ss.str();
+  }
 
   enqueue(std::move(table), stream, perColData->metadata);
   setStateIf(ReceiverState::WaitingForData, ReceiverState::ReadyToReceive);
