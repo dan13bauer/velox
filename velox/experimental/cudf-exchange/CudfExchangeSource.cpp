@@ -20,6 +20,7 @@
 #include <cudf/column/column.hpp>
 #include <cudf/column/column_factories.hpp>
 #include <cudf/contiguous_split.hpp>
+#include <cudf/strings/strings_column_view.hpp>
 #include <cudf/structs/structs_column_view.hpp>
 #include <cudf/table/table.hpp>
 #include <folly/String.h>
@@ -216,12 +217,14 @@ std::shared_ptr<CudfExchangeSource> CudfExchangeSource::getSelfPtr() {
 void CudfExchangeSource::enqueue(
     std::unique_ptr<cudf::table> table,
     rmm::cuda_stream_view stream,
-    MetadataMsg& metadata) {
+    MetadataMsg& metadata,
+    uint64_t chunkSeq,
+    int32_t partition) {
   std::vector<velox::ContinuePromise> queuePromises;
   {
     std::lock_guard<std::mutex> l(queue_->mutex());
 
-    TableWithStream tableWithStream(std::move(table), stream);
+    TableWithStream tableWithStream(std::move(table), stream, chunkSeq, partition);
     queue_->enqueueLocked(std::move(tableWithStream), queuePromises);
   }
   // wake up consumers of the CudfExchangeQueue
@@ -365,8 +368,8 @@ void CudfExchangeSource::onMetadata(
       VLOG(3) << "There is no more data to transfer for " << toString();
       setStateIf(ReceiverState::WaitingForMetadata, ReceiverState::Done);
       communicator_->addToWorkQueue(getSelfPtr());
-      // nullptr table marks end
-      enqueue(nullptr, stream, ptr->metadata);
+      // nullptr table marks end (use 0/0 for chunk/part - not used for end marker)
+      enqueue(nullptr, stream, ptr->metadata, 0, 0);
       // jump out of this function.
       return;
     }
@@ -607,6 +610,46 @@ void CudfExchangeSource::onPerColumnDataComplete(
     }
   }
 
+  // DEBUG: Compute and log checksums for all received buffers to detect corruption
+  for (size_t i = 0; i < perColData->columnMeta.size(); ++i) {
+    const auto& colMeta = perColData->columnMeta[i];
+    const auto& dataBuf = perColData->dataBuffers[i];
+
+    if (dataBuf && dataBuf->size() > 0) {
+      uint64_t checksum = 0;
+      size_t bufSize = dataBuf->size();
+      if (bufSize >= 16) {
+        uint64_t first = 0, last = 0;
+        cudaMemcpy(&first, dataBuf->data(), std::min<size_t>(8, bufSize), cudaMemcpyDeviceToHost);
+        cudaMemcpy(&last, static_cast<const uint8_t*>(dataBuf->data()) + bufSize - 8, 8, cudaMemcpyDeviceToHost);
+        checksum = first ^ last ^ bufSize;
+      } else if (bufSize > 0) {
+        cudaMemcpy(&checksum, dataBuf->data(), std::min<size_t>(8, bufSize), cudaMemcpyDeviceToHost);
+        checksum ^= bufSize;
+      }
+
+      if (colMeta.typeId == cudf::type_id::STRING) {
+        VLOG(1) << "[RECV-STR] " << toString()
+                << " chunk=" << tablesReceived_
+                << " part=" << partitionKey_.destination
+                << " col=" << i
+                << " (chars) dataSize=" << colMeta.dataSize
+                << " bufSize=" << bufSize
+                << " checksum=" << std::hex << checksum << std::dec;
+      } else {
+        VLOG(1) << "[RECV-DATA] " << toString()
+                << " chunk=" << tablesReceived_
+                << " part=" << partitionKey_.destination
+                << " col=" << i
+                << " type=" << static_cast<int>(colMeta.typeId)
+                << " size=" << colMeta.size
+                << " dataSize=" << colMeta.dataSize
+                << " bufSize=" << bufSize
+                << " checksum=" << std::hex << checksum << std::dec;
+      }
+    }
+  }
+
   // Increment sequence number by the number of buffers received (each buffer used one sequence)
   // For empty tables, increment by at least 1 to advance the sequence
   this->sequenceNumber_ += std::max(numBuffersReceived, static_cast<size_t>(1));
@@ -686,6 +729,7 @@ void CudfExchangeSource::onPerColumnDataComplete(
       // STRING columns: data buffer contains chars, child(0) contains offsets
       // data.size() can be 0 for columns of empty strings (valid case!)
       // We need to create the column with the offsets child and chars data
+      size_t charsDataSize = data.size();  // capture before move
       column = std::make_unique<cudf::column>(
           dtype,
           meta.size,
@@ -693,6 +737,40 @@ void CudfExchangeSource::onPerColumnDataComplete(
           std::move(null_mask),
           meta.nullCount,
           std::move(children));  // offsets child
+
+      // DEBUG: Verify reconstructed STRING column
+      cudf::strings_column_view scv(column->view());
+      auto reconstructedCharsSize = scv.chars_size(stream);
+      VLOG(1) << "[RECV-STR-VERIFY] " << toString()
+              << " chunk=" << tablesReceived_
+              << " part=" << partitionKey_.destination
+              << " col=" << idx
+              << " metaSize=" << meta.size
+              << " columnSize=" << column->size()
+              << " inputCharsDataSize=" << charsDataSize
+              << " reconstructedCharsSize=" << reconstructedCharsSize
+              << " offsetsSize=" << scv.offsets().size()
+              << " numChildren=" << column->num_children();
+
+      // Compute checksum of reconstructed chars for comparison
+      if (reconstructedCharsSize > 0) {
+        uint64_t checksum = 0;
+        const void* charsPtr = scv.chars_begin(stream);
+        if (reconstructedCharsSize >= 16) {
+          uint64_t first = 0, last = 0;
+          cudaMemcpy(&first, charsPtr, std::min<size_t>(8, reconstructedCharsSize), cudaMemcpyDeviceToHost);
+          cudaMemcpy(&last, static_cast<const uint8_t*>(charsPtr) + reconstructedCharsSize - 8, 8, cudaMemcpyDeviceToHost);
+          checksum = first ^ last ^ reconstructedCharsSize;
+        } else {
+          cudaMemcpy(&checksum, charsPtr, std::min<size_t>(8, reconstructedCharsSize), cudaMemcpyDeviceToHost);
+          checksum ^= reconstructedCharsSize;
+        }
+        VLOG(1) << "[RECV-STR-VERIFY] " << toString()
+                << " chunk=" << tablesReceived_
+                << " part=" << partitionKey_.destination
+                << " col=" << idx
+                << " reconstructed checksum=" << std::hex << checksum << std::dec;
+      }
     } else if (data.size() == 0 && meta.size > 0) {
       // This shouldn't happen - we have a non-empty column but no data
       // Log error and create an empty column as fallback
@@ -774,7 +852,15 @@ void CudfExchangeSource::onPerColumnDataComplete(
     VLOG(3) << ss.str();
   }
 
-  enqueue(std::move(table), stream, perColData->metadata);
+  // Pass chunk/partition info for tracing in DEQUEUE logs
+  enqueue(
+      std::move(table),
+      stream,
+      perColData->metadata,
+      tablesReceived_,
+      partitionKey_.destination);
+  // Increment tables received counter (used as chunk sequence in logs)
+  ++tablesReceived_;
   setStateIf(ReceiverState::WaitingForData, ReceiverState::ReadyToReceive);
   communicator_->addToWorkQueue(getSelfPtr());
 }

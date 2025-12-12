@@ -98,6 +98,14 @@ class CudfPartitionedOutput : public exec::Operator,
       std::vector<cudf::size_type> offsets,
       rmm::cuda_stream_view stream);
 
+  // Logs ENQUEUE checksums for all columns in the table view (for debugging).
+  // Chunk sequence and partition index are included in the log for matching
+  // with SEND/RECV/DEQUEUE logs.
+  void logEnqueueChecksums(
+      cudf::table_view tableView,
+      uint64_t chunkSeq,
+      int partitionIndex);
+
   const std::weak_ptr<CudfOutputQueueManager> queueManager_;
   std::vector<column_index_t> partitionKeyIndices_;
   const size_t numPartitions_;
@@ -114,6 +122,9 @@ class CudfPartitionedOutput : public exec::Operator,
   // Used for switching columns when column order differs between input and
   // output.
   std::vector<uint32_t> remap_;
+
+  // Chunk sequence number - increments for each input batch processed.
+  uint64_t chunkSeq_{0};
 };
 
 } // namespace facebook::velox::cudf_exchange

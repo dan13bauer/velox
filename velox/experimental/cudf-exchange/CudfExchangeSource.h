@@ -149,11 +149,13 @@ class CudfExchangeSource
   std::shared_ptr<CudfExchangeSource> getSelfPtr();
 
   // Put the received data into the exchange queue along with the stream
-  // used to allocate the table's buffers.
+  // used to allocate the table's buffers and chunk/partition info for tracing.
   void enqueue(
       std::unique_ptr<cudf::table> table,
       rmm::cuda_stream_view stream,
-      MetadataMsg& metadata);
+      MetadataMsg& metadata,
+      uint64_t chunkSeq,
+      int32_t partition);
 
   /// @brief Sets the endpoint for this receiver.
   void setEndpoint(std::shared_ptr<EndpointRef> endpointRef);
@@ -218,6 +220,9 @@ class CudfExchangeSource
   std::atomic<ReceiverState> state_;
 
   uint32_t sequenceNumber_{0};
+
+  // Counter for tables received - used as chunk sequence in logs
+  uint64_t tablesReceived_{0};
 
   // The shared queue of packed_columns that all CudfExchangeSources write to
   const std::shared_ptr<CudfExchangeQueue> queue_{nullptr};

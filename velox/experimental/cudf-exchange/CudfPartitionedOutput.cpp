@@ -23,9 +23,11 @@
 #include "velox/experimental/cudf-exchange/CudfExchangeProtocol.h"
 #include "velox/experimental/cudf-exchange/CudfQueues.h"
 
+#include <cuda_runtime.h>
 #include <cudf/contiguous_split.hpp>
 #include <cudf/copying.hpp>
 #include <cudf/partitioning.hpp>
+#include <cudf/strings/strings_column_view.hpp>
 
 using namespace facebook::velox::cudf_velox;
 using facebook::velox::exec::Task;
@@ -123,19 +125,6 @@ void CudfPartitionedOutput::addInput(RowVectorPtr input) {
           cudfVector->getTableView().select(remap_.begin(), remap_.end());
     }
 
-    // Log column types after remap is applied
-    {
-      std::stringstream ss;
-      ss << "@" << taskId() << "#" << pipelineId_ << "/" << driverId_
-         << " CudfPartitionedOutput column types after remap: [";
-      for (cudf::size_type i = 0; i < tableView.num_columns(); ++i) {
-        if (i > 0) ss << ", ";
-        ss << static_cast<int>(tableView.column(i).type().id());
-      }
-      ss << "]";
-      VLOG(3) << ss.str();
-    }
-
     auto queueManager = sharedQueueManager();
     if (numPartitions_ > 1) {
       if (partitionKeyIndices_.size() > 0 || spec_ == "gather") {
@@ -177,9 +166,21 @@ void CudfPartitionedOutput::addInput(RowVectorPtr input) {
       unpackedData->tableView = tableView;  // Use remapped view
       unpackedData->sourceTable = std::move(sourceTable);
       unpackedData->numRows = numRows;
+      unpackedData->stream = stream;  // Propagate stream for proper sync
+
+      // Set chunk sequence, partition, and driver ID for tracing
+      unpackedData->chunkSeq = chunkSeq_;
+      unpackedData->partition = 0;
+      unpackedData->driverId = driverId_;
+
+      // Log ENQUEUE checksums for single partition (partition 0)
+      logEnqueueChecksums(tableView, chunkSeq_, 0);
 
       queueManager->enqueue(this->taskId(), 0, std::move(unpackedData));
     }
+    // Increment chunk sequence after processing this input batch
+    ++chunkSeq_;
+
     // Check once after all enqueues if we're blocked
     blocked = queueManager->checkBlocked(this->taskId(), &future_);
     // record the statistics.
@@ -319,6 +320,10 @@ void CudfPartitionedOutput::hashPartition(
   // Convert to shared_ptr for shared ownership across partitions
   auto sourceTable =
       std::shared_ptr<cudf::table>(std::move(partitionedTable));
+
+  // hash_partition returns a new table with the same column order as the input
+  // tableView (which may have been remapped). Use sourceTable->view() since
+  // it points to the actual partitioned data.
   splitAndEnqueue(std::move(sourceTable), partitionOffsets, stream);
 }
 
@@ -375,10 +380,151 @@ void CudfPartitionedOutput::splitAndEnqueue(
     unpackedData->metadata = std::move(metadata);
     unpackedData->tableView = partitionView;
     unpackedData->sourceTable = sourceTable; // All partitions share ownership
+
+    // DEBUG: Log column types being stored in TableWithMetadata
+    {
+      std::stringstream ss;
+      ss << "@" << taskId() << " drv=" << driverId_
+         << " chunk=" << chunkSeq_ << " part=" << i
+         << " STORING tableView with column types: [";
+      for (cudf::size_type c = 0; c < partitionView.num_columns(); ++c) {
+        if (c > 0) ss << ", ";
+        ss << static_cast<int>(partitionView.column(c).type().id());
+      }
+      ss << "]";
+      VLOG(1) << ss.str();
+    }
     unpackedData->numRows = partitionView.num_rows();
+    unpackedData->stream = stream;  // Propagate stream for proper sync
+    unpackedData->chunkSeq = chunkSeq_;  // Set chunk sequence for tracing
+    unpackedData->partition = i;  // Set partition index for tracing
+    unpackedData->driverId = driverId_;  // Set driver ID for tracing
+
+    // Log ENQUEUE checksums for this partition (after split, before enqueue)
+    logEnqueueChecksums(partitionView, chunkSeq_, i);
 
     // enqueue partition data on Cudf Output Buffer
     queueManager->enqueue(this->taskId(), i, std::move(unpackedData));
+  }
+}
+
+void CudfPartitionedOutput::logEnqueueChecksums(
+    cudf::table_view tableView,
+    uint64_t chunkSeq,
+    int partitionIndex) {
+  // Compute checksums for each column in depth-first order (matches metadata)
+  size_t colIdx = 0;
+  std::function<void(cudf::column_view)> logColumnChecksum =
+      [&, chunkSeq](cudf::column_view colView) {
+        auto dataType = colView.type();
+        auto size = colView.size();
+        size_t currentColIdx = colIdx++;
+
+        if (dataType.id() == cudf::type_id::STRING && size > 0 &&
+            colView.num_children() > 0) {
+          // STRING column - compute checksum of chars
+          // For split STRING columns, we compute partial chars range
+          // The parent column's offset() tells us where this slice starts
+          // in the offsets array. We read offsets[parent.offset()] and
+          // offsets[parent.offset() + parent.size()] to get the byte range.
+          cudf::strings_column_view scv(colView);
+          auto offsetsView = scv.offsets();
+          auto parentOffset = colView.offset();  // Index into offsets array
+
+          int32_t firstOffset = 0;
+          int32_t lastOffset = 0;
+          // Read offsets at positions parent.offset() and parent.offset() + size
+          // Note: offsetsView.head() points to the raw offsets buffer,
+          // and offsetsView.offset() may also be set, so we use both.
+          const int32_t* offsetsPtr =
+              static_cast<const int32_t*>(offsetsView.head()) +
+              offsetsView.offset();
+          cudaMemcpy(
+              &firstOffset,
+              offsetsPtr + parentOffset,
+              sizeof(int32_t),
+              cudaMemcpyDeviceToHost);
+          cudaMemcpy(
+              &lastOffset,
+              offsetsPtr + parentOffset + size,
+              sizeof(int32_t),
+              cudaMemcpyDeviceToHost);
+
+          auto actualCharsSize = lastOffset - firstOffset;
+          uint64_t checksum = 0;
+          if (actualCharsSize > 0) {
+            const char* charsBegin = scv.chars_begin(rmm::cuda_stream_default);
+            const void* partialCharsPtr = charsBegin + firstOffset;
+            if (actualCharsSize >= 16) {
+              uint64_t first = 0, last = 0;
+              cudaMemcpy(&first, partialCharsPtr, std::min<int32_t>(8, actualCharsSize), cudaMemcpyDeviceToHost);
+              cudaMemcpy(&last, static_cast<const uint8_t*>(partialCharsPtr) + actualCharsSize - 8, 8, cudaMemcpyDeviceToHost);
+              checksum = first ^ last ^ actualCharsSize;
+            } else {
+              cudaMemcpy(&checksum, partialCharsPtr, std::min<int32_t>(8, actualCharsSize), cudaMemcpyDeviceToHost);
+              checksum ^= actualCharsSize;
+            }
+          }
+          VLOG(1) << "[ENQUEUE-STR] @" << taskId()
+                  << " drv=" << driverId_
+                  << " chunk=" << chunkSeq
+                  << " part=" << partitionIndex
+                  << " col=" << currentColIdx
+                  << " STRING: numStrings=" << size
+                  << " offset=" << colView.offset()
+                  << " charsSize=" << actualCharsSize
+                  << " (range " << firstOffset << "-" << lastOffset << ")"
+                  << " needsRebasing=" << (firstOffset > 0 ? "yes" : "no")
+                  << " checksum=" << std::hex << checksum << std::dec;
+        } else if (size > 0 && colView.head() != nullptr &&
+                   cudf::is_fixed_width(dataType)) {
+          // Fixed-width column
+          size_t dataSize = size * cudf::size_of(dataType);
+          const void* dataPtr = static_cast<const void*>(
+              static_cast<const uint8_t*>(colView.head()) +
+              colView.offset() * cudf::size_of(dataType));
+          uint64_t checksum = 0;
+          if (dataSize >= 16) {
+            uint64_t first = 0, last = 0;
+            cudaMemcpy(&first, dataPtr, std::min<size_t>(8, dataSize), cudaMemcpyDeviceToHost);
+            cudaMemcpy(&last, static_cast<const uint8_t*>(dataPtr) + dataSize - 8, 8, cudaMemcpyDeviceToHost);
+            checksum = first ^ last ^ dataSize;
+          } else if (dataSize > 0) {
+            cudaMemcpy(&checksum, dataPtr, std::min<size_t>(8, dataSize), cudaMemcpyDeviceToHost);
+            checksum ^= dataSize;
+          }
+          VLOG(1) << "[ENQUEUE-DATA] @" << taskId()
+                  << " drv=" << driverId_
+                  << " chunk=" << chunkSeq
+                  << " part=" << partitionIndex
+                  << " col=" << currentColIdx
+                  << " type=" << static_cast<int>(dataType.id())
+                  << " size=" << size
+                  << " offset=" << colView.offset()
+                  << " dataSize=" << dataSize
+                  << " checksum=" << std::hex << checksum << std::dec;
+        }
+
+        // Recursively process children
+        // Note: STRING columns are fully handled above and should NOT recurse
+        // to children, matching the behavior in CudfExchangeServer::sendColumnView
+        // which handles STRING chars, null_mask, and offsets specially and returns early.
+        // However, we must increment colIdx for the synthetic offsets entry that
+        // metadata includes for STRING columns.
+        if (dataType.id() == cudf::type_id::STRING) {
+          if (colView.num_children() > 0 && size > 0) {
+            // Metadata includes a synthetic offsets entry after STRING, increment counter
+            ++colIdx;
+          }
+        } else {
+          for (int i = 0; i < colView.num_children(); ++i) {
+            logColumnChecksum(colView.child(i));
+          }
+        }
+      };
+
+  for (cudf::size_type i = 0; i < tableView.num_columns(); ++i) {
+    logColumnChecksum(tableView.column(i));
   }
 }
 

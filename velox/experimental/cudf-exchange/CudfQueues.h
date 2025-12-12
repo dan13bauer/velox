@@ -20,6 +20,7 @@
 #include <deque>
 #include <functional>
 #include <memory>
+#include <rmm/cuda_stream_view.hpp>
 #include <vector>
 #include "velox/core/PlanNode.h"
 #include "velox/exec/OutputBuffer.h" // for the Stats structure
@@ -40,6 +41,15 @@ struct TableWithMetadata {
   std::shared_ptr<cudf::table> sourceTable;
   /// Number of rows in this partition (may be subset of sourceTable).
   cudf::size_type numRows;
+  /// The CUDA stream used to create/partition this data. Operations on this
+  /// data should use this stream to ensure proper synchronization.
+  rmm::cuda_stream_view stream{rmm::cuda_stream_default};
+  /// Chunk sequence number (increments for each input batch/table).
+  uint64_t chunkSeq{0};
+  /// Partition index this data belongs to.
+  int32_t partition{0};
+  /// Driver ID that produced this data (for tracing).
+  int32_t driverId{0};
 
   /// Returns the GPU memory size of the tableView's columns.
   /// Note: This returns the size of the viewed data, not the entire sourceTable.

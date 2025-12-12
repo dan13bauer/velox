@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 #include "velox/experimental/cudf-exchange/HybridExchange.h"
+#include <cuda_runtime.h>
+#include <cudf/strings/strings_column_view.hpp>
 #include "velox/experimental/cudf-exchange/Communicator.h"
 #include "velox/experimental/cudf-exchange/ExchangeClientFacade.h"
 #include "velox/experimental/cudf-exchange/NetUtil.h"
@@ -366,16 +368,87 @@ RowVectorPtr HybridExchange::getOutputFromTable(
   // This avoids the expensive cudf::unpack() operation.
   // Use the stream from the queue (same stream used to allocate buffers).
   tableWithStream->stream.synchronize();
+
+  // DEBUG: Compute checksums for all columns to detect corruption
+  auto numCols = tableWithStream->table->num_columns();
+  auto numRows = tableWithStream->table->num_rows();
   VLOG(3) << "@" << taskId() << " Dequeued table with "
-          << tableWithStream->table->num_columns() 
-          << " columns, " << tableWithStream->table->num_rows()
-          << " rows from per-column data";
+          << numCols << " columns, " << numRows << " rows";
+
+  // Compute checksums for each column in depth-first order
+  size_t colIdx = 0;
+  std::function<void(cudf::column_view)> logColumnChecksum =
+      [&](cudf::column_view colView) {
+        auto dataType = colView.type();
+        auto size = colView.size();
+        size_t currentColIdx = colIdx++;
+
+        if (dataType.id() == cudf::type_id::STRING && size > 0 &&
+            colView.num_children() > 0) {
+          // STRING column - compute checksum of chars
+          cudf::strings_column_view scv(colView);
+          auto charsSize = scv.chars_size(tableWithStream->stream);
+          uint64_t checksum = 0;
+          if (charsSize > 0) {
+            const void* charsPtr = scv.chars_begin(tableWithStream->stream);
+            if (charsSize >= 16) {
+              uint64_t first = 0, last = 0;
+              cudaMemcpy(&first, charsPtr, std::min<size_t>(8, charsSize), cudaMemcpyDeviceToHost);
+              cudaMemcpy(&last, static_cast<const uint8_t*>(charsPtr) + charsSize - 8, 8, cudaMemcpyDeviceToHost);
+              checksum = first ^ last ^ charsSize;
+            } else {
+              cudaMemcpy(&checksum, charsPtr, std::min<size_t>(8, charsSize), cudaMemcpyDeviceToHost);
+              checksum ^= charsSize;
+            }
+          }
+          VLOG(1) << "[DEQUEUE-STR] @" << taskId()
+                  << " chunk=" << tableWithStream->chunkSeq
+                  << " part=" << tableWithStream->partition
+                  << " col=" << currentColIdx
+                  << " STRING: numStrings=" << size
+                  << " charsSize=" << charsSize
+                  << " checksum=" << std::hex << checksum << std::dec;
+        } else if (size > 0 && colView.head() != nullptr &&
+                   cudf::is_fixed_width(dataType)) {
+          // Fixed-width column
+          size_t dataSize = size * cudf::size_of(dataType);
+          const void* dataPtr = static_cast<const void*>(
+              static_cast<const uint8_t*>(colView.head()) +
+              colView.offset() * cudf::size_of(dataType));
+          uint64_t checksum = 0;
+          if (dataSize >= 16) {
+            uint64_t first = 0, last = 0;
+            cudaMemcpy(&first, dataPtr, std::min<size_t>(8, dataSize), cudaMemcpyDeviceToHost);
+            cudaMemcpy(&last, static_cast<const uint8_t*>(dataPtr) + dataSize - 8, 8, cudaMemcpyDeviceToHost);
+            checksum = first ^ last ^ dataSize;
+          } else if (dataSize > 0) {
+            cudaMemcpy(&checksum, dataPtr, std::min<size_t>(8, dataSize), cudaMemcpyDeviceToHost);
+            checksum ^= dataSize;
+          }
+          VLOG(1) << "[DEQUEUE-DATA] @" << taskId()
+                  << " chunk=" << tableWithStream->chunkSeq
+                  << " part=" << tableWithStream->partition
+                  << " col=" << currentColIdx
+                  << " type=" << static_cast<int>(dataType.id())
+                  << " size=" << size
+                  << " dataSize=" << dataSize
+                  << " checksum=" << std::hex << checksum << std::dec;
+        }
+
+        // Recursively process children
+        for (int i = 0; i < colView.num_children(); ++i) {
+          logColumnChecksum(colView.child(i));
+        }
+      };
+
+  for (cudf::size_type i = 0; i < numCols; ++i) {
+    logColumnChecksum(tableWithStream->table->view().column(i));
+  }
 
   // We need to move the table out of the variant, which requires a const_cast
   // since the variant gives us a const pointer. This is safe because we're
   // about to empty the result anyway.
   auto& mutableTableWithStream = const_cast<TableWithStream&>(*tableWithStream);
-  auto numRows = mutableTableWithStream.table->num_rows();
   auto tableSize = mutableTableWithStream.table->alloc_size();
 
   // outputType_ is declared in the Operator base class.

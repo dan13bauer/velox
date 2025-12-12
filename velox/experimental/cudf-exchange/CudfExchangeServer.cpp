@@ -241,13 +241,17 @@ void CudfExchangeServer::sendData() {
       // Log column types being sent for debugging column order issues
       {
         std::stringstream ss;
-        ss << "@" << partitionKey_.taskId << " CudfExchangeServer sending column types: [";
+        ss << "@" << partitionKey_.taskId
+           << " drv=" << dataPtr_->driverId
+           << " chunk=" << dataPtr_->chunkSeq
+           << " part=" << dataPtr_->partition
+           << " SENDING tableView with column types: [";
         for (cudf::size_type i = 0; i < numColumns; ++i) {
           if (i > 0) ss << ", ";
           ss << static_cast<int>(dataPtr_->tableView.column(i).type().id());
         }
         ss << "]";
-        VLOG(3) << ss.str();
+        VLOG(1) << ss.str();
       }
 
       setState(ServerState::WaitingForSendComplete);
@@ -264,6 +268,10 @@ void CudfExchangeServer::sendData() {
       // All column_views reference data in sourceTable.
       auto sourceTable = dataPtr_->sourceTable;
 
+      // Get the stream used for partitioning this data. Must sync before sending.
+      auto stream = dataPtr_->stream;
+      stream.synchronize();
+
       // First pass: count the number of buffers to send.
       // This is needed to pre-increment pendingDataRequests_ before any sends,
       // preventing race conditions where callbacks fire synchronously.
@@ -278,10 +286,41 @@ void CudfExchangeServer::sendData() {
             if (dataType.id() == cudf::type_id::STRING && size > 0 &&
                 numChildren > 0) {
               cudf::strings_column_view scv(colView);
-              auto charsSize = scv.chars_size(rmm::cuda_stream_default);
-              if (charsSize > 0) {
+              auto offsetsView = scv.offsets();
+              auto parentOffset = colView.offset();  // Index into offsets array
+
+              // Read offsets at positions parent.offset() and parent.offset() + size
+              int32_t firstOffset = 0;
+              int32_t lastOffset = 0;
+              const int32_t* offsetsPtr =
+                  static_cast<const int32_t*>(offsetsView.head()) +
+                  offsetsView.offset();
+              cudaMemcpy(
+                  &firstOffset,
+                  offsetsPtr + parentOffset,
+                  sizeof(int32_t),
+                  cudaMemcpyDeviceToHost);
+              cudaMemcpy(
+                  &lastOffset,
+                  offsetsPtr + parentOffset + size,
+                  sizeof(int32_t),
+                  cudaMemcpyDeviceToHost);
+
+              auto actualCharsSize = lastOffset - firstOffset;
+              if (actualCharsSize > 0) {
+                ++bufferCount; // chars buffer (partial or full)
+              }
+
+              // ALWAYS handle STRING offsets directly (don't recurse to child(0)).
+              // Order: chars, null_mask, offsets (rebased if needed)
+              // Count null mask for STRING column FIRST (if present)
+              if (colView.null_mask() != nullptr) {
                 ++bufferCount;
               }
+              // Then count offsets buffer
+              ++bufferCount;
+              // Don't recurse to offsets child - we handle offsets directly
+              return; // Skip normal child processing for STRING
             } else if (size > 0 && colView.head() != nullptr &&
                        cudf::is_fixed_width(dataType)) {
               ++bufferCount;
@@ -295,15 +334,11 @@ void CudfExchangeServer::sendData() {
             }
 
             // Recursively count children
-            // For STRING columns, skip the chars child (child 1) since chars are
-            // sent via strings_column_view. Only process offsets child (child 0).
+            // Note: STRING columns are fully handled above (chars + null_mask + offsets)
+            // and return early, so they never reach here.
             // For STRUCT columns, use structs_column_view::get_sliced_child() to
             // get children with parent's offset/size applied (needed after split).
-            if (dataType.id() == cudf::type_id::STRING) {
-              if (numChildren > 0) {
-                countBuffers(colView.child(0));  // offsets only
-              }
-            } else if (dataType.id() == cudf::type_id::STRUCT) {
+            if (dataType.id() == cudf::type_id::STRUCT) {
               cudf::structs_column_view scv(colView);
               for (cudf::size_type i = 0; i < numChildren; ++i) {
                 countBuffers(scv.get_sliced_child(i));
@@ -337,32 +372,97 @@ void CudfExchangeServer::sendData() {
         // callbacks to ensure the underlying data stays alive until all
         // transfers complete.
         // bufferSeq is captured by reference and incremented for each buffer.
+        // colIdx tracks the column index in depth-first order (matches metadata order).
+        size_t colIdx = 0;
+        // Capture chunk sequence, partition, and driver ID for tracing logs
+        uint64_t chunkSeq = dataPtr_->chunkSeq;
+        int32_t partition = dataPtr_->partition;
+        int32_t driverId = dataPtr_->driverId;
         std::function<void(cudf::column_view)> sendColumnView =
-            [&](cudf::column_view colView) {
+            [&, chunkSeq, partition, driverId](cudf::column_view colView) {
               auto dataType = colView.type();
               auto size = colView.size();
               auto numChildren = colView.num_children();
+              size_t currentColIdx = colIdx++;  // Capture and increment column index
 
               // Handle STRING columns specially - chars are accessed via
               // strings_column_view, not head()
               if (dataType.id() == cudf::type_id::STRING && size > 0 &&
                   numChildren > 0) {
                 cudf::strings_column_view scv(colView);
-                auto charsSize = scv.chars_size(rmm::cuda_stream_default);
-                if (charsSize > 0) {
-                  const void* charsPtr = scv.chars_begin(rmm::cuda_stream_default);
-                  bytes_ += charsSize;
+                auto offsetsView = scv.offsets();
+                auto parentOffset = colView.offset();  // Index into offsets array
+
+                // Read offsets at positions parent.offset() and parent.offset() + size
+                int32_t firstOffset = 0;
+                int32_t lastOffset = 0;
+                const int32_t* offsetsPtr =
+                    static_cast<const int32_t*>(offsetsView.head()) +
+                    offsetsView.offset();
+                cudaMemcpy(
+                    &firstOffset,
+                    offsetsPtr + parentOffset,
+                    sizeof(int32_t),
+                    cudaMemcpyDeviceToHost);
+                cudaMemcpy(
+                    &lastOffset,
+                    offsetsPtr + parentOffset + size,
+                    sizeof(int32_t),
+                    cudaMemcpyDeviceToHost);
+
+                auto actualCharsSize = lastOffset - firstOffset;
+                // Number of offsets to send = size + 1 (includes end offset)
+                auto numOffsetsToSend = size + 1;
+
+                // DEBUG: Log detailed STRING column info for corruption detection
+                VLOG(1) << "[SEND-STR] @" << partitionKey_.taskId
+                        << " drv=" << driverId
+                        << " chunk=" << chunkSeq
+                        << " part=" << partition
+                        << " col=" << currentColIdx
+                        << " STRING: numStrings=" << size
+                        << " parentOffset=" << parentOffset
+                        << " charsSize=" << actualCharsSize
+                        << " (range " << firstOffset << "-" << lastOffset << ")"
+                        << " numOffsets=" << numOffsetsToSend
+                        << " needsRebasing=" << (firstOffset > 0 ? "yes" : "no");
+
+                if (actualCharsSize > 0) {
+                  // Send partial chars buffer (from firstOffset to lastOffset)
+                  const char* charsBegin = scv.chars_begin(stream);
+                  const void* partialCharsPtr = charsBegin + firstOffset;
+                  bytes_ += actualCharsSize;
+
+                  // DEBUG: Compute simple checksum (first 8 + last 8 bytes XOR'd with size)
+                  uint64_t checksum = 0;
+                  if (actualCharsSize >= 16) {
+                    uint64_t first = 0, last = 0;
+                    cudaMemcpy(&first, partialCharsPtr, std::min<int32_t>(8, actualCharsSize), cudaMemcpyDeviceToHost);
+                    cudaMemcpy(&last, static_cast<const uint8_t*>(partialCharsPtr) + actualCharsSize - 8, 8, cudaMemcpyDeviceToHost);
+                    checksum = first ^ last ^ actualCharsSize;
+                  } else if (actualCharsSize > 0) {
+                    cudaMemcpy(&checksum, partialCharsPtr, std::min<int32_t>(8, actualCharsSize), cudaMemcpyDeviceToHost);
+                    checksum ^= actualCharsSize;
+                  }
+                  VLOG(1) << "[SEND-STR] @" << partitionKey_.taskId
+                          << " drv=" << driverId
+                          << " chunk=" << chunkSeq
+                          << " part=" << partition
+                          << " col=" << currentColIdx
+                          << " chars: ptr=" << partialCharsPtr
+                          << " charsSize=" << actualCharsSize
+                          << " checksum=" << std::hex << checksum << std::dec;
 
                   uint64_t tag = getDataTag(partitionKeyHash_, bufferSeq++);
                   VLOG(3) << "@" << partitionKey_.taskId
                           << " Sending STRING chars buffer "
-                          << " size " << charsSize << " tag " << std::hex << tag
+                          << " size " << actualCharsSize << " tag " << std::hex << tag
                           << std::dec;
 
                   std::weak_ptr<CudfExchangeServer> weakData = weak_from_this();
                   auto req = endpointRef_->endpoint_->tagSend(
-                      const_cast<void*>(charsPtr),
-                      charsSize,
+                      const_cast<void*>(partialCharsPtr),
+                      actualCharsSize,
                       ucxx::Tag{tag},
                       false,
                       [weakData, sourceTable](
@@ -379,6 +479,123 @@ void CudfExchangeServer::sendData() {
                       sourceTable);
                   dataRequests_.push_back(req);
                 }
+
+                // ALWAYS handle STRING offsets directly here instead of recursing to child(0).
+                // This is because child(0) returns the FULL offsets column for split views,
+                // not the slice we need. We send (parentSize + 1) offsets, rebased if needed.
+                {
+                  size_t offsetsSize = numOffsetsToSend * sizeof(int32_t);
+
+                  // Copy offsets to host (starting at parentOffset)
+                  std::vector<int32_t> hostOffsets(numOffsetsToSend);
+                  cudaMemcpy(
+                      hostOffsets.data(),
+                      offsetsPtr + parentOffset,
+                      offsetsSize,
+                      cudaMemcpyDeviceToHost);
+
+                  // If rebasing needed, transform: rebased[i] = original[i] - firstOffset
+                  if (firstOffset > 0) {
+                    for (size_t i = 0; i < numOffsetsToSend; ++i) {
+                      hostOffsets[i] -= firstOffset;
+                    }
+                  }
+
+                  // Allocate device buffer and copy offsets
+                  auto offsetsBuffer = std::make_shared<rmm::device_buffer>(
+                      offsetsSize, stream);
+                  cudaMemcpy(
+                      offsetsBuffer->data(),
+                      hostOffsets.data(),
+                      offsetsSize,
+                      cudaMemcpyHostToDevice);
+
+                  // Sync to ensure copy is complete before sending
+                  stream.synchronize();
+
+                  // IMPORTANT: Send null mask BEFORE offsets to match receiver order!
+                  // Receiver expects: STRING data, STRING null_mask, offsets child data
+                  // So we send: chars, null_mask, offsets
+                  std::weak_ptr<CudfExchangeServer> weakData = weak_from_this();
+
+                  // Handle null mask for STRING column FIRST (if present)
+                  if (colView.null_mask() != nullptr) {
+                    auto nullMaskCopy = cudf::copy_bitmask(colView);
+                    size_t nullSize = nullMaskCopy.size();
+
+                    if (nullSize > 0) {
+                      auto nullMaskPtr = std::make_shared<rmm::device_buffer>(
+                          std::move(nullMaskCopy));
+                      bytes_ += nullSize;
+
+                      uint64_t nullTag = getDataTag(partitionKeyHash_, bufferSeq++);
+                      VLOG(3) << "@" << partitionKey_.taskId
+                              << " Sending null_mask buffer for STRING "
+                              << " size " << nullSize << " tag " << std::hex
+                              << nullTag << std::dec;
+
+                      auto nullReq = endpointRef_->endpoint_->tagSend(
+                          nullMaskPtr->data(),
+                          nullSize,
+                          ucxx::Tag{nullTag},
+                          false,
+                          [weakData, sourceTable, nullMaskPtr](
+                              ucs_status_t status, std::shared_ptr<void> arg) {
+                            if (auto self = weakData.lock()) {
+                              size_t remaining =
+                                  self->pendingDataRequests_.fetch_sub(1) - 1;
+                              if (remaining == 0) {
+                                self->sendComplete(status, arg);
+                              }
+                            }
+                          },
+                          sourceTable);
+                      dataRequests_.push_back(nullReq);
+                    }
+                  }
+
+                  // Now send offsets (rebased if needed)
+                  VLOG(1) << "[SEND-STR] @" << partitionKey_.taskId
+                          << " drv=" << driverId
+                          << " chunk=" << chunkSeq
+                          << " part=" << partition
+                          << " col=" << currentColIdx
+                          << " offsets: numOffsets=" << numOffsetsToSend
+                          << " offsetsSize=" << offsetsSize
+                          << (firstOffset > 0 ? " (REBASED, subtracted " + std::to_string(firstOffset) + ")" : " (no rebasing)");
+
+                  uint64_t tag = getDataTag(partitionKeyHash_, bufferSeq++);
+                  VLOG(3) << "@" << partitionKey_.taskId
+                          << " Sending offsets buffer "
+                          << " size " << offsetsSize << " tag " << std::hex
+                          << tag << std::dec;
+
+                  bytes_ += offsetsSize;
+
+                  auto req = endpointRef_->endpoint_->tagSend(
+                      offsetsBuffer->data(),
+                      offsetsSize,
+                      ucxx::Tag{tag},
+                      false,
+                      [weakData, sourceTable, offsetsBuffer](
+                          ucs_status_t status, std::shared_ptr<void> arg) {
+                        // sourceTable and offsetsBuffer captured to keep data alive
+                        if (auto self = weakData.lock()) {
+                          size_t remaining =
+                              self->pendingDataRequests_.fetch_sub(1) - 1;
+                          if (remaining == 0) {
+                            self->sendComplete(status, arg);
+                          }
+                        }
+                      },
+                      sourceTable);
+                  dataRequests_.push_back(req);
+
+                  // Skip normal child and null mask processing - we handled everything for STRING
+                  // But increment colIdx for the synthetic offsets entry that metadata includes
+                  ++colIdx;
+                  return;
+                }
               } else if (size > 0 && colView.head() != nullptr &&
                          cudf::is_fixed_width(dataType)) {
                 // Send data buffer for fixed-width types
@@ -387,6 +604,28 @@ void CudfExchangeServer::sendData() {
                     static_cast<const uint8_t*>(colView.head()) +
                     colView.offset() * cudf::size_of(dataType));
                 bytes_ += dataSize;
+
+                // DEBUG: Compute simple checksum for fixed-width columns
+                uint64_t checksum = 0;
+                if (dataSize >= 16) {
+                  uint64_t first = 0, last = 0;
+                  cudaMemcpy(&first, dataPtr, std::min<size_t>(8, dataSize), cudaMemcpyDeviceToHost);
+                  cudaMemcpy(&last, static_cast<const uint8_t*>(dataPtr) + dataSize - 8, 8, cudaMemcpyDeviceToHost);
+                  checksum = first ^ last ^ dataSize;
+                } else if (dataSize > 0) {
+                  cudaMemcpy(&checksum, dataPtr, std::min<size_t>(8, dataSize), cudaMemcpyDeviceToHost);
+                  checksum ^= dataSize;
+                }
+                VLOG(1) << "[SEND-DATA] @" << partitionKey_.taskId
+                        << " drv=" << driverId
+                        << " chunk=" << chunkSeq
+                        << " part=" << partition
+                        << " col=" << currentColIdx
+                        << " type=" << static_cast<int>(dataType.id())
+                        << " size=" << size
+                        << " offset=" << colView.offset()
+                        << " dataSize=" << dataSize
+                        << " checksum=" << std::hex << checksum << std::dec;
 
                 uint64_t tag = getDataTag(partitionKeyHash_, bufferSeq++);
                 VLOG(3) << "@" << partitionKey_.taskId << " Sending data buffer "
@@ -461,15 +700,11 @@ void CudfExchangeServer::sendData() {
               }
 
               // Recursively process children (depth-first order)
-              // For STRING columns, skip the chars child (child 1) since chars are
-              // sent via strings_column_view. Only process offsets child (child 0).
+              // Note: STRING columns are fully handled above (chars + null_mask + offsets)
+              // and return early, so they never reach here.
               // For STRUCT columns, use structs_column_view::get_sliced_child() to
               // get children with parent's offset/size applied (needed after split).
-              if (dataType.id() == cudf::type_id::STRING) {
-                if (numChildren > 0) {
-                  sendColumnView(colView.child(0));  // offsets only
-                }
-              } else if (dataType.id() == cudf::type_id::STRUCT) {
+              if (dataType.id() == cudf::type_id::STRUCT) {
                 cudf::structs_column_view scv(colView);
                 for (cudf::size_type i = 0; i < numChildren; ++i) {
                   sendColumnView(scv.get_sliced_child(i));

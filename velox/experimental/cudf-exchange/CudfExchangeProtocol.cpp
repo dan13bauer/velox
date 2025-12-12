@@ -15,6 +15,7 @@
  */
 
 #include "cuda.h"
+#include <cuda_runtime.h>
 
 #include <cudf/null_mask.hpp>
 #include <cudf/strings/strings_column_view.hpp>
@@ -118,13 +119,41 @@ void TableMetadata::buildColumnMetadata(
       case cudf::type_id::STRING: {
         // STRING columns store chars in the parent's data buffer.
         // The offsets are in child(0).
-        // Use strings_column_view to get the chars size.
-        // Note: col.head<char>() might be nullptr for STRING columns since
-        // cudf 25.x stores chars differently. Check num_children instead.
+        // For split STRING columns, we compute the actual chars range needed
+        // by reading the first and last offset values. This allows sending
+        // only the partial chars buffer instead of the full buffer.
+        // The sender will rebase offsets so offsets[0] = 0.
+        // The parent column's offset() tells us where this slice starts
+        // in the offsets array.
         if (col.num_children() > 0) {
           cudf::strings_column_view scv(col);
-          // chars_size() reads the last offset from device memory
-          meta.dataSize = scv.chars_size(rmm::cuda_stream_default);
+          auto offsetsView = scv.offsets();
+          auto parentOffset = col.offset();  // Index into offsets array
+          auto size = col.size();  // Number of strings in this slice
+
+          if (size > 0) {
+            // Read offsets at positions parent.offset() and parent.offset() + size
+            int32_t firstOffset = 0;
+            int32_t lastOffset = 0;
+            const int32_t* offsetsPtr =
+                static_cast<const int32_t*>(offsetsView.head()) +
+                offsetsView.offset();
+            cudaMemcpy(
+                &firstOffset,
+                offsetsPtr + parentOffset,
+                sizeof(int32_t),
+                cudaMemcpyDeviceToHost);
+            cudaMemcpy(
+                &lastOffset,
+                offsetsPtr + parentOffset + size,
+                sizeof(int32_t),
+                cudaMemcpyDeviceToHost);
+
+            // Store actual chars size needed (partial buffer for split views)
+            meta.dataSize = lastOffset - firstOffset;
+          } else {
+            meta.dataSize = -1;
+          }
         } else {
           meta.dataSize = -1;
         }
@@ -175,16 +204,77 @@ void TableMetadata::buildColumnMetadata(
     meta.numChildren = col.num_children();
   }
 
+  // DEBUG: Log metadata for STRING columns for corruption detection
+  // metadata.size() is the index of this column (before push_back)
+  size_t colIdx = metadata.size();
+  if (meta.typeId == cudf::type_id::STRING) {
+    if (col.num_children() > 0) {
+      cudf::strings_column_view scv(col);
+      auto offsetsView = scv.offsets();
+      auto parentOffset = col.offset();
+      auto size = col.size();
+      int32_t firstOff = 0, lastOff = 0;
+      if (size > 0) {
+        const int32_t* offsetsPtr =
+            static_cast<const int32_t*>(offsetsView.head()) +
+            offsetsView.offset();
+        cudaMemcpy(&firstOff, offsetsPtr + parentOffset, sizeof(int32_t), cudaMemcpyDeviceToHost);
+        cudaMemcpy(&lastOff, offsetsPtr + parentOffset + size, sizeof(int32_t), cudaMemcpyDeviceToHost);
+      }
+      VLOG(1) << "[META-STR] col=" << colIdx << " STRING: size=" << meta.size
+              << " dataSize=" << meta.dataSize << " (chars range " << firstOff
+              << "-" << lastOff << ")"
+              << " nullMaskSize=" << meta.nullMaskSize
+              << " numChildren=" << meta.numChildren
+              << " col.offset=" << col.offset()
+              << " needsRebasing=" << (firstOff > 0 ? "yes" : "no");
+    } else {
+      VLOG(1) << "[META-STR] col=" << colIdx << " STRING: size=" << meta.size
+              << " dataSize=" << meta.dataSize
+              << " nullMaskSize=" << meta.nullMaskSize
+              << " numChildren=" << meta.numChildren
+              << " col.offset=" << col.offset() << " (no children)";
+    }
+  } else {
+    VLOG(2) << "[META] col=" << colIdx
+            << " type=" << static_cast<int>(meta.typeId)
+            << " size=" << meta.size
+            << " dataSize=" << meta.dataSize
+            << " nullMaskSize=" << meta.nullMaskSize
+            << " numChildren=" << meta.numChildren
+            << " col.offset=" << col.offset();
+  }
+
   // Add this column's metadata
   metadata.push_back(meta);
 
   // Recursively process children (depth-first)
-  // For STRING columns, only process offsets child (child 0), skip chars child.
+  // For STRING columns, we create a synthetic offsets metadata entry that reflects
+  // what we actually send: (parent.size() + 1) INT32 offsets. We can't use
+  // col.child(0) directly because for split views, child(0) returns the original
+  // unsliced offsets column with the wrong size.
   // For STRUCT columns, use structs_column_view::get_sliced_child() to get
   // children with the parent's offset/size applied (needed after cudf::split).
   if (col.type().id() == cudf::type_id::STRING) {
-    if (col.num_children() > 0) {
-      buildColumnMetadata(col.child(0), metadata);
+    if (col.num_children() > 0 && col.size() > 0) {
+      // Create synthetic offsets metadata with correct size for this slice
+      ColumnMetadata offsetsMeta;
+      offsetsMeta.typeId = cudf::type_id::INT32;
+      offsetsMeta.typeScale = 0;
+      // Offsets array has (string_count + 1) elements
+      offsetsMeta.size = col.size() + 1;
+      offsetsMeta.nullCount = 0;  // Offsets never have nulls
+      offsetsMeta.dataSize = static_cast<int64_t>(col.size() + 1) * sizeof(int32_t);
+      offsetsMeta.nullMaskSize = -1;  // No null mask
+      offsetsMeta.numChildren = 0;
+
+      size_t colIdx = metadata.size();
+      VLOG(2) << "[META-OFFSETS] col=" << colIdx
+              << " INT32 offsets: size=" << offsetsMeta.size
+              << " dataSize=" << offsetsMeta.dataSize
+              << " for parent STRING with size=" << col.size();
+
+      metadata.push_back(offsetsMeta);
     }
   } else if (col.type().id() == cudf::type_id::STRUCT) {
     // Use structs_column_view::get_sliced_child() for proper offset handling

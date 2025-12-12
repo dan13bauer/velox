@@ -30,22 +30,33 @@ namespace facebook::velox::cudf_exchange {
 struct TableWithStream {
   std::unique_ptr<cudf::table> table;
   rmm::cuda_stream_view stream;
+  /// Chunk sequence number from the sender (for tracing).
+  uint64_t chunkSeq{0};
+  /// Partition index from the sender (for tracing).
+  int32_t partition{0};
 
   TableWithStream() : table(nullptr), stream(rmm::cuda_stream_view{}) {}
 
   TableWithStream(
       std::unique_ptr<cudf::table> t,
-      rmm::cuda_stream_view s)
-      : table(std::move(t)), stream(s) {}
+      rmm::cuda_stream_view s,
+      uint64_t chunk = 0,
+      int32_t part = 0)
+      : table(std::move(t)), stream(s), chunkSeq(chunk), partition(part) {}
 
   // Move constructor
   TableWithStream(TableWithStream&& other) noexcept
-      : table(std::move(other.table)), stream(other.stream) {}
+      : table(std::move(other.table)),
+        stream(other.stream),
+        chunkSeq(other.chunkSeq),
+        partition(other.partition) {}
 
   // Move assignment
   TableWithStream& operator=(TableWithStream&& other) noexcept {
     table = std::move(other.table);
     stream = other.stream;
+    chunkSeq = other.chunkSeq;
+    partition = other.partition;
     return *this;
   }
 
