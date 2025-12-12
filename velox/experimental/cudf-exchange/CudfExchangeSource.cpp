@@ -28,6 +28,9 @@
 #include "velox/experimental/cudf-exchange/CudfExchangeSource.h"
 #include "velox/experimental/cudf/exec/Utilities.h"
 
+// Uncomment to enable checkpoint/checksum logging for debugging data corruption
+// #define CHECKSUM_LOGGING 1
+
 using namespace facebook::velox::exec;
 namespace facebook::velox::cudf_exchange {
 
@@ -610,6 +613,7 @@ void CudfExchangeSource::onPerColumnDataComplete(
     }
   }
 
+#if CHECKSUM_LOGGING
   // DEBUG: Compute and log checksums for all received buffers to detect corruption
   for (size_t i = 0; i < perColData->columnMeta.size(); ++i) {
     const auto& colMeta = perColData->columnMeta[i];
@@ -649,6 +653,7 @@ void CudfExchangeSource::onPerColumnDataComplete(
       }
     }
   }
+#endif
 
   // Increment sequence number by the number of buffers received (each buffer used one sequence)
   // For empty tables, increment by at least 1 to advance the sequence
@@ -738,6 +743,7 @@ void CudfExchangeSource::onPerColumnDataComplete(
           meta.nullCount,
           std::move(children));  // offsets child
 
+#if CHECKSUM_LOGGING
       // DEBUG: Verify reconstructed STRING column
       cudf::strings_column_view scv(column->view());
       auto reconstructedCharsSize = scv.chars_size(stream);
@@ -771,6 +777,7 @@ void CudfExchangeSource::onPerColumnDataComplete(
                 << " col=" << idx
                 << " reconstructed checksum=" << std::hex << checksum << std::dec;
       }
+#endif
     } else if (data.size() == 0 && meta.size > 0) {
       // This shouldn't happen - we have a non-empty column but no data
       // Log error and create an empty column as fallback

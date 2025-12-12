@@ -21,6 +21,9 @@
 #include "velox/experimental/cudf-exchange/NetUtil.h"
 #include "velox/experimental/cudf/exec/Utilities.h"
 
+// Uncomment to enable checkpoint/checksum logging for debugging data corruption
+// #define CHECKSUM_LOGGING 1
+
 using namespace facebook::velox::exec;
 using namespace facebook::velox::core;
 
@@ -369,9 +372,11 @@ RowVectorPtr HybridExchange::getOutputFromTable(
   // Use the stream from the queue (same stream used to allocate buffers).
   tableWithStream->stream.synchronize();
 
+  auto numRows = tableWithStream->table->num_rows();
+
+#if CHECKSUM_LOGGING
   // DEBUG: Compute checksums for all columns to detect corruption
   auto numCols = tableWithStream->table->num_columns();
-  auto numRows = tableWithStream->table->num_rows();
   VLOG(3) << "@" << taskId() << " Dequeued table with "
           << numCols << " columns, " << numRows << " rows";
 
@@ -444,6 +449,7 @@ RowVectorPtr HybridExchange::getOutputFromTable(
   for (cudf::size_type i = 0; i < numCols; ++i) {
     logColumnChecksum(tableWithStream->table->view().column(i));
   }
+#endif
 
   // We need to move the table out of the variant, which requires a const_cast
   // since the variant gives us a const pointer. This is safe because we're

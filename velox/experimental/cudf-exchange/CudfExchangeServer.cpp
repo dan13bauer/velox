@@ -25,6 +25,9 @@
 #include "velox/experimental/cudf-exchange/CudfExchangeProtocol.h"
 #include "velox/experimental/cudf/exec/Utilities.h"
 
+// Uncomment to enable checkpoint/checksum logging for debugging data corruption
+// #define CHECKSUM_LOGGING 1
+
 namespace facebook::velox::cudf_exchange {
 
 // This constructor is private
@@ -238,6 +241,7 @@ void CudfExchangeServer::sendData() {
               << " rows to task " << partitionKey_.toString()
               << ":" << this->sequenceNumber_ << " using per-column transfer";
 
+#if CHECKSUM_LOGGING
       // Log column types being sent for debugging column order issues
       {
         std::stringstream ss;
@@ -253,6 +257,7 @@ void CudfExchangeServer::sendData() {
         ss << "]";
         VLOG(1) << ss.str();
       }
+#endif
 
       setState(ServerState::WaitingForSendComplete);
 
@@ -414,6 +419,7 @@ void CudfExchangeServer::sendData() {
                 // Number of offsets to send = size + 1 (includes end offset)
                 auto numOffsetsToSend = size + 1;
 
+#if CHECKSUM_LOGGING
                 // DEBUG: Log detailed STRING column info for corruption detection
                 VLOG(1) << "[SEND-STR] @" << partitionKey_.taskId
                         << " drv=" << driverId
@@ -426,6 +432,7 @@ void CudfExchangeServer::sendData() {
                         << " (range " << firstOffset << "-" << lastOffset << ")"
                         << " numOffsets=" << numOffsetsToSend
                         << " needsRebasing=" << (firstOffset > 0 ? "yes" : "no");
+#endif
 
                 if (actualCharsSize > 0) {
                   // Send partial chars buffer (from firstOffset to lastOffset)
@@ -433,6 +440,7 @@ void CudfExchangeServer::sendData() {
                   const void* partialCharsPtr = charsBegin + firstOffset;
                   bytes_ += actualCharsSize;
 
+#if CHECKSUM_LOGGING
                   // DEBUG: Compute simple checksum (first 8 + last 8 bytes XOR'd with size)
                   uint64_t checksum = 0;
                   if (actualCharsSize >= 16) {
@@ -452,6 +460,7 @@ void CudfExchangeServer::sendData() {
                           << " chars: ptr=" << partialCharsPtr
                           << " charsSize=" << actualCharsSize
                           << " checksum=" << std::hex << checksum << std::dec;
+#endif
 
                   uint64_t tag = getDataTag(partitionKeyHash_, bufferSeq++);
                   VLOG(3) << "@" << partitionKey_.taskId
@@ -554,6 +563,7 @@ void CudfExchangeServer::sendData() {
                     }
                   }
 
+#if CHECKSUM_LOGGING
                   // Now send offsets (rebased if needed)
                   VLOG(1) << "[SEND-STR] @" << partitionKey_.taskId
                           << " drv=" << driverId
@@ -563,6 +573,7 @@ void CudfExchangeServer::sendData() {
                           << " offsets: numOffsets=" << numOffsetsToSend
                           << " offsetsSize=" << offsetsSize
                           << (firstOffset > 0 ? " (REBASED, subtracted " + std::to_string(firstOffset) + ")" : " (no rebasing)");
+#endif
 
                   uint64_t tag = getDataTag(partitionKeyHash_, bufferSeq++);
                   VLOG(3) << "@" << partitionKey_.taskId
@@ -605,6 +616,7 @@ void CudfExchangeServer::sendData() {
                     colView.offset() * cudf::size_of(dataType));
                 bytes_ += dataSize;
 
+#if CHECKSUM_LOGGING
                 // DEBUG: Compute simple checksum for fixed-width columns
                 uint64_t checksum = 0;
                 if (dataSize >= 16) {
@@ -626,6 +638,7 @@ void CudfExchangeServer::sendData() {
                         << " offset=" << colView.offset()
                         << " dataSize=" << dataSize
                         << " checksum=" << std::hex << checksum << std::dec;
+#endif
 
                 uint64_t tag = getDataTag(partitionKeyHash_, bufferSeq++);
                 VLOG(3) << "@" << partitionKey_.taskId << " Sending data buffer "

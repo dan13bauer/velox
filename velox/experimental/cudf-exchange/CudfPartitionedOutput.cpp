@@ -29,6 +29,9 @@
 #include <cudf/partitioning.hpp>
 #include <cudf/strings/strings_column_view.hpp>
 
+// Uncomment to enable checkpoint/checksum logging for debugging data corruption
+// #define CHECKSUM_LOGGING 1
+
 using namespace facebook::velox::cudf_velox;
 using facebook::velox::exec::Task;
 namespace facebook::velox::cudf_exchange {
@@ -381,6 +384,7 @@ void CudfPartitionedOutput::splitAndEnqueue(
     unpackedData->tableView = partitionView;
     unpackedData->sourceTable = sourceTable; // All partitions share ownership
 
+#if CHECKSUM_LOGGING
     // DEBUG: Log column types being stored in TableWithMetadata
     {
       std::stringstream ss;
@@ -394,14 +398,17 @@ void CudfPartitionedOutput::splitAndEnqueue(
       ss << "]";
       VLOG(1) << ss.str();
     }
+#endif
     unpackedData->numRows = partitionView.num_rows();
     unpackedData->stream = stream;  // Propagate stream for proper sync
     unpackedData->chunkSeq = chunkSeq_;  // Set chunk sequence for tracing
     unpackedData->partition = i;  // Set partition index for tracing
     unpackedData->driverId = driverId_;  // Set driver ID for tracing
 
+#if CHECKSUM_LOGGING
     // Log ENQUEUE checksums for this partition (after split, before enqueue)
     logEnqueueChecksums(partitionView, chunkSeq_, i);
+#endif
 
     // enqueue partition data on Cudf Output Buffer
     queueManager->enqueue(this->taskId(), i, std::move(unpackedData));
@@ -409,9 +416,10 @@ void CudfPartitionedOutput::splitAndEnqueue(
 }
 
 void CudfPartitionedOutput::logEnqueueChecksums(
-    cudf::table_view tableView,
-    uint64_t chunkSeq,
-    int partitionIndex) {
+    [[maybe_unused]] cudf::table_view tableView,
+    [[maybe_unused]] uint64_t chunkSeq,
+    [[maybe_unused]] int partitionIndex) {
+#if CHECKSUM_LOGGING
   // Compute checksums for each column in depth-first order (matches metadata)
   size_t colIdx = 0;
   std::function<void(cudf::column_view)> logColumnChecksum =
@@ -526,6 +534,7 @@ void CudfPartitionedOutput::logEnqueueChecksums(
   for (cudf::size_type i = 0; i < tableView.num_columns(); ++i) {
     logColumnChecksum(tableView.column(i));
   }
+#endif
 }
 
 } // namespace facebook::velox::cudf_exchange

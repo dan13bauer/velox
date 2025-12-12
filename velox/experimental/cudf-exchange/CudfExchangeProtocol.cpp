@@ -23,6 +23,9 @@
 #include <rmm/cuda_stream_view.hpp>
 #include "velox/experimental/cudf-exchange/CudfExchangeProtocol.h"
 
+// Uncomment to enable checkpoint/checksum logging for debugging data corruption
+// #define CHECKSUM_LOGGING 1
+
 namespace facebook::velox::cudf_exchange {
 
 // ColumnMetadata implementation
@@ -204,6 +207,7 @@ void TableMetadata::buildColumnMetadata(
     meta.numChildren = col.num_children();
   }
 
+#if CHECKSUM_LOGGING
   // DEBUG: Log metadata for STRING columns for corruption detection
   // metadata.size() is the index of this column (before push_back)
   size_t colIdx = metadata.size();
@@ -244,6 +248,7 @@ void TableMetadata::buildColumnMetadata(
             << " numChildren=" << meta.numChildren
             << " col.offset=" << col.offset();
   }
+#endif
 
   // Add this column's metadata
   metadata.push_back(meta);
@@ -268,11 +273,13 @@ void TableMetadata::buildColumnMetadata(
       offsetsMeta.nullMaskSize = -1;  // No null mask
       offsetsMeta.numChildren = 0;
 
-      size_t colIdx = metadata.size();
-      VLOG(2) << "[META-OFFSETS] col=" << colIdx
+#if CHECKSUM_LOGGING
+      size_t offsetsColIdx = metadata.size();
+      VLOG(2) << "[META-OFFSETS] col=" << offsetsColIdx
               << " INT32 offsets: size=" << offsetsMeta.size
               << " dataSize=" << offsetsMeta.dataSize
               << " for parent STRING with size=" << col.size();
+#endif
 
       metadata.push_back(offsetsMeta);
     }
