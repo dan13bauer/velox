@@ -77,6 +77,7 @@ class CudfOutputQueueManagerTest : public testing::Test {
     tableData->tableView = sourceTable->view();
     tableData->sourceTable = std::move(sourceTable);
     tableData->numRows = static_cast<cudf::size_type>(numRows);
+    tableData->stream = stream;
     return tableData;
   }
 

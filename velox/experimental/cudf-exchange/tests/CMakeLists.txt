@@ -17,6 +17,7 @@ add_executable(
   CudfOutputQueueManagerTest.cpp
   CudfExchangeTest.cpp
   TableMetadataTest.cpp
+  StringColumnSplitTest.cpp
   Main.cpp
   CudfTestHelpers.cpp
   CudfTestData.cpp

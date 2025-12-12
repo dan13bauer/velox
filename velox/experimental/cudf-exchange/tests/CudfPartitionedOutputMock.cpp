@@ -82,6 +82,7 @@ void CudfPartitionedOutputMock::publishDataChunks() {
       tableData->tableView = sourceTable->view();
       tableData->sourceTable = std::move(sourceTable);
       tableData->numRows = static_cast<cudf::size_type>(numRowsPerChunk_);
+      tableData->stream = stream;
 
       queueManager_->enqueue(
           taskId_,

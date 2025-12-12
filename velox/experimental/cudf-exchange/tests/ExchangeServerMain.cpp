@@ -173,6 +173,7 @@ class CudfExchangeServerTest {
     tableData->tableView = sourceTable->view();
     tableData->sourceTable = std::move(sourceTable);
     tableData->numRows = static_cast<cudf::size_type>(size);
+    tableData->stream = stream;
 
     queueManager_->enqueue(taskId, destination, std::move(tableData));
   }
