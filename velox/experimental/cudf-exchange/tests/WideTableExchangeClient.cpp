@@ -57,6 +57,7 @@ DEFINE_uint32(partition_id, 0, "Partition ID to fetch (0, 1, ...)");
 DEFINE_uint32(num_sink_drivers, 4, "Number of sink drivers (parallel receivers)");
 DEFINE_uint32(client_port, 21347, "Local port for UCX communication");
 DEFINE_uint32(rmm_pool_percent, 50, "Percentage of free GPU memory for RMM pool");
+DEFINE_bool(complex_types, false, "If true, expect WideComplexTestTable schema (includes STRING and STRUCT)");
 
 /// @brief Creates a remote split pointing to the server's partition.
 /// The URL format follows Velox's exchange protocol.
@@ -93,6 +94,7 @@ int main(int argc, char** argv) {
   std::cout << "  Partition ID: " << FLAGS_partition_id << std::endl;
   std::cout << "  Sink drivers: " << FLAGS_num_sink_drivers << std::endl;
   std::cout << "  Client port: " << FLAGS_client_port << std::endl;
+  std::cout << "  Complex types: " << (FLAGS_complex_types ? "yes (STRING + STRUCT)" : "no (numeric only)") << std::endl;
   std::cout << "========================================" << std::endl;
 
   // Setup RMM memory resource with a pool
@@ -128,10 +130,14 @@ int main(int argc, char** argv) {
   std::cout << "Local Communicator is ready." << std::endl;
 
   // Create sink task for this partition
+  // Use the appropriate row type based on --complex_types flag
+  auto rowType = FLAGS_complex_types
+      ? WideComplexTestTable::kRowType
+      : WideTestTable::kRowType;
   std::string sinkTaskId = "clientSinkTask_p" + std::to_string(FLAGS_partition_id);
   core::PlanNodeId exchangeNodeId;
   auto sinkTask = createExchangeTask(
-      sinkTaskId, WideTestTable::kRowType, FLAGS_partition_id, exchangeNodeId);
+      sinkTaskId, rowType, FLAGS_partition_id, exchangeNodeId);
 
   // Create SinkDriverMock with multiple drivers for parallel receiving
   // Pass nullptr for reference data (no data validation in client mode)

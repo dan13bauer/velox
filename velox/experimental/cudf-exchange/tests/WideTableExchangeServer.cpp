@@ -61,6 +61,7 @@ DEFINE_uint32(num_src_drivers, 1, "Number of source drivers (parallel senders)")
 DEFINE_string(task_id, "wideTableTask0", "Task ID that clients will use to fetch data");
 DEFINE_uint32(rmm_pool_percent, 50, "Percentage of free GPU memory for RMM pool");
 DEFINE_bool(wait_forever, false, "If true, wait for Ctrl+C instead of auto-terminating when done");
+DEFINE_bool(complex_types, false, "If true, use WideComplexTestTable (includes STRING and STRUCT columns)");
 
 // Global communicator pointer for signal handler
 static std::shared_ptr<Communicator> g_communicator;
@@ -98,6 +99,7 @@ int main(int argc, char** argv) {
   std::cout << "  Source drivers: " << FLAGS_num_src_drivers << std::endl;
   std::cout << "  Rows per chunk: " << (FLAGS_num_rows / FLAGS_num_chunks) << std::endl;
   std::cout << "  Wait forever: " << (FLAGS_wait_forever ? "yes" : "no") << std::endl;
+  std::cout << "  Complex types: " << (FLAGS_complex_types ? "yes (STRING + STRUCT)" : "no (numeric only)") << std::endl;
   std::cout << "========================================" << std::endl;
 
   // Setup RMM memory resource with a pool
@@ -140,14 +142,21 @@ int main(int argc, char** argv) {
   std::signal(SIGINT, signalHandler);
   std::signal(SIGTERM, signalHandler);
 
-  // Create WideTestTable generator with random values
+  // Create table generator with random values based on --complex_types flag
   // Initialize with rows_per_chunk since SourceDriverMock creates this many rows per chunk
   size_t rowsPerChunk = FLAGS_num_rows / FLAGS_num_chunks;
-  auto wideTable = std::make_shared<WideTestTable>();
-  wideTable->initialize(rowsPerChunk);
+  std::shared_ptr<BaseTableGenerator> tableGenerator;
+  if (FLAGS_complex_types) {
+    tableGenerator = std::make_shared<WideComplexTestTable>();
+    std::cout << "Using WideComplexTestTable (includes STRING and STRUCT columns)" << std::endl;
+  } else {
+    tableGenerator = std::make_shared<WideTestTable>();
+    std::cout << "Using WideTestTable (numeric columns only)" << std::endl;
+  }
+  tableGenerator->initialize(rowsPerChunk);
 
-  std::cout << "Created WideTestTable with " << rowsPerChunk << " rows per chunk" << std::endl;
-  std::cout << "Table schema: " << WideTestTable::kRowType->toString() << std::endl;
+  std::cout << "Created table with " << rowsPerChunk << " rows per chunk" << std::endl;
+  std::cout << "Table schema: " << tableGenerator->getRowType()->toString() << std::endl;
 
   // Create source task with PartitionedOutput plan node
   // Use int32_col (column index 2) for hash partitioning
@@ -162,7 +171,7 @@ int main(int argc, char** argv) {
   auto srcTask = createPartitionedOutputTask(
       FLAGS_task_id,
       pool,
-      WideTestTable::kRowType,
+      tableGenerator->getRowType(),
       FLAGS_num_partitions,
       partitionKeys);
 
@@ -176,7 +185,7 @@ int main(int argc, char** argv) {
       FLAGS_num_src_drivers,
       FLAGS_num_chunks,
       rowsPerChunk,
-      wideTable);
+      tableGenerator);
 
   std::cout << "Starting data production..." << std::endl;
 

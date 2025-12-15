@@ -30,8 +30,9 @@ namespace facebook::velox::cudf_exchange {
 
 /// @brief Enum to identify different table types for testing
 enum class TableType {
-  NARROW, // Original CudfTestData structure (INT32, FLOAT64, VARCHAR)
-  WIDE    // All cudf data types including STRUCT
+  NARROW,      // Original CudfTestData structure (INT32, FLOAT64, VARCHAR)
+  WIDE,        // Numeric types only (no STRING or STRUCT)
+  WIDE_COMPLEX // All cudf data types including STRING and STRUCT
 };
 
 /// @brief Abstract base class for generating test tables with cudf data.
@@ -178,11 +179,12 @@ class CudfTestData : public BaseTableGenerator {
   size_t numRows_ = 0;
 };
 
-/// @brief Wide table generator with many cudf data types including STRUCT.
-/// Used to test that all column types transfer correctly through the exchange.
+/// @brief Wide table generator with numeric cudf data types only.
+/// Used to test that numeric column types transfer correctly through the exchange.
+/// Does NOT include STRING or STRUCT columns - use WideComplexTestTable for those.
 class WideTestTable : public BaseTableGenerator {
  public:
-  // Column names for the wide table
+  // Column names for the wide table (numeric types only)
   inline static const std::vector<std::string> kColumnNames = {
       "int8_col",      // INT8
       "int16_col",     // INT16
@@ -194,12 +196,10 @@ class WideTestTable : public BaseTableGenerator {
       "uint64_col",    // UINT64
       "float32_col",   // FLOAT32
       "float64_col",   // FLOAT64
-      "bool_col",      // BOOL8
-      "string_col",    // STRING
-      "struct_col"     // STRUCT<int64, float64>
+      "bool_col"       // BOOL8
   };
 
-  // Column types for Velox
+  // Column types for Velox (numeric types only)
   inline static const std::vector<TypePtr> kColumnTypes = {
       TINYINT(),                           // INT8
       SMALLINT(),                          // INT16
@@ -211,10 +211,7 @@ class WideTestTable : public BaseTableGenerator {
       BIGINT(),                            // UINT64 (mapped to BIGINT)
       REAL(),                              // FLOAT32
       DOUBLE(),                            // FLOAT64
-      BOOLEAN(),                           // BOOL8
-      VARCHAR(),                           // STRING
-      ROW({"field1", "field2"},            // STRUCT
-          {BIGINT(), DOUBLE()})};
+      BOOLEAN()};                          // BOOL8
 
   inline static const facebook::velox::RowTypePtr kRowType =
       ROW(kColumnNames, kColumnTypes);
@@ -240,7 +237,25 @@ class WideTestTable : public BaseTableGenerator {
       rmm::cuda_stream_view stream) override;
 
  protected:
-  // Data storage for each column type
+  /// @brief Helper to add numeric columns to a column vector.
+  /// Can be used by derived classes to build tables with additional columns.
+  void addNumericColumns(
+      std::vector<std::unique_ptr<cudf::column>>& columns,
+      rmm::cuda_stream_view stream);
+
+  /// @brief Helper to verify numeric columns in a table.
+  /// @param table The table view to verify.
+  /// @param startRow Starting row in the reference data.
+  /// @param numRows Number of rows to verify.
+  /// @param stream CUDA stream.
+  /// @return True if all numeric columns match, false otherwise.
+  bool verifyNumericColumns(
+      const cudf::table_view& table,
+      size_t startRow,
+      size_t numRows,
+      rmm::cuda_stream_view stream);
+
+  // Data storage for numeric column types
   std::vector<int8_t> int8Data_;
   std::vector<int16_t> int16Data_;
   std::vector<int32_t> int32Data_;
@@ -252,12 +267,73 @@ class WideTestTable : public BaseTableGenerator {
   std::vector<float> float32Data_;
   std::vector<double> float64Data_;
   std::vector<int8_t> boolData_; // stored as int8_t for BOOL8
+
+  size_t numRows_ = 0;
+};
+
+/// @brief Wide table generator that extends WideTestTable with STRING and STRUCT columns.
+/// Used to test that all column types including complex types transfer correctly.
+class WideComplexTestTable : public WideTestTable {
+ public:
+  // Column names: base numeric columns + string + struct
+  inline static const std::vector<std::string> kColumnNames = {
+      "int8_col",      // INT8
+      "int16_col",     // INT16
+      "int32_col",     // INT32
+      "int64_col",     // INT64
+      "uint8_col",     // UINT8
+      "uint16_col",    // UINT16
+      "uint32_col",    // UINT32
+      "uint64_col",    // UINT64
+      "float32_col",   // FLOAT32
+      "float64_col",   // FLOAT64
+      "bool_col",      // BOOL8
+      "string_col",    // STRING
+      "struct_col"     // STRUCT<int64, float64>
+  };
+
+  // Column types for Velox: base numeric types + string + struct
+  inline static const std::vector<TypePtr> kColumnTypes = {
+      TINYINT(),                           // INT8
+      SMALLINT(),                          // INT16
+      INTEGER(),                           // INT32
+      BIGINT(),                            // INT64
+      TINYINT(),                           // UINT8 (mapped to TINYINT)
+      SMALLINT(),                          // UINT16 (mapped to SMALLINT)
+      INTEGER(),                           // UINT32 (mapped to INTEGER)
+      BIGINT(),                            // UINT64 (mapped to BIGINT)
+      REAL(),                              // FLOAT32
+      DOUBLE(),                            // FLOAT64
+      BOOLEAN(),                           // BOOL8
+      VARCHAR(),                           // STRING
+      ROW({"field1", "field2"},            // STRUCT
+          {BIGINT(), DOUBLE()})};
+
+  inline static const facebook::velox::RowTypePtr kRowType =
+      ROW(kColumnNames, kColumnTypes);
+
+  WideComplexTestTable() = default;
+
+  void initialize(size_t numRows) override;
+
+  facebook::velox::RowTypePtr getRowType() const override {
+    return kRowType;
+  }
+
+  std::unique_ptr<cudf::table> makeTable(rmm::cuda_stream_view stream) override;
+
+  bool verifyTable(
+      const cudf::table_view& table,
+      size_t startRow,
+      size_t numRows,
+      rmm::cuda_stream_view stream) override;
+
+ protected:
+  // Additional data storage for complex column types
   std::vector<std::string> stringData_;
   // Struct children data
   std::vector<int64_t> structField1Data_;
   std::vector<double> structField2Data_;
-
-  size_t numRows_ = 0;
 };
 
 /// @brief Factory function to create a table generator based on TableType.
@@ -268,6 +344,8 @@ inline std::shared_ptr<BaseTableGenerator> createTableGenerator(
       return std::make_shared<CudfTestData>();
     case TableType::WIDE:
       return std::make_shared<WideTestTable>();
+    case TableType::WIDE_COMPLEX:
+      return std::make_shared<WideComplexTestTable>();
     default:
       return std::make_shared<CudfTestData>();
   }

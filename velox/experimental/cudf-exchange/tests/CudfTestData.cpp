@@ -356,6 +356,7 @@ bool CudfTestData::verifyTable(
 }
 
 // ----- WideTestTable implementation -----
+// Contains only numeric columns (no STRING or STRUCT)
 
 void WideTestTable::initialize(size_t numRows) {
   VLOG(3) << "+ WideTestTable::initialize numRows:" << numRows;
@@ -366,7 +367,6 @@ void WideTestTable::initialize(size_t numRows) {
   std::uniform_int_distribution<int64_t> intDist(-1000000, 1000000);
   std::uniform_real_distribution<double> doubleDist(-1000.0, 1000.0);
   std::uniform_int_distribution<> boolDist(0, 1);
-  std::uniform_int_distribution<> strLenDist(1, 20);
 
   int8Data_.resize(numRows);
   int16Data_.resize(numRows);
@@ -379,9 +379,6 @@ void WideTestTable::initialize(size_t numRows) {
   float32Data_.resize(numRows);
   float64Data_.resize(numRows);
   boolData_.resize(numRows);
-  stringData_.resize(numRows);
-  structField1Data_.resize(numRows);
-  structField2Data_.resize(numRows);
 
   for (size_t i = 0; i < numRows; ++i) {
     int64_t randInt = intDist(gen);
@@ -398,21 +395,14 @@ void WideTestTable::initialize(size_t numRows) {
     float32Data_[i] = static_cast<float>(randDouble);
     float64Data_[i] = randDouble;
     boolData_[i] = boolDist(gen);
-    stringData_[i] = genRandomStr(strLenDist(gen));
-
-    // Struct children data
-    structField1Data_[i] = randInt * 2;
-    structField2Data_[i] = randDouble * 2.0;
   }
 
   VLOG(3) << "- WideTestTable::initialize";
 }
 
-std::unique_ptr<cudf::table> WideTestTable::makeTable(
+void WideTestTable::addNumericColumns(
+    std::vector<std::unique_ptr<cudf::column>>& columns,
     rmm::cuda_stream_view stream) {
-  std::vector<std::unique_ptr<cudf::column>> columns;
-
-  // Numeric columns
   columns.push_back(makeNumericColumn(int8Data_, stream));
   columns.push_back(makeNumericColumn(int16Data_, stream));
   columns.push_back(makeNumericColumn(int32Data_, stream));
@@ -424,32 +414,21 @@ std::unique_ptr<cudf::table> WideTestTable::makeTable(
   columns.push_back(makeNumericColumn(float32Data_, stream));
   columns.push_back(makeNumericColumn(float64Data_, stream));
   columns.push_back(makeNumericColumn(boolData_, stream));
+}
 
-  // String column
-  columns.push_back(makeStringsColumn(stringData_));
-
-  // Struct column
-  std::vector<std::unique_ptr<cudf::column>> structChildren;
-  structChildren.push_back(makeNumericColumn(structField1Data_, stream));
-  structChildren.push_back(makeNumericColumn(structField2Data_, stream));
-  columns.push_back(
-      makeStructColumn(std::move(structChildren), static_cast<cudf::size_type>(numRows_)));
-
+std::unique_ptr<cudf::table> WideTestTable::makeTable(
+    rmm::cuda_stream_view stream) {
+  std::vector<std::unique_ptr<cudf::column>> columns;
+  addNumericColumns(columns, stream);
   return std::make_unique<cudf::table>(std::move(columns));
 }
 
-bool WideTestTable::verifyTable(
+bool WideTestTable::verifyNumericColumns(
     const cudf::table_view& table,
     size_t startRow,
     size_t numRows,
     rmm::cuda_stream_view stream) {
-  if (table.num_columns() != 13) {
-    VLOG(0) << "WideTestTable::verifyTable: expected 13 columns, got "
-            << table.num_columns();
-    return false;
-  }
-
-  // Verify numeric columns
+  // Verify numeric columns (columns 0-10)
   auto rxInt8 = getColVector<int8_t>(table.column(0), numRows, stream);
   auto rxInt16 = getColVector<int16_t>(table.column(1), numRows, stream);
   auto rxInt32 = getColVector<int32_t>(table.column(2), numRows, stream);
@@ -461,19 +440,11 @@ bool WideTestTable::verifyTable(
   auto rxFloat32 = getColVector<float>(table.column(8), numRows, stream);
   auto rxFloat64 = getColVector<double>(table.column(9), numRows, stream);
   auto rxBool = getColVector<int8_t>(table.column(10), numRows, stream);
-  auto rxStrings = getStringCol(table.column(11), numRows, stream);
-
-  // Verify struct column children
-  cudf::structs_column_view structView{table.column(12)};
-  auto rxStructField1 =
-      getColVector<int64_t>(structView.child(0), numRows, stream);
-  auto rxStructField2 =
-      getColVector<double>(structView.child(1), numRows, stream);
 
   for (size_t i = 0; i < numRows; ++i) {
     size_t srcIdx = startRow + i;
     if (srcIdx >= numRows_) {
-      VLOG(0) << "WideTestTable::verifyTable: srcIdx " << srcIdx
+      VLOG(0) << "verifyNumericColumns: srcIdx " << srcIdx
               << " out of range " << numRows_;
       return false;
     }
@@ -486,11 +457,110 @@ bool WideTestTable::verifyTable(
         rxUint64[i] != uint64Data_[srcIdx] ||
         rxFloat32[i] != float32Data_[srcIdx] ||
         rxFloat64[i] != float64Data_[srcIdx] ||
-        rxBool[i] != boolData_[srcIdx] ||
-        rxStrings[i] != stringData_[srcIdx] ||
+        rxBool[i] != boolData_[srcIdx]) {
+      VLOG(0) << "verifyNumericColumns: data mismatch at row " << i;
+      return false;
+    }
+  }
+  return true;
+}
+
+bool WideTestTable::verifyTable(
+    const cudf::table_view& table,
+    size_t startRow,
+    size_t numRows,
+    rmm::cuda_stream_view stream) {
+  if (table.num_columns() != 11) {
+    VLOG(0) << "WideTestTable::verifyTable: expected 11 columns, got "
+            << table.num_columns();
+    return false;
+  }
+  return verifyNumericColumns(table, startRow, numRows, stream);
+}
+
+// ----- WideComplexTestTable implementation -----
+// Extends WideTestTable with STRING and STRUCT columns
+
+void WideComplexTestTable::initialize(size_t numRows) {
+  // First initialize the base class (numeric columns)
+  WideTestTable::initialize(numRows);
+
+  VLOG(3) << "+ WideComplexTestTable::initialize (adding complex columns)";
+
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<int64_t> intDist(-1000000, 1000000);
+  std::uniform_real_distribution<double> doubleDist(-1000.0, 1000.0);
+  std::uniform_int_distribution<> strLenDist(1, 20);
+
+  stringData_.resize(numRows);
+  structField1Data_.resize(numRows);
+  structField2Data_.resize(numRows);
+
+  for (size_t i = 0; i < numRows; ++i) {
+    int64_t randInt = intDist(gen);
+    double randDouble = doubleDist(gen);
+
+    stringData_[i] = genRandomStr(strLenDist(gen));
+    structField1Data_[i] = randInt * 2;
+    structField2Data_[i] = randDouble * 2.0;
+  }
+
+  VLOG(3) << "- WideComplexTestTable::initialize";
+}
+
+std::unique_ptr<cudf::table> WideComplexTestTable::makeTable(
+    rmm::cuda_stream_view stream) {
+  std::vector<std::unique_ptr<cudf::column>> columns;
+
+  // Add numeric columns from base class
+  addNumericColumns(columns, stream);
+
+  // Add string column
+  columns.push_back(makeStringsColumn(stringData_));
+
+  // Add struct column
+  std::vector<std::unique_ptr<cudf::column>> structChildren;
+  structChildren.push_back(makeNumericColumn(structField1Data_, stream));
+  structChildren.push_back(makeNumericColumn(structField2Data_, stream));
+  columns.push_back(
+      makeStructColumn(std::move(structChildren), static_cast<cudf::size_type>(numRows_)));
+
+  return std::make_unique<cudf::table>(std::move(columns));
+}
+
+bool WideComplexTestTable::verifyTable(
+    const cudf::table_view& table,
+    size_t startRow,
+    size_t numRows,
+    rmm::cuda_stream_view stream) {
+  if (table.num_columns() != 13) {
+    VLOG(0) << "WideComplexTestTable::verifyTable: expected 13 columns, got "
+            << table.num_columns();
+    return false;
+  }
+
+  // First verify numeric columns using base class helper
+  if (!verifyNumericColumns(table, startRow, numRows, stream)) {
+    return false;
+  }
+
+  // Verify string column (column 11)
+  auto rxStrings = getStringCol(table.column(11), numRows, stream);
+
+  // Verify struct column children (column 12)
+  cudf::structs_column_view structView{table.column(12)};
+  auto rxStructField1 =
+      getColVector<int64_t>(structView.child(0), numRows, stream);
+  auto rxStructField2 =
+      getColVector<double>(structView.child(1), numRows, stream);
+
+  for (size_t i = 0; i < numRows; ++i) {
+    size_t srcIdx = startRow + i;
+    if (rxStrings[i] != stringData_[srcIdx] ||
         rxStructField1[i] != structField1Data_[srcIdx] ||
         rxStructField2[i] != structField2Data_[srcIdx]) {
-      VLOG(0) << "WideTestTable::verifyTable: data mismatch at row " << i;
+      VLOG(0) << "WideComplexTestTable::verifyTable: complex column mismatch at row " << i;
       return false;
     }
   }
