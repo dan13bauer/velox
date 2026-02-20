@@ -2080,11 +2080,19 @@ using GroupIdNodePtr = std::shared_ptr<const GroupIdNode>;
 
 class ExchangeNode : public PlanNode {
  public:
+  enum class TransportType { kHttp, kUcx };
+
+  VELOX_DECLARE_EMBEDDED_ENUM_NAME(TransportType)
+
   ExchangeNode(
       const PlanNodeId& id,
       RowTypePtr type,
-      VectorSerde::Kind serdeKind)
-      : PlanNode(id), outputType_(type), serdeKind_(serdeKind) {}
+      VectorSerde::Kind serdeKind,
+      TransportType transportType = TransportType::kHttp)
+      : PlanNode(id),
+        outputType_(type),
+        serdeKind_(serdeKind),
+        transportType_(transportType) {}
 
   class Builder {
    public:
@@ -2094,6 +2102,7 @@ class ExchangeNode : public PlanNode {
       id_ = other.id();
       outputType_ = other.outputType();
       serdeKind_ = other.serdeKind();
+      transportType_ = other.transportType();
     }
 
     Builder& id(PlanNodeId id) {
@@ -2111,6 +2120,11 @@ class ExchangeNode : public PlanNode {
       return *this;
     }
 
+    Builder& transportType(TransportType transportType) {
+      transportType_ = transportType;
+      return *this;
+    }
+
     std::shared_ptr<ExchangeNode> build() const {
       VELOX_USER_CHECK(id_.has_value(), "ExchangeNode id is not set");
       VELOX_USER_CHECK(
@@ -2119,13 +2133,17 @@ class ExchangeNode : public PlanNode {
           serdeKind_.has_value(), "ExchangeNode serdeKind is not set");
 
       return std::make_shared<ExchangeNode>(
-          id_.value(), outputType_.value(), serdeKind_.value());
+          id_.value(),
+          outputType_.value(),
+          serdeKind_.value(),
+          transportType_.value_or(TransportType::kHttp));
     }
 
    private:
     std::optional<PlanNodeId> id_;
     std::optional<RowTypePtr> outputType_;
     std::optional<VectorSerde::Kind> serdeKind_;
+    std::optional<TransportType> transportType_;
   };
 
   const RowTypePtr& outputType() const override {
@@ -2153,6 +2171,10 @@ class ExchangeNode : public PlanNode {
     return serdeKind_;
   }
 
+  TransportType transportType() const {
+    return transportType_;
+  }
+
   folly::dynamic serialize() const override;
 
   static PlanNodePtr create(const folly::dynamic& obj, void* context);
@@ -2162,6 +2184,7 @@ class ExchangeNode : public PlanNode {
 
   const RowTypePtr outputType_;
   const VectorSerde::Kind serdeKind_;
+  const TransportType transportType_;
 };
 
 using ExchangeNodePtr = std::shared_ptr<const ExchangeNode>;
@@ -2173,7 +2196,8 @@ class MergeExchangeNode : public ExchangeNode {
       const RowTypePtr& type,
       const std::vector<FieldAccessTypedExprPtr>& sortingKeys,
       const std::vector<SortOrder>& sortingOrders,
-      VectorSerde::Kind serdeKind);
+      VectorSerde::Kind serdeKind,
+      TransportType transportType = TransportType::kHttp);
 
   class Builder {
    public:
@@ -2185,6 +2209,7 @@ class MergeExchangeNode : public ExchangeNode {
       sortingKeys_ = other.sortingKeys();
       sortingOrders_ = other.sortingOrders();
       serdeKind_ = other.serdeKind();
+      transportType_ = other.transportType();
     }
 
     Builder& id(PlanNodeId id) {
@@ -2212,6 +2237,11 @@ class MergeExchangeNode : public ExchangeNode {
       return *this;
     }
 
+    Builder& transportType(TransportType transportType) {
+      transportType_ = transportType;
+      return *this;
+    }
+
     std::shared_ptr<MergeExchangeNode> build() const {
       VELOX_USER_CHECK(id_.has_value(), "MergeExchangeNode id is not set");
       VELOX_USER_CHECK(
@@ -2229,7 +2259,8 @@ class MergeExchangeNode : public ExchangeNode {
           outputType_.value(),
           sortingKeys_.value(),
           sortingOrders_.value(),
-          serdeKind_.value());
+          serdeKind_.value(),
+          transportType_.value_or(TransportType::kHttp));
     }
 
    private:
@@ -2238,6 +2269,7 @@ class MergeExchangeNode : public ExchangeNode {
     std::optional<std::vector<FieldAccessTypedExprPtr>> sortingKeys_;
     std::optional<std::vector<SortOrder>> sortingOrders_;
     std::optional<VectorSerde::Kind> serdeKind_;
+    std::optional<TransportType> transportType_;
   };
 
   const std::vector<FieldAccessTypedExprPtr>& sortingKeys() const {
@@ -2607,6 +2639,10 @@ class PartitionedOutputNode : public PlanNode {
     kArbitrary,
   };
 
+  enum class TransportType { kHttp, kUcx };
+
+  VELOX_DECLARE_EMBEDDED_ENUM_NAME(TransportType)
+
   VELOX_DECLARE_EMBEDDED_ENUM_NAME(Kind)
 
   PartitionedOutputNode(
@@ -2619,27 +2655,29 @@ class PartitionedOutputNode : public PlanNode {
       RowTypePtr outputType,
       VectorSerde::Kind serdeKind,
       PlanNodePtr source,
-      bool rootFragment = false);
+      TransportType transportType = TransportType::kHttp);
 
   static std::shared_ptr<PartitionedOutputNode> broadcast(
       const PlanNodeId& id,
       int numPartitions,
       RowTypePtr outputType,
       VectorSerde::Kind serdeKind,
-      PlanNodePtr source);
+      PlanNodePtr source,
+      TransportType transportType = TransportType::kHttp);
 
   static std::shared_ptr<PartitionedOutputNode> arbitrary(
       const PlanNodeId& id,
       RowTypePtr outputType,
       VectorSerde::Kind serdeKind,
-      PlanNodePtr source);
+      PlanNodePtr source,
+      TransportType transportType = TransportType::kHttp);
 
   static std::shared_ptr<PartitionedOutputNode> single(
       const PlanNodeId& id,
       RowTypePtr outputType,
       VectorSerde::Kind VectorSerde,
       PlanNodePtr source,
-      bool rootFragment = false);
+      TransportType transportType = TransportType::kHttp);
 
   class Builder {
    public:
@@ -2654,6 +2692,7 @@ class PartitionedOutputNode : public PlanNode {
       partitionFunctionSpec_ = other.partitionFunctionSpecPtr();
       outputType_ = other.outputType();
       serdeKind_ = other.serdeKind();
+      transportType_ = other.transportType();
       VELOX_CHECK_EQ(other.sources().size(), 1);
       source_ = other.sources()[0];
     }
@@ -2703,6 +2742,11 @@ class PartitionedOutputNode : public PlanNode {
       return *this;
     }
 
+    Builder& transportType(TransportType transportType) {
+      transportType_ = transportType;
+      return *this;
+    }
+
     std::shared_ptr<PartitionedOutputNode> build() const {
       VELOX_USER_CHECK(id_.has_value(), "PartitionedOutputNode id is not set");
       VELOX_USER_CHECK(
@@ -2735,7 +2779,8 @@ class PartitionedOutputNode : public PlanNode {
           partitionFunctionSpec_.value(),
           outputType_.value(),
           serdeKind_.value(),
-          source_.value());
+          source_.value(),
+          transportType_.value_or(TransportType::kHttp));
     }
 
    private:
@@ -2748,14 +2793,15 @@ class PartitionedOutputNode : public PlanNode {
     std::optional<RowTypePtr> outputType_;
     std::optional<VectorSerde::Kind> serdeKind_;
     std::optional<PlanNodePtr> source_;
+    std::optional<TransportType> transportType_;
   };
 
   const RowTypePtr& outputType() const override {
     return outputType_;
   }
 
-  const bool isRootFragment() const {
-    return rootFragment_;
+  TransportType transportType() const {
+    return transportType_;
   }
 
   const std::vector<PlanNodePtr>& sources() const override {
@@ -2833,7 +2879,7 @@ class PartitionedOutputNode : public PlanNode {
   const PartitionFunctionSpecPtr partitionFunctionSpec_;
   const VectorSerde::Kind serdeKind_;
   const RowTypePtr outputType_;
-  const bool rootFragment_;
+  const TransportType transportType_;
 };
 
 using PartitionedOutputNodePtr = std::shared_ptr<const PartitionedOutputNode>;
