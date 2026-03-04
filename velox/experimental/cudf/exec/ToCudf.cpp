@@ -16,7 +16,6 @@
 
 #include "velox/experimental/cudf-exchange/CudfExchangeClient.h"
 #include "velox/experimental/cudf-exchange/CudfPartitionedOutput.h"
-#include "velox/experimental/cudf-exchange/ExchangeClientFacade.h"
 #include "velox/experimental/cudf/CudfConfig.h"
 #include "velox/experimental/cudf/connectors/hive/CudfHiveConnector.h"
 #include "velox/experimental/cudf/connectors/hive/CudfHiveDataSource.h"
@@ -435,7 +434,6 @@ void CudfConfig::initialize(
   if (config.find(kCudfExchangeLogLevel) != config.end()) {
     exchangeLogLevel = folly::to<int32_t>(config[kCudfExchangeLogLevel]);
   }
-
 }
 
 } // namespace facebook::velox::cudf_velox
