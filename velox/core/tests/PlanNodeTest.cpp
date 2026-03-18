@@ -586,6 +586,103 @@ TEST_F(PlanNodeTest, aggregationNodeNoGroupsSpanBatches) {
         "-- Aggregation[agg][SINGLE [c0] sum := sum()] -> c0:BIGINT, sum:BIGINT\n");
   }
 }
+TEST_F(PlanNodeTest, exchangeNodeTransportTypeSerialization) {
+  std::string serdeKind = "Presto";
+  // Round-trip with kUcx transport.
+  {
+    auto node = std::make_shared<ExchangeNode>(
+        "exchange1", rowType_, serdeKind, ExchangeNode::TransportType::kUcx);
+    auto serialized = node->serialize();
+    ASSERT_EQ(serialized["transportType"].asString(), "UCX");
+    auto deserialized = std::dynamic_pointer_cast<const ExchangeNode>(
+        ExchangeNode::create(serialized, nullptr));
+    ASSERT_EQ(deserialized->transportType(), ExchangeNode::TransportType::kUcx);
+  }
+
+  // Round-trip with kHttp transport.
+  {
+    auto node = std::make_shared<ExchangeNode>(
+        "exchange2", rowType_, serdeKind, ExchangeNode::TransportType::kHttp);
+    auto serialized = node->serialize();
+    ASSERT_EQ(serialized["transportType"].asString(), "HTTP");
+    auto deserialized = std::dynamic_pointer_cast<const ExchangeNode>(
+        ExchangeNode::create(serialized, nullptr));
+    ASSERT_EQ(
+        deserialized->transportType(), ExchangeNode::TransportType::kHttp);
+  }
+
+  // Backward compatibility: missing transportType field defaults to kHttp.
+  {
+    auto node = std::make_shared<ExchangeNode>(
+        "exchange3", rowType_, serdeKind, ExchangeNode::TransportType::kUcx);
+    auto serialized = node->serialize();
+    serialized.erase("transportType");
+    auto deserialized = std::dynamic_pointer_cast<const ExchangeNode>(
+        ExchangeNode::create(serialized, nullptr));
+    ASSERT_EQ(
+        deserialized->transportType(), ExchangeNode::TransportType::kHttp);
+  }
+}
+
+TEST_F(PlanNodeTest, partitionedOutputNodeTransportTypeSerialization) {
+  Type::registerSerDe();
+  core::PlanNode::registerSerDe();
+
+  auto source = std::make_shared<ValuesNode>("source", rowData_);
+  std::string serdeKind = "Presto";
+
+  // Round-trip with kUcx transport.
+  {
+    auto node = PartitionedOutputNode::single(
+        "po1",
+        rowType_,
+        serdeKind,
+        source,
+        PartitionedOutputNode::TransportType::kUcx);
+    auto serialized = node->serialize();
+    ASSERT_EQ(serialized["transportType"].asString(), "UCX");
+    auto deserialized = std::dynamic_pointer_cast<const PartitionedOutputNode>(
+        PartitionedOutputNode::create(serialized, pool_.get()));
+    ASSERT_EQ(
+        deserialized->transportType(),
+        PartitionedOutputNode::TransportType::kUcx);
+  }
+
+  // Round-trip with kHttp transport.
+  {
+    auto node = PartitionedOutputNode::single(
+        "po2",
+        rowType_,
+        serdeKind,
+        source,
+        PartitionedOutputNode::TransportType::kHttp);
+    auto serialized = node->serialize();
+    ASSERT_EQ(serialized["transportType"].asString(), "HTTP");
+    auto deserialized = std::dynamic_pointer_cast<const PartitionedOutputNode>(
+        PartitionedOutputNode::create(serialized, pool_.get()));
+    ASSERT_EQ(
+        deserialized->transportType(),
+        PartitionedOutputNode::TransportType::kHttp);
+  }
+
+  // Backward compatibility: missing transportType field defaults to kHttp.
+  {
+    auto node = PartitionedOutputNode::single(
+        "po3",
+        rowType_,
+        serdeKind,
+        source,
+        PartitionedOutputNode::TransportType::kUcx);
+    auto serialized = node->serialize();
+    serialized.erase("transportType");
+    auto deserialized = std::dynamic_pointer_cast<const PartitionedOutputNode>(
+        PartitionedOutputNode::create(serialized, pool_.get()));
+    ASSERT_EQ(
+        deserialized->transportType(),
+        PartitionedOutputNode::TransportType::kHttp);
+  }
+}
+
 TEST_F(PlanNodeTest, rpcNodeSerdePerRowMode) {
   Type::registerSerDe();
   core::PlanNode::registerSerDe();
