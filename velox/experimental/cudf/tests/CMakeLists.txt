@@ -87,6 +87,12 @@ velox_add_cudf_test(
 )
 
 velox_add_cudf_test(
+  NAME velox_cudf_exchange_adapter_selection_test
+  SOURCES Main.cpp ExchangeAdapterSelectionTest.cpp
+  LIBS ${CUDF_TEST_DEFAULT_LIBS} velox_ucx_exchange velox_vector_fuzzer
+)
+
+velox_add_cudf_test(
   NAME velox_cudf_expression_selection_test
   SOURCES Main.cpp ExpressionEvaluatorSelectionTest.cpp
   LIBS ${CUDF_TEST_DEFAULT_LIBS} velox_functions_spark
