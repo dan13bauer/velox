@@ -48,19 +48,6 @@ using facebook::velox::common::testutil::TestValue;
 namespace facebook::velox::exec {
 namespace {
 
-std::vector<std::pair<std::string, std::weak_ptr<IOutputBufferManager>>>
-toWeakPairs(
-    std::vector<std::pair<std::string, std::shared_ptr<IOutputBufferManager>>>
-        strong) {
-  std::vector<std::pair<std::string, std::weak_ptr<IOutputBufferManager>>>
-      result;
-  result.reserve(strong.size());
-  for (auto& [id, ptr] : strong) {
-    result.emplace_back(std::move(id), std::move(ptr));
-  }
-  return result;
-}
-
 std::string_view registryNameForTransport(core::TransportType type) {
   switch (type) {
     case core::TransportType::kHttp:
@@ -462,14 +449,7 @@ Task::Task(
       traceCtx_(maybeMakeTraceCtx()),
       consumerSupplier_(std::move(consumerSupplier)),
       onError_(std::move(onError)),
-      splitsStates_(buildSplitStates(planFragment_.planNode)),
-      bufferManagers_(
-          toWeakPairs(OutputBufferManagerRegistry::getAll(*queryCtx_))) {
-  if (bufferManagers_.empty()) {
-    bufferManagers_.emplace_back(
-        std::string(OutputBufferManagerRegistry::kDefaultId),
-        OutputBufferManager::getInstanceRef());
-  }
+      splitsStates_(buildSplitStates(planFragment_.planNode)) {
   ++numCreatedTasks_;
   // NOTE: the executor must not be folly::InlineLikeExecutor for parallel
   // execution.
@@ -1345,18 +1325,17 @@ void Task::initializePartitionOutput() {
     const auto transportType =
         queryCtx_->outputTransportType(partitionedOutputNode->id());
     const auto targetName = registryNameForTransport(transportType);
-    for (auto& [name, weakMgr] : bufferManagers_) {
-      if (name != targetName) {
-        continue;
-      }
-      auto mgr = weakMgr.lock();
-      VELOX_CHECK_NOT_NULL(mgr, "OutputBufferManager was already destructed");
-      mgr->initializeTask(
-          shared_from_this(),
-          partitionedOutputNode->kind(),
-          partitionedOutputNode->numPartitions(),
-          numOutputDrivers);
+    auto mgr = OutputBufferManagerRegistry::tryGet(
+        *queryCtx_, std::string(targetName));
+    if (!mgr) {
+      mgr = OutputBufferManager::getInstanceRef();
     }
+    bufferManager_ = mgr;
+    mgr->initializeTask(
+        shared_from_this(),
+        partitionedOutputNode->kind(),
+        partitionedOutputNode->numPartitions(),
+        numOutputDrivers);
   }
 }
 
@@ -2157,12 +2136,9 @@ bool Task::checkNoMoreSplitGroupsLocked() {
     numTotalDrivers_ = seenSplitGroups_.size() * numDriversPerSplitGroup_ +
         numDriversUngrouped_;
     if (groupedPartitionedOutput_) {
-      for (auto& [_, weakMgr] : bufferManagers_) {
-        if (auto mgr = weakMgr.lock()) {
-          mgr->updateNumDrivers(
-              taskId(),
-              numDriversInPartitionedOutput_ * seenSplitGroups_.size());
-        }
+      if (auto mgr = bufferManager_.lock()) {
+        mgr->updateNumDrivers(
+            taskId(), numDriversInPartitionedOutput_ * seenSplitGroups_.size());
       }
     }
 
@@ -2359,14 +2335,10 @@ bool Task::updateOutputBuffers(int numBuffers, bool noMoreBuffers) {
       noMoreOutputBuffers_ = true;
     }
   }
-  bool result = true;
-  for (auto& [_, weakMgr] : bufferManagers_) {
-    if (auto mgr = weakMgr.lock()) {
-      result = mgr->updateOutputBuffers(taskId_, numBuffers, noMoreBuffers) &&
-          result;
-    }
+  if (auto mgr = bufferManager_.lock()) {
+    return mgr->updateOutputBuffers(taskId_, numBuffers, noMoreBuffers);
   }
-  return result;
+  return false;
 }
 
 int Task::getOutputPipelineId() const {
@@ -2859,27 +2831,14 @@ ContinueFuture Task::terminate(TaskState terminalState) {
 
 void Task::maybeRemoveFromOutputBufferManager() {
   if (hasPartitionedOutput()) {
-    {
-      std::lock_guard<std::timed_mutex> l(mutex_);
-      if (!taskStats_.outputBufferStats.has_value()) {
-        for (auto& [_, weakMgr] : bufferManagers_) {
-          if (auto mgr = weakMgr.lock()) {
-            auto s = mgr->stats(taskId_);
-            if (s.has_value()) {
-              if (taskStats_.outputBufferStats.has_value()) {
-                taskStats_.outputBufferStats->add(s.value());
-              } else {
-                taskStats_.outputBufferStats = s;
-              }
-            }
-          }
+    if (auto mgr = bufferManager_.lock()) {
+      {
+        std::lock_guard<std::timed_mutex> l(mutex_);
+        if (!taskStats_.outputBufferStats.has_value()) {
+          taskStats_.outputBufferStats = mgr->stats(taskId_);
         }
       }
-    }
-    for (auto& [_, weakMgr] : bufferManagers_) {
-      if (auto mgr = weakMgr.lock()) {
-        mgr->removeTask(taskId_);
-      }
+      mgr->removeTask(taskId_);
     }
   }
 }
@@ -3038,24 +2997,11 @@ TaskStats Task::taskStats() const {
     }
   }
 
-  double maxUtilization = 0.0;
-  bool anyOverutilized = false;
-  for (auto& [_, weakMgr] : bufferManagers_) {
-    if (auto mgr = weakMgr.lock()) {
-      maxUtilization = std::max(maxUtilization, mgr->getUtilization(taskId_));
-      anyOverutilized = anyOverutilized || mgr->isOverutilized(taskId_);
-      auto s = mgr->stats(taskId_);
-      if (s.has_value()) {
-        if (taskStats.outputBufferStats.has_value()) {
-          taskStats.outputBufferStats->add(s.value());
-        } else {
-          taskStats.outputBufferStats = s;
-        }
-      }
-    }
+  if (auto mgr = bufferManager_.lock()) {
+    taskStats.outputBufferUtilization = mgr->getUtilization(taskId_);
+    taskStats.outputBufferOverutilized = mgr->isOverutilized(taskId_);
+    taskStats.outputBufferStats = mgr->stats(taskId_);
   }
-  taskStats.outputBufferUtilization = maxUtilization;
-  taskStats.outputBufferOverutilized = anyOverutilized;
   return taskStats;
 }
 
@@ -3314,17 +3260,11 @@ folly::dynamic Task::toJson() const {
   }
   obj["drivers"] = drivers;
 
-  folly::dynamic bufferManagers = folly::dynamic::object;
-  for (auto& [id, weakMgr] : bufferManagers_) {
-    if (auto mgr = weakMgr.lock()) {
-      auto s = mgr->toString(taskId_);
-      if (!s.empty()) {
-        bufferManagers[id] = s;
-      }
+  if (auto mgr = bufferManager_.lock()) {
+    auto s = mgr->toString(taskId_);
+    if (!s.empty()) {
+      obj["outputBuffer"] = s;
     }
-  }
-  if (!bufferManagers.empty()) {
-    obj["bufferManagers"] = bufferManagers;
   }
 
   folly::dynamic exchangeClients = folly::dynamic::object;
