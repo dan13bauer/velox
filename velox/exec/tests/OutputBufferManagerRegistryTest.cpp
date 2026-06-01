@@ -20,6 +20,7 @@
 #include <gtest/gtest.h>
 
 #include "velox/common/memory/Memory.h"
+#include "velox/core/PlanFragment.h"
 #include "velox/core/QueryCtx.h"
 #include "velox/exec/IOutputBufferManager.h"
 #include "velox/exec/OutputBufferManager.h"
@@ -109,8 +110,8 @@ TEST(OutputBufferManagerRegistryTest, selfRegistration) {
   // registry, even if a prior test cleared it via unregisterAll().
   auto instance = OutputBufferManager::getInstanceRef();
 
-  auto defaultMgr = OutputBufferManagerRegistry::tryGet(
-      std::string(OutputBufferManagerRegistry::kDefaultId));
+  auto defaultMgr =
+      OutputBufferManagerRegistry::tryGet(core::TransportKind::kHttp);
   EXPECT_NE(defaultMgr, nullptr);
 
   auto all = OutputBufferManagerRegistry::getAll();
@@ -118,7 +119,7 @@ TEST(OutputBufferManagerRegistryTest, selfRegistration) {
 
   bool foundDefault = false;
   for (auto& [key, _] : all) {
-    if (key == OutputBufferManagerRegistry::kDefaultId) {
+    if (key == core::TransportKind::kHttp) {
       foundDefault = true;
     }
   }

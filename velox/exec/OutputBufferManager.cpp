@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 #include "velox/exec/OutputBufferManager.h"
-#include "velox/exec/OutputBufferManagerRegistry.h"
+#include "velox/core/PlanFragment.h"
 #include "velox/exec/OutputBufferManagerRegistryInternal.h"
 #include "velox/exec/Task.h"
 
@@ -31,12 +31,9 @@ const std::shared_ptr<OutputBufferManager>& OutputBufferManager::getInstanceRef(
     const Options& options) {
   static const std::shared_ptr<OutputBufferManager> instance =
       std::make_shared<OutputBufferManager>(options);
-  if (!outputBufferManagers().find(
-          std::string(OutputBufferManagerRegistry::kDefaultId))) {
+  if (!outputBufferManagers().find(core::TransportKind::kHttp)) {
     outputBufferManagers().insert(
-        std::string(OutputBufferManagerRegistry::kDefaultId),
-        instance,
-        /*overwrite=*/true);
+        core::TransportKind::kHttp, instance, /*overwrite=*/true);
   }
   return instance;
 }

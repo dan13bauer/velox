@@ -48,16 +48,6 @@ using facebook::velox::common::testutil::TestValue;
 namespace facebook::velox::exec {
 namespace {
 
-std::string_view registryNameForTransport(core::TransportType type) {
-  switch (type) {
-    case core::TransportType::kHttp:
-      return OutputBufferManagerRegistry::kDefaultId;
-    case core::TransportType::kUcx:
-      return "ucx";
-  }
-  VELOX_UNREACHABLE();
-}
-
 // RAII helper class to satisfy given promises and notify listeners of an event
 // connected to the promises outside of the mutex that guards the promises.
 // Inactive on creation. Must be activated explicitly by calling 'activate'.
@@ -1323,10 +1313,8 @@ void Task::initializePartitionOutput() {
     VELOX_CHECK(hasPartitionedOutput());
     VELOX_CHECK_GT(numOutputDrivers, 0);
     const auto transportType =
-        queryCtx_->outputTransportType(partitionedOutputNode->id());
-    const auto targetName = registryNameForTransport(transportType);
-    auto mgr = OutputBufferManagerRegistry::tryGet(
-        *queryCtx_, std::string(targetName));
+        planFragment_.outputTransportType(partitionedOutputNode->id());
+    auto mgr = OutputBufferManagerRegistry::tryGet(*queryCtx_, transportType);
     if (!mgr) {
       mgr = OutputBufferManager::getInstanceRef();
     }
