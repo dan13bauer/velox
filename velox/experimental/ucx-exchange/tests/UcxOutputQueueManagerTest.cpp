@@ -54,7 +54,7 @@ class UcxOutputQueueManagerTest : public testing::Test {
       core::PartitionedOutputNode::Kind kind =
           core::PartitionedOutputNode::Kind::kPartitioned) {
     if (cleanup) {
-      queueManager_->removeTask(taskId);
+      queueManager_->removeTask(std::string(taskId));
     }
 
     auto task = createSourceTask(taskId, pool_, UcxTestData::kTestRowType);
