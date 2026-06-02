@@ -31,9 +31,9 @@ const std::shared_ptr<OutputBufferManager>& OutputBufferManager::getInstanceRef(
     const Options& options) {
   static const std::shared_ptr<OutputBufferManager> instance =
       std::make_shared<OutputBufferManager>(options);
-  if (!outputBufferManagers().find(core::TransportKind::kHttp)) {
-    outputBufferManagers().insert(
-        core::TransportKind::kHttp, instance, /*overwrite=*/true);
+  const std::string httpKind{core::TransportKind::kHttp};
+  if (!outputBufferManagers().find(httpKind)) {
+    outputBufferManagers().insert(httpKind, instance, /*overwrite=*/true);
   }
   return instance;
 }

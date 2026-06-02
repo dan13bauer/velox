@@ -441,6 +441,9 @@ Task::Task(
       onError_(std::move(onError)),
       splitsStates_(buildSplitStates(planFragment_.planNode)) {
   ++numCreatedTasks_;
+  // Validate that any per-node transport type annotations refer to the right
+  // kind of plan node before they are used to select exchange transports.
+  planFragment_.validateTransportTypes();
   // NOTE: the executor must not be folly::InlineLikeExecutor for parallel
   // execution.
   if (mode_ == Task::ExecutionMode::kParallel) {
@@ -1312,8 +1315,8 @@ void Task::initializePartitionOutput() {
   if (partitionedOutputNode != nullptr) {
     VELOX_CHECK(hasPartitionedOutput());
     VELOX_CHECK_GT(numOutputDrivers, 0);
-    const auto transportType =
-        planFragment_.outputTransportType(partitionedOutputNode->id());
+    const std::string transportType{
+        planFragment_.outputTransportType(partitionedOutputNode->id())};
     auto mgr = OutputBufferManagerRegistry::tryGet(*queryCtx_, transportType);
     if (!mgr) {
       mgr = OutputBufferManager::getInstanceRef();

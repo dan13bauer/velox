@@ -55,14 +55,15 @@ class ExchangeAdapterSelectionTest : public OperatorTestBase {
   void setTransportTypes(
       core::PlanFragment& fragment,
       const std::string& inputNodeId = "",
-      const std::string& inputTransport = TransportKind::kHttp,
+      std::string_view inputTransport = TransportKind::kHttp,
       const std::string& outputNodeId = "",
-      const std::string& outputTransport = TransportKind::kHttp) {
+      std::string_view outputTransport = TransportKind::kHttp) {
     if (!inputNodeId.empty()) {
-      fragment.inputTransportTypes[inputNodeId] = inputTransport;
+      fragment.inputTransportTypes[inputNodeId] = std::string{inputTransport};
     }
     if (!outputNodeId.empty()) {
-      fragment.outputTransportTypes[outputNodeId] = outputTransport;
+      fragment.outputTransportTypes[outputNodeId] =
+          std::string{outputTransport};
     }
   }
 

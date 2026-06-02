@@ -110,8 +110,8 @@ TEST(OutputBufferManagerRegistryTest, selfRegistration) {
   // registry, even if a prior test cleared it via unregisterAll().
   auto instance = OutputBufferManager::getInstanceRef();
 
-  auto defaultMgr =
-      OutputBufferManagerRegistry::tryGet(core::TransportKind::kHttp);
+  auto defaultMgr = OutputBufferManagerRegistry::tryGet(
+      std::string{core::TransportKind::kHttp});
   EXPECT_NE(defaultMgr, nullptr);
 
   auto all = OutputBufferManagerRegistry::getAll();

@@ -1231,7 +1231,7 @@ void registerAllOperatorAdapters() {
   // Register UcxOutputQueueManager with the output buffer manager registry so
   // Task.cpp dispatches initializeTask to it for UCX transport nodes.
   exec::OutputBufferManagerRegistry::global().insert(
-      core::TransportKind::kUcx,
+      std::string{core::TransportKind::kUcx},
       ucx_exchange::UcxOutputQueueManager::getInstanceRef(),
       true);
 
