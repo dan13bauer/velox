@@ -1315,8 +1315,11 @@ void Task::initializePartitionOutput() {
   if (partitionedOutputNode != nullptr) {
     VELOX_CHECK(hasPartitionedOutput());
     VELOX_CHECK_GT(numOutputDrivers, 0);
-    const std::string transportType{
-        planFragment_.outputTransportType(partitionedOutputNode->id())};
+    const auto& outputTransportTypes = planFragment_.outputTransportTypes;
+    const auto it = outputTransportTypes.find(partitionedOutputNode->id());
+    const std::string transportType = it != outputTransportTypes.end()
+        ? it->second
+        : std::string{core::TransportKind::kHttp};
     auto mgr = OutputBufferManagerRegistry::tryGet(*queryCtx_, transportType);
     if (!mgr) {
       mgr = OutputBufferManager::getInstanceRef();

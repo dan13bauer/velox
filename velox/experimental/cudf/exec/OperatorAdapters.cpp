@@ -1023,6 +1023,20 @@ std::mutex& getUcxExchangeClientMapMutex() {
   return instance;
 }
 
+namespace {
+// Returns the transport type annotated for 'planNodeId' in 'transportTypes',
+// defaulting to TransportKind::kHttp when the node is not annotated.
+std::string_view transportTypeOf(
+    const folly::F14FastMap<core::PlanNodeId, std::string>& transportTypes,
+    const core::PlanNodeId& planNodeId) {
+  const auto it = transportTypes.find(planNodeId);
+  if (it != transportTypes.end()) {
+    return it->second;
+  }
+  return core::TransportKind::kHttp;
+}
+} // namespace
+
 /// ExchangeAdapter - Replaces with UcxExchange for UCX transport.
 class ExchangeAdapter : public OperatorAdapter {
  public:
@@ -1040,8 +1054,9 @@ class ExchangeAdapter : public OperatorAdapter {
     if (!CudfConfig::getInstance().exchange) {
       return false;
     }
-    return ctx->task->planFragment().inputTransportType(planNode->id()) ==
-        core::TransportKind::kUcx;
+    const auto transportType = transportTypeOf(
+        ctx->task->planFragment().inputTransportTypes, planNode->id());
+    return transportType == core::TransportKind::kUcx;
   }
 
   bool acceptsGpuInput() const override {
@@ -1097,8 +1112,9 @@ class ExchangeAdapter : public OperatorAdapter {
     if (!CudfConfig::getInstance().exchange) {
       return true;
     }
-    return ctx->task->planFragment().inputTransportType(planNode->id()) !=
-        core::TransportKind::kUcx;
+    const auto transportType = transportTypeOf(
+        ctx->task->planFragment().inputTransportTypes, planNode->id());
+    return transportType != core::TransportKind::kUcx;
   }
 };
 
@@ -1120,8 +1136,9 @@ class MergeExchangeAdapter : public OperatorAdapter {
     if (!CudfConfig::getInstance().exchange) {
       return false;
     }
-    return ctx->task->planFragment().inputTransportType(planNode->id()) ==
-        core::TransportKind::kUcx;
+    const auto transportType = transportTypeOf(
+        ctx->task->planFragment().inputTransportTypes, planNode->id());
+    return transportType == core::TransportKind::kUcx;
   }
 
   bool acceptsGpuInput() const override {
@@ -1156,8 +1173,9 @@ class MergeExchangeAdapter : public OperatorAdapter {
     if (!CudfConfig::getInstance().exchange) {
       return true;
     }
-    return ctx->task->planFragment().inputTransportType(planNode->id()) !=
-        core::TransportKind::kUcx;
+    const auto transportType = transportTypeOf(
+        ctx->task->planFragment().inputTransportTypes, planNode->id());
+    return transportType != core::TransportKind::kUcx;
   }
 };
 
@@ -1179,8 +1197,9 @@ class PartitionedOutputAdapter : public OperatorAdapter {
     if (!CudfConfig::getInstance().exchange) {
       return false;
     }
-    return ctx->task->planFragment().outputTransportType(planNode->id()) ==
-        core::TransportKind::kUcx;
+    const auto transportType = transportTypeOf(
+        ctx->task->planFragment().outputTransportTypes, planNode->id());
+    return transportType == core::TransportKind::kUcx;
   }
 
   bool acceptsGpuInput() const override {
@@ -1216,8 +1235,9 @@ class PartitionedOutputAdapter : public OperatorAdapter {
     if (!CudfConfig::getInstance().exchange) {
       return true;
     }
-    return ctx->task->planFragment().outputTransportType(planNode->id()) !=
-        core::TransportKind::kUcx;
+    const auto transportType = transportTypeOf(
+        ctx->task->planFragment().outputTransportTypes, planNode->id());
+    return transportType != core::TransportKind::kUcx;
   }
 };
 
