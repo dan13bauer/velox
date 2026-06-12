@@ -152,6 +152,11 @@ class SubfieldFilterAstTest : public OperatorTestBase {
             veloxExpected = filter.testBytes(sv.data(), sv.size());
             break;
           }
+          case TypeKind::TIMESTAMP: {
+            auto v = fieldVec->asFlatVector<Timestamp>()->valueAt(i);
+            veloxExpected = filter.testTimestamp(v);
+            break;
+          }
           default:
             veloxExpected = true;
         }
@@ -201,6 +206,89 @@ TEST_F(SubfieldFilterAstTest, DoubleRange) {
 
   // Execution validation
   auto vec = makeTestVector(rowType, 100);
+  testFilterExecution(rowType, columnName, *filter, vec, expr);
+}
+
+TEST_F(SubfieldFilterAstTest, TimestampRangeOpenEnded) {
+  const std::string columnName = "c0";
+  auto rowType = ROW({{columnName, TIMESTAMP()}});
+  // "c0 >= 2025-01-01" becomes a TimestampRange whose upper bound is the
+  // Timestamp::max() sentinel. This is the shape the Hive connector pushes
+  // down for the failing query, and the bound the converter must skip to avoid
+  // overflowing int64 ticks.
+  Timestamp lower(1735689600, 0); // 2025-01-01 00:00:00 UTC.
+  auto filter = std::make_unique<common::TimestampRange>(
+      lower, std::numeric_limits<Timestamp>::max(), /*nullAllowed*/ false);
+
+  // Spread values from 50 days before to 49 days after the bound.
+  std::vector<Timestamp> values;
+  values.reserve(100);
+  for (int i = 0; i < 100; ++i) {
+    values.emplace_back(1735689600 + (i - 50) * 86400, 0);
+  }
+  auto vec = makeRowVector({columnName}, {makeFlatVector<Timestamp>(values)});
+
+  common::Subfield subfield(columnName);
+  cudf::ast::tree tree;
+  std::vector<std::unique_ptr<cudf::scalar>> scalars;
+  const auto& expr =
+      createAstFromSubfieldFilter(subfield, *filter, tree, scalars, rowType);
+  ASSERT_GT(tree.size(), 0UL) << "No expressions created for test";
+  EXPECT_EQ(scalars.size(), 1UL) << "Open-ended range should emit one bound";
+
+  testFilterExecution(rowType, columnName, *filter, vec, expr);
+}
+
+TEST_F(SubfieldFilterAstTest, TimestampRangeBounded) {
+  const std::string columnName = "c0";
+  auto rowType = ROW({{columnName, TIMESTAMP()}});
+  Timestamp lower(1735689600, 0); // 2025-01-01 00:00:00 UTC.
+  Timestamp upper(1738368000, 0); // 2025-02-01 00:00:00 UTC.
+  auto filter = std::make_unique<common::TimestampRange>(
+      lower, upper, /*nullAllowed*/ false);
+
+  std::vector<Timestamp> values;
+  values.reserve(100);
+  for (int i = 0; i < 100; ++i) {
+    values.emplace_back(1735689600 + (i - 50) * 86400, 0);
+  }
+  auto vec = makeRowVector({columnName}, {makeFlatVector<Timestamp>(values)});
+
+  common::Subfield subfield(columnName);
+  cudf::ast::tree tree;
+  std::vector<std::unique_ptr<cudf::scalar>> scalars;
+  const auto& expr =
+      createAstFromSubfieldFilter(subfield, *filter, tree, scalars, rowType);
+  ASSERT_GT(tree.size(), 0UL) << "No expressions created for test";
+  EXPECT_EQ(scalars.size(), 2UL) << "Bounded range should emit two bounds";
+
+  testFilterExecution(rowType, columnName, *filter, vec, expr);
+}
+
+TEST_F(SubfieldFilterAstTest, TimestampRangeSingleValue) {
+  const std::string columnName = "c0";
+  auto rowType = ROW({{columnName, TIMESTAMP()}});
+  Timestamp value(1735689600, 0); // 2025-01-01 00:00:00 UTC.
+  auto filter = std::make_unique<common::TimestampRange>(
+      value, value, /*nullAllowed*/ false);
+
+  std::vector<Timestamp> values;
+  values.reserve(100);
+  for (int i = 0; i < 100; ++i) {
+    // Include the exact value at row 50 so the equality filter matches a row.
+    values.emplace_back(1735689600 + (i - 50) * 86400, 0);
+  }
+  auto vec = makeRowVector({columnName}, {makeFlatVector<Timestamp>(values)});
+
+  common::Subfield subfield(columnName);
+  cudf::ast::tree tree;
+  std::vector<std::unique_ptr<cudf::scalar>> scalars;
+  const auto& expr =
+      createAstFromSubfieldFilter(subfield, *filter, tree, scalars, rowType);
+  ASSERT_GT(tree.size(), 0UL) << "No expressions created for test";
+  EXPECT_EQ(scalars.size(), 1UL)
+      << "Single-value filter should emit one scalar";
+
   testFilterExecution(rowType, columnName, *filter, vec, expr);
 }
 

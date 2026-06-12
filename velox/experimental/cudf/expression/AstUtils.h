@@ -70,6 +70,28 @@ cudf::ast::literal makeLiteralFromScalar(
     VELOX_FAIL("Unsupported base type for literal");
   } else if (type->kind() == TypeKind::VARCHAR) {
     return cudf::ast::literal{*static_cast<cudf::string_scalar*>(&scalar)};
+  } else if constexpr (std::is_same_v<T, Timestamp>) {
+    // velox::Timestamp carries no resolution in its type, so pick the concrete
+    // cuDF timestamp_scalar subtype from the scalar's actual unit (set by
+    // makeScalarFromValue from CudfConfig::timestampUnit).
+    switch (scalar.type().id()) {
+      case cudf::type_id::TIMESTAMP_SECONDS:
+        return cudf::ast::literal{
+            *static_cast<cudf::timestamp_scalar<cudf::timestamp_s>*>(&scalar)};
+      case cudf::type_id::TIMESTAMP_MILLISECONDS:
+        return cudf::ast::literal{
+            *static_cast<cudf::timestamp_scalar<cudf::timestamp_ms>*>(&scalar)};
+      case cudf::type_id::TIMESTAMP_MICROSECONDS:
+        return cudf::ast::literal{
+            *static_cast<cudf::timestamp_scalar<cudf::timestamp_us>*>(&scalar)};
+      case cudf::type_id::TIMESTAMP_NANOSECONDS:
+        return cudf::ast::literal{
+            *static_cast<cudf::timestamp_scalar<cudf::timestamp_ns>*>(&scalar)};
+      default:
+        VELOX_FAIL(
+            "Unsupported cuDF timestamp unit for literal: {}",
+            static_cast<int32_t>(scalar.type().id()));
+    }
   } else {
     // TODO for non-numeric types too.
     VELOX_NYI(
@@ -104,23 +126,34 @@ std::unique_ptr<cudf::scalar> makeScalarFromValue(
   // cheap (one-time cost per scalar) and guarantees the memory is
   // available on every stream.
   if constexpr (std::is_same_v<T, Timestamp>) {
-    auto unit = CudfConfig::getInstance().timestampUnit;
-    if (unit == cudf::type_id::TIMESTAMP_MICROSECONDS) {
-      using CudfTimestampType = cudf::timestamp_us;
-      auto micros = isNull ? 0 : value.toMicros();
+    // Build a cuDF timestamp_scalar at the configured interop resolution
+    // (CudfConfig::timestampUnit) so the literal matches timestamp columns,
+    // which VeloxCudfInterop and the Parquet reader both produce at that unit.
+    // A null scalar carries a default Timestamp, so the tick conversion below
+    // yields 0 and validity is set from isNull.
+    const auto unit = CudfConfig::getInstance().timestampUnit;
+    auto makeTimestampScalar =
+        [&](auto cudfTimestampTag,
+            int64_t ticks) -> std::unique_ptr<cudf::scalar> {
+      using CudfTimestampType = decltype(cudfTimestampTag);
       auto scalar = std::make_unique<cudf::timestamp_scalar<CudfTimestampType>>(
-          CudfTimestampType{cudf::duration_us{micros}}, !isNull, stream, mr);
+          ticks, !isNull, stream, mr);
       stream.synchronize();
       return scalar;
-    } else if (unit == cudf::type_id::TIMESTAMP_NANOSECONDS) {
-      using CudfTimestampType = cudf::timestamp_ns;
-      auto nanos = isNull ? 0 : value.toNanos();
-      auto scalar = std::make_unique<cudf::timestamp_scalar<CudfTimestampType>>(
-          CudfTimestampType{cudf::duration_ns{nanos}}, !isNull, stream, mr);
-      stream.synchronize();
-      return scalar;
-    } else {
-      VELOX_FAIL("Unsupported timestamp unit: {}", static_cast<int32_t>(unit));
+    };
+    switch (unit) {
+      case cudf::type_id::TIMESTAMP_SECONDS:
+        return makeTimestampScalar(cudf::timestamp_s{}, value.getSeconds());
+      case cudf::type_id::TIMESTAMP_MILLISECONDS:
+        return makeTimestampScalar(cudf::timestamp_ms{}, value.toMillis());
+      case cudf::type_id::TIMESTAMP_MICROSECONDS:
+        return makeTimestampScalar(cudf::timestamp_us{}, value.toMicros());
+      case cudf::type_id::TIMESTAMP_NANOSECONDS:
+        return makeTimestampScalar(cudf::timestamp_ns{}, value.toNanos());
+      default:
+        VELOX_FAIL(
+            "Unsupported cuDF timestamp unit for scalar: {}",
+            static_cast<int32_t>(unit));
     }
   } else if constexpr (cudf::is_fixed_width<T>()) {
     if (type->isDecimal()) {
@@ -222,7 +255,9 @@ cudf::ast::literal makeScalarAndLiteral(
     bool isNull,
     std::vector<std::unique_ptr<cudf::scalar>>& scalars) {
   using T = typename TypeTraits<kind>::NativeType;
-  if constexpr (cudf::is_fixed_width<T>() || kind == TypeKind::VARCHAR) {
+  if constexpr (
+      cudf::is_fixed_width<T>() || kind == TypeKind::VARCHAR ||
+      kind == TypeKind::TIMESTAMP) {
     if (isNull) {
       auto scalar = makeScalarFromValue<T>(type, T{}, true);
       scalars.emplace_back(std::move(scalar));

@@ -333,6 +333,72 @@ std::reference_wrapper<const cudf::ast::expression> buildIntegerInListExpr(
   }
 }
 
+// Build a range expression for a TIMESTAMP column. Literal scalars are built at
+// the configured interop resolution (CudfConfig::timestampUnit) via
+// makeScalarAndLiteral, matching the unit at which both VeloxCudfInterop and
+// the Parquet reader produce timestamp columns. Deployments must align
+// cudf.timestamp_unit with the reader's parquet.reader.timestamp-type so the
+// literal and column units agree (cuDF AST compares raw ticks without unit
+// normalization).
+const cudf::ast::expression& buildTimestampRangeExpr(
+    const common::Filter& filter,
+    cudf::ast::tree& tree,
+    std::vector<std::unique_ptr<cudf::scalar>>& scalars,
+    const cudf::ast::expression& columnRef,
+    const TypePtr& columnType) {
+  using Op = cudf::ast::ast_operator;
+  using Operation = cudf::ast::operation;
+
+  auto* range = dynamic_cast<const common::TimestampRange*>(&filter);
+  VELOX_CHECK_NOT_NULL(range, "Filter is not a TimestampRange");
+
+  auto addLiteral =
+      [&](const Timestamp& value) -> const cudf::ast::expression& {
+    return tree.push(
+        makeScalarAndLiteral<TypeKind::TIMESTAMP>(
+            columnType, variant(value), scalars));
+  };
+
+  if (range->isSingleValue()) {
+    const auto& literal = addLiteral(range->lower());
+    return tree.push(Operation{Op::EQUAL, columnRef, literal});
+  }
+
+  // Skip sentinel bounds. greaterThanOrEqual/lessThanOrEqual translate an
+  // open-ended predicate (e.g. ts >= x) into a TimestampRange whose other
+  // bound is Timestamp::min()/max(). Those sentinels exceed the tick count an
+  // int64 can hold at sub-second resolution, so converting them would
+  // overflow; they are also semantic no-ops. Omit any bound that equals its
+  // sentinel.
+  const bool skipLower =
+      range->lower() == std::numeric_limits<Timestamp>::min();
+  const bool skipUpper =
+      range->upper() == std::numeric_limits<Timestamp>::max();
+
+  const cudf::ast::expression* lowerExpr = nullptr;
+  if (!skipLower) {
+    const auto& lowerLiteral = addLiteral(range->lower());
+    lowerExpr =
+        &tree.push(Operation{Op::GREATER_EQUAL, columnRef, lowerLiteral});
+  }
+  const cudf::ast::expression* upperExpr = nullptr;
+  if (!skipUpper) {
+    const auto& upperLiteral = addLiteral(range->upper());
+    upperExpr = &tree.push(Operation{Op::LESS_EQUAL, columnRef, upperLiteral});
+  }
+
+  if (lowerExpr && upperExpr) {
+    return tree.push(Operation{Op::NULL_LOGICAL_AND, *lowerExpr, *upperExpr});
+  } else if (lowerExpr) {
+    return *lowerExpr;
+  } else if (upperExpr) {
+    return *upperExpr;
+  }
+
+  // Both bounds are sentinels -> pass-through filter (matches everything).
+  return tree.push(Operation{Op::EQUAL, columnRef, columnRef});
+}
+
 } // namespace
 
 // Convert subfield filters to cudf AST
@@ -448,6 +514,12 @@ cudf::ast::expression const& createAstFromSubfieldFilter(
 
     case common::FilterKind::kBytesRange: {
       return createBytesRangeExpr(filter, tree, scalars, columnRef, stream, mr);
+    }
+
+    case common::FilterKind::kTimestampRange: {
+      auto const& columnType = inputRowSchema->childAt(columnIndex);
+      return buildTimestampRangeExpr(
+          filter, tree, scalars, columnRef, columnType);
     }
 
     case common::FilterKind::kBoolValue: {
