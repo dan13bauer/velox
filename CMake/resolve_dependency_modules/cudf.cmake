@@ -63,8 +63,8 @@ set(
 set(VELOX_cudf_SOURCE_URL "https://github.com/rapidsai/cudf/archive/${VELOX_cudf_COMMIT}.tar.gz")
 velox_resolve_dependency_url(cudf)
 
-# Probe for a system UCX install. The variables are used only to gate ucxx
-# fetching below; nothing in Velox links against UCX directly yet.
+# Probe for a system UCX install. The variables gate both ucxx fetching and
+# the experimental ucx-exchange build below.
 find_library(UCX_LIBRARY NAMES ucp)
 find_path(UCX_INCLUDE_DIR NAMES ucp/api/ucp.h)
 if(UCX_LIBRARY AND UCX_INCLUDE_DIR)
@@ -72,6 +72,8 @@ if(UCX_LIBRARY AND UCX_INCLUDE_DIR)
 else()
   set(UCX_FOUND FALSE)
 endif()
+# Build the experimental ucx-exchange library when UCX is available.
+set(VELOX_ENABLE_UCX_EXCHANGE ${UCX_FOUND} CACHE BOOL "Build ucx-exchange (UCX found)" FORCE)
 if(UCX_FOUND)
   message(STATUS "Found UCX: ${UCX_LIBRARY} (headers: ${UCX_INCLUDE_DIR}) -- ucxx will be fetched")
   # ucxx commit dc57333 from 2026-06-09 (release/0.50 branch)
@@ -139,7 +141,7 @@ block(SCOPE_FOR VARIABLES)
     UPDATE_DISCONNECTED 1
   )
 
-  if(UCX_FOUND)
+  if(VELOX_ENABLE_UCX_EXCHANGE)
     FetchContent_Declare(
       ucxx
       URL ${VELOX_ucxx_SOURCE_URL}
@@ -151,8 +153,7 @@ block(SCOPE_FOR VARIABLES)
   endif()
 
   FetchContent_MakeAvailable(cudf)
-
-  if(UCX_FOUND)
+  if(VELOX_ENABLE_UCX_EXCHANGE)
     FetchContent_MakeAvailable(ucxx)
   endif()
 
