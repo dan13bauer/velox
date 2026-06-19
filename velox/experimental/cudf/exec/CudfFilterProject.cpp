@@ -19,9 +19,11 @@
 #include "velox/experimental/cudf/exec/CudfFilterProject.h"
 #include "velox/experimental/cudf/exec/GpuResources.h"
 #include "velox/experimental/cudf/exec/VeloxCudfInterop.h"
+#include "velox/experimental/cudf/expression/ExpressionEvaluator.h"
 #include "velox/experimental/cudf/vector/CudfVector.h"
 
 #include "velox/common/memory/Memory.h"
+#include "velox/exec/Driver.h"
 #include "velox/expression/Expr.h"
 #include "velox/expression/FieldReference.h"
 
@@ -204,23 +206,29 @@ void CudfFilterProject::initialize() {
       debugPrintTree(expr, 0, LOG(INFO));
     }
   }
+  // Resolve the session timezone once so timezone-sensitive CudfFunctions
+  // (e.g. CastFunction for VARCHAR->TIMESTAMP) receive it at construction.
+  const auto* sessionTimeZone = cudf_velox::sessionTimeZoneFromConfig(
+      operatorCtx_->driverCtx()->queryConfig());
+
   if (hasFilter_) {
     // First expr is Filter, rest are Project
-    filterEvaluator_ = createCudfExpression(expr->exprs()[0], inputType);
+    filterEvaluator_ =
+        createCudfExpression(expr->exprs()[0], inputType, sessionTimeZone);
     std::transform(
         expr->exprs().begin() + 1,
         expr->exprs().end(),
         std::back_inserter(projectEvaluators_),
-        [inputType](const auto& expr) {
-          return createCudfExpression(expr, inputType);
+        [inputType, sessionTimeZone](const auto& expr) {
+          return createCudfExpression(expr, inputType, sessionTimeZone);
         });
   } else {
     std::transform(
         expr->exprs().begin(),
         expr->exprs().end(),
         std::back_inserter(projectEvaluators_),
-        [inputType](const auto& expr) {
-          return createCudfExpression(expr, inputType);
+        [inputType, sessionTimeZone](const auto& expr) {
+          return createCudfExpression(expr, inputType, sessionTimeZone);
         });
   }
 

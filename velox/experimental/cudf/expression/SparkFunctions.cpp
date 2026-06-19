@@ -46,7 +46,9 @@ void registerSparkFunctions(const std::string& prefix) {
 
   registerCudfFunction(
       prefix + "hash_with_seed",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
+      [](const std::string&,
+         const std::shared_ptr<velox::exec::Expr>& expr,
+         const tz::TimeZone*) {
         return std::make_shared<sparksql::HashFunction>(expr);
       },
       {FunctionSignatureBuilder()
@@ -57,7 +59,9 @@ void registerSparkFunctions(const std::string& prefix) {
 
   registerCudfFunction(
       prefix + "date_add",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
+      [](const std::string&,
+         const std::shared_ptr<velox::exec::Expr>& expr,
+         const tz::TimeZone*) {
         return std::make_shared<sparksql::DateAddFunction>(expr);
       },
       {FunctionSignatureBuilder()

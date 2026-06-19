@@ -415,6 +415,10 @@ struct AstContext {
       precomputeInstructions;
   const std::shared_ptr<velox::exec::Expr>
       rootExpr; // Track the root expression
+  // Session timezone threaded into timezone-sensitive functions built on the
+  // precompute path, or nullptr if timestamps are not adjusted to a session
+  // timezone.
+  const tz::TimeZone* sessionTimeZone;
   bool allowPureAstOnly;
 
   cudf::ast::expression const& pushExprToTree(
@@ -580,7 +584,8 @@ cudf::ast::expression const& AstContext::pushExprToTree(
       if (sideIdx < 0) {
         sideIdx = 0; // Default to left side if no fields found
       }
-      auto node = createCudfExpression(expr, inputRowSchema[sideIdx]);
+      auto node =
+          createCudfExpression(expr, inputRowSchema[sideIdx], sessionTimeZone);
       return addPrecomputeInstructionOnSide(sideIdx, 0, name, "", node);
     }
     VELOX_FAIL("Unsupported expression: {}", name);
@@ -690,18 +695,21 @@ cudf::ast::expression const& AstContext::pushExprToTree(
     return *result;
   } else if (name == "cast" || name == "try_cast") {
     VELOX_CHECK_EQ(len, 1);
-    auto const& op1 = pushExprToTree(expr->inputs()[0]);
-    if (expr->type()->kind() == TypeKind::INTEGER) {
-      // No int32 cast in cudf ast
-      return tree.push(Operation{Op::CAST_TO_INT64, op1});
-    } else if (expr->type()->kind() == TypeKind::BIGINT) {
-      return tree.push(Operation{Op::CAST_TO_INT64, op1});
-    } else if (expr->type()->kind() == TypeKind::DOUBLE) {
-      return tree.push(Operation{Op::CAST_TO_FLOAT64, op1});
-    } else {
-      VELOX_FAIL("Unsupported type for cast operation");
+    const auto outputKind = expr->type()->kind();
+    if (outputKind == TypeKind::INTEGER || outputKind == TypeKind::BIGINT ||
+        outputKind == TypeKind::DOUBLE) {
+      auto const& op1 = pushExprToTree(expr->inputs()[0]);
+      if (outputKind == TypeKind::INTEGER || outputKind == TypeKind::BIGINT) {
+        // No int32 cast in cudf ast
+        return tree.push(Operation{Op::CAST_TO_INT64, op1});
+      } else {
+        return tree.push(Operation{Op::CAST_TO_FLOAT64, op1});
+      }
     }
-  } else if (auto fieldExpr = std::dynamic_pointer_cast<FieldReference>(expr)) {
+    // Cast types not supported in pure AST (e.g. DATE->VARCHAR) fall through
+    // to the canBeEvaluatedByCudf precompute path below.
+  }
+  if (auto fieldExpr = std::dynamic_pointer_cast<FieldReference>(expr)) {
     // Refer to the appropriate side
     const auto fieldName =
         fieldExpr->inputs().empty() ? name : fieldExpr->inputs()[0]->name();

@@ -27,6 +27,7 @@ add_library(
   sparksql/DateAddFunction.cpp
   sparksql/HashFunction.cpp
   SubfieldFiltersToAst.cpp
+  TimeZoneOffset.cpp
 )
 
 target_link_libraries(

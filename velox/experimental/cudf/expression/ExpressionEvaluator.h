@@ -19,6 +19,7 @@
 #include "velox/expression/Expr.h"
 #include "velox/expression/FunctionSignature.h"
 #include "velox/type/Type.h"
+#include "velox/type/tz/TimeZoneMap.h"
 
 #include <cudf/column/column.hpp>
 #include <cudf/table/table_view.hpp>
@@ -28,6 +29,10 @@
 #include <string>
 #include <variant>
 #include <vector>
+
+namespace facebook::velox::core {
+class QueryConfig;
+}
 
 namespace facebook::velox::cudf_velox {
 
@@ -72,7 +77,8 @@ class CudfFunction {
 
 using CudfFunctionFactory = std::function<std::shared_ptr<CudfFunction>(
     const std::string& name,
-    const std::shared_ptr<velox::exec::Expr>& expr)>;
+    const std::shared_ptr<velox::exec::Expr>& expr,
+    const tz::TimeZone* sessionTimeZone)>;
 
 struct CudfFunctionSpec {
   CudfFunctionFactory factory;
@@ -93,10 +99,12 @@ void registerCudfFunctions(
 
 /// Create a CudfFunction for the given name and expression.
 /// Returns nullptr if no registered function matches the expression's
-/// signature.
+/// signature. \param sessionTimeZone Session timezone for timezone-sensitive
+/// functions, or nullptr if timestamps are not adjusted to a session timezone.
 std::shared_ptr<CudfFunction> createCudfFunction(
     const std::string& name,
-    const std::shared_ptr<velox::exec::Expr>& expr);
+    const std::shared_ptr<velox::exec::Expr>& expr,
+    const tz::TimeZone* sessionTimeZone);
 
 bool registerBuiltinFunctions(const std::string& prefix);
 
@@ -121,7 +129,8 @@ using CudfExpressionEvaluatorCanEvaluate =
 using CudfExpressionEvaluatorCreate =
     std::function<std::shared_ptr<CudfExpression>(
         std::shared_ptr<velox::exec::Expr> expr,
-        const RowTypePtr& inputRowSchema)>;
+        const RowTypePtr& inputRowSchema,
+        const tz::TimeZone* sessionTimeZone)>;
 
 // Register a CudfExpression evaluator.
 // - name: unique identifier (e.g., "ast", "function", "my_custom").
@@ -140,7 +149,8 @@ class FunctionExpression : public CudfExpression {
  public:
   static std::shared_ptr<FunctionExpression> create(
       const std::shared_ptr<velox::exec::Expr>& expr,
-      const RowTypePtr& inputRowSchema);
+      const RowTypePtr& inputRowSchema,
+      const tz::TimeZone* sessionTimeZone);
 
   // TODO (dm): A storage for keeping results in case this is a multiply
   // referenced subexpression (to do CSE)
@@ -173,9 +183,13 @@ class FunctionExpression : public CudfExpression {
   RowTypePtr inputRowSchema_;
 };
 
+/// Create a CudfExpression tree for the given expression.
+/// \param sessionTimeZone Session timezone threaded into timezone-sensitive
+/// functions, or nullptr if timestamps are not adjusted to a session timezone.
 std::shared_ptr<CudfExpression> createCudfExpression(
     std::shared_ptr<velox::exec::Expr> expr,
-    const RowTypePtr& inputRowSchema);
+    const RowTypePtr& inputRowSchema,
+    const tz::TimeZone* sessionTimeZone);
 
 /// Lightweight check if an expression tree is supported by any CUDF evaluator
 /// without initializing CudfExpression objects.
@@ -186,5 +200,10 @@ std::shared_ptr<CudfExpression> createCudfExpression(
 bool canBeEvaluatedByCudf(
     std::shared_ptr<velox::exec::Expr> expr,
     bool deep = true);
+
+/// Resolves the session timezone from query config for threading into
+/// timezone-sensitive GPU functions. Returns nullptr when timestamps are not
+/// adjusted to a session timezone or no session timezone is set.
+const tz::TimeZone* sessionTimeZoneFromConfig(const core::QueryConfig& config);
 
 } // namespace facebook::velox::cudf_velox

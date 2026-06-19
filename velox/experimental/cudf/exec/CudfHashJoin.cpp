@@ -26,6 +26,7 @@
 
 #include "velox/common/testutil/TestValue.h"
 #include "velox/core/PlanNode.h"
+#include "velox/exec/Driver.h"
 #include "velox/exec/Task.h" // NOLINT(misc-unused-headers)
 #include "velox/type/TypeUtil.h"
 
@@ -465,12 +466,19 @@ void CudfHashJoinProbe::initialize() {
         "AST expression evaluation must be enabled for semi-filter and anti joins.");
   }
 
+  // Resolve the session timezone once so timezone-sensitive CudfFunctions
+  // receive it at construction.
+  const auto* sessionTimeZone = cudf_velox::sessionTimeZoneFromConfig(
+      operatorCtx_->driverCtx()->queryConfig());
+
   // Create a reusable evaluator for the filter column. This is expensive to
   // build, and the expression + input schema are stable for the lifetime of
   // the operator instance.
   std::vector<velox::RowTypePtr> filterRowTypes{probeType_, buildType_};
   filterEvaluator_ = createCudfExpression(
-      exprs.exprs()[0], facebook::velox::type::concatRowTypes(filterRowTypes));
+      exprs.exprs()[0],
+      facebook::velox::type::concatRowTypes(filterRowTypes),
+      sessionTimeZone);
 
   // Check if the filter expression spans both join sides (e.g., switch
   // expressions referencing columns from both probe and build). If so, we
@@ -499,7 +507,8 @@ void CudfHashJoinProbe::initialize() {
           buildType_,
           probeType_,
           rightPrecomputeInstructions_,
-          leftPrecomputeInstructions_);
+          leftPrecomputeInstructions_,
+          sessionTimeZone);
     } else {
       createAstTree(
           exprs.exprs()[0],
@@ -508,7 +517,8 @@ void CudfHashJoinProbe::initialize() {
           probeType_,
           buildType_,
           leftPrecomputeInstructions_,
-          rightPrecomputeInstructions_);
+          rightPrecomputeInstructions_,
+          sessionTimeZone);
     }
   }
 }

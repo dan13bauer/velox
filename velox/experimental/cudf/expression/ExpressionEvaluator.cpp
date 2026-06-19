@@ -18,9 +18,11 @@
 #include "velox/experimental/cudf/expression/AstUtils.h"
 #include "velox/experimental/cudf/expression/DecimalExpressionKernels.h"
 #include "velox/experimental/cudf/expression/ExpressionEvaluator.h"
+#include "velox/experimental/cudf/expression/TimeZoneOffset.h"
 
 #include "velox/common/base/Exceptions.h"
 #include "velox/common/memory/Memory.h"
+#include "velox/core/QueryConfig.h"
 #include "velox/core/QueryCtx.h"
 #include "velox/expression/ConstantExpr.h"
 #include "velox/expression/EvalCtx.h"
@@ -30,6 +32,7 @@
 #include "velox/type/DecimalUtil.h"
 #include "velox/type/Time.h"
 #include "velox/type/Type.h"
+#include "velox/type/tz/TimeZoneMap.h"
 #include "velox/vector/BaseVector.h"
 #include "velox/vector/ComplexVector.h"
 #include "velox/vector/ConstantVector.h"
@@ -227,8 +230,11 @@ static void ensureBuiltinExpressionEvaluatorsRegistered() {
       [](std::shared_ptr<velox::exec::Expr> expr) {
         return FunctionExpression::canEvaluate(std::move(expr));
       },
-      [](std::shared_ptr<velox::exec::Expr> expr, const RowTypePtr& row) {
-        return FunctionExpression::create(std::move(expr), row);
+      [](std::shared_ptr<velox::exec::Expr> expr,
+         const RowTypePtr& row,
+         const tz::TimeZone* sessionTimeZone) {
+        return FunctionExpression::create(
+            std::move(expr), row, sessionTimeZone);
       },
       /*overwrite=*/false);
 
@@ -257,6 +263,17 @@ getCudfFunctionRegistry() {
   static std::unordered_map<std::string, std::vector<CudfFunctionSpec>>
       registry;
   return registry;
+}
+
+const tz::TimeZone* sessionTimeZoneFromConfig(const core::QueryConfig& config) {
+  if (!config.adjustTimestampToTimezone()) {
+    return nullptr;
+  }
+  const auto tzName = config.sessionTimezone();
+  if (tzName.empty()) {
+    return nullptr;
+  }
+  return tz::locateZone(tzName);
 }
 
 namespace {
@@ -327,6 +344,54 @@ void mergeNullSourceNullsIntoResult(
 
 } // namespace
 
+static std::optional<std::string> prestoToCudfDateFormat(
+    const std::string& prestoFormat) {
+  std::string result;
+  result.reserve(prestoFormat.size() * 2);
+  for (size_t i = 0; i < prestoFormat.size(); ++i) {
+    if (prestoFormat[i] != '%') {
+      result += prestoFormat[i];
+      continue;
+    }
+    if (i + 1 >= prestoFormat.size()) {
+      return std::nullopt;
+    }
+    ++i;
+    switch (prestoFormat[i]) {
+      case 'Y':
+      case 'y':
+      case 'm':
+      case 'd':
+      case 'H':
+      case 'I':
+      case 'S':
+      case 'f':
+      case 'j':
+        result += '%';
+        result += prestoFormat[i];
+        break;
+      case 'i':
+        result += "%M";
+        break;
+      case 's':
+        result += "%S";
+        break;
+      case 'h':
+        result += "%I";
+        break;
+      case 'T':
+        result += "%H:%M:%S";
+        break;
+      case '%':
+        result += "%%";
+        break;
+      default:
+        return std::nullopt;
+    }
+  }
+  return result;
+}
+
 class SplitFunction : public CudfFunction {
  public:
   SplitFunction(const std::shared_ptr<velox::exec::Expr>& expr) {
@@ -364,17 +429,45 @@ class SplitFunction : public CudfFunction {
 
 class CastFunction : public CudfFunction {
  public:
-  CastFunction(const std::shared_ptr<velox::exec::Expr>& expr) {
+  enum class CastMode {
+    kFixedWidth,
+    kStringToTimestamp,
+    kDateToString,
+    kIntToString,
+  };
+
+  CastFunction(
+      const std::shared_ptr<velox::exec::Expr>& expr,
+      const tz::TimeZone* sessionTimeZone)
+      : sessionTimeZone_(sessionTimeZone) {
     VELOX_CHECK_EQ(expr->inputs().size(), 1, "cast expects exactly 1 input");
 
     targetCudfType_ = cudf_velox::veloxToCudfDataType(expr->type());
-    auto sourceType =
-        cudf_velox::veloxToCudfDataType(expr->inputs()[0]->type());
-    VELOX_CHECK(
-        cudf::is_supported_cast(sourceType, targetCudfType_),
-        "Cast from {} to {} is not supported",
-        expr->inputs()[0]->type()->toString(),
-        expr->type()->toString());
+    auto srcVeloxType = expr->inputs()[0]->type();
+    auto dstVeloxType = expr->type();
+
+    if (srcVeloxType->kind() == TypeKind::VARCHAR &&
+        dstVeloxType->kind() == TypeKind::TIMESTAMP) {
+      castMode_ = CastMode::kStringToTimestamp;
+    } else if (
+        srcVeloxType->isDate() && dstVeloxType->kind() == TypeKind::VARCHAR) {
+      castMode_ = CastMode::kDateToString;
+    } else if (
+        (srcVeloxType->kind() == TypeKind::TINYINT ||
+         srcVeloxType->kind() == TypeKind::SMALLINT ||
+         srcVeloxType->kind() == TypeKind::INTEGER ||
+         srcVeloxType->kind() == TypeKind::BIGINT) &&
+        dstVeloxType->kind() == TypeKind::VARCHAR) {
+      castMode_ = CastMode::kIntToString;
+    } else {
+      castMode_ = CastMode::kFixedWidth;
+      auto sourceType = cudf_velox::veloxToCudfDataType(srcVeloxType);
+      VELOX_CHECK(
+          cudf::is_supported_cast(sourceType, targetCudfType_),
+          "Cast from {} to {} is not supported",
+          srcVeloxType->toString(),
+          dstVeloxType->toString());
+    }
   }
 
   ColumnOrView eval(
@@ -382,11 +475,118 @@ class CastFunction : public CudfFunction {
       rmm::cuda_stream_view stream,
       rmm::device_async_resource_ref mr) const override {
     auto inputCol = asView(inputColumns[0]);
-    return cudf::cast(inputCol, targetCudfType_, stream, mr);
+    switch (castMode_) {
+      case CastMode::kStringToTimestamp: {
+        // Presto CAST(varchar AS timestamp) expects "YYYY-MM-DD HH:MM:SS"
+        // with optional fractional seconds. cudf::strings::to_timestamps
+        // requires a fixed format, so we use a two-pass approach:
+        // 1) Parse with fractional seconds (".ffffff")
+        // 2) Parse without fractional seconds
+        // 3) Combine using copy_if_else based on which format matched.
+        static constexpr char kFmtFrac[] = "%Y-%m-%d %H:%M:%S.%6f";
+        static constexpr char kFmtNoFrac[] = "%Y-%m-%d %H:%M:%S";
+        auto stringsView = cudf::strings_column_view(inputCol);
+
+        auto validFrac =
+            cudf::strings::is_timestamp(stringsView, kFmtFrac, stream, mr);
+        auto tsFrac = cudf::strings::to_timestamps(
+            stringsView, targetCudfType_, kFmtFrac, stream, mr);
+        auto tsNoFrac = cudf::strings::to_timestamps(
+            stringsView, targetCudfType_, kFmtNoFrac, stream, mr);
+
+        auto result = cudf::copy_if_else(
+            tsFrac->view(), tsNoFrac->view(), validFrac->view(), stream, mr);
+
+        // cudf::strings::to_timestamps treats strings as UTC, but Presto
+        // treats bare timestamps as local time. Convert local->UTC.
+        if (sessionTimeZone_ != nullptr) {
+          return TimeZoneOffsetTable::get(sessionTimeZone_)
+              ->toUtc(result->view(), stream, mr);
+        }
+        return result;
+      }
+      case CastMode::kDateToString:
+        return cudf::strings::from_timestamps(
+            inputCol,
+            "%Y-%m-%d",
+            cudf::strings_column_view(
+                cudf::column_view{
+                    cudf::data_type{cudf::type_id::STRING},
+                    0,
+                    nullptr,
+                    nullptr,
+                    0}),
+            stream,
+            mr);
+      case CastMode::kIntToString:
+        return cudf::strings::from_integers(inputCol, stream, mr);
+      default:
+        return cudf::cast(inputCol, targetCudfType_, stream, mr);
+    }
   }
 
  private:
+  CastMode castMode_{CastMode::kFixedWidth};
   cudf::data_type targetCudfType_;
+  // Session timezone for VARCHAR->TIMESTAMP local-to-UTC conversion, or nullptr
+  // if timestamps are not adjusted to a session timezone.
+  const tz::TimeZone* sessionTimeZone_;
+};
+
+class DateFormatFunction : public CudfFunction {
+ public:
+  DateFormatFunction(
+      const std::shared_ptr<velox::exec::Expr>& expr,
+      const tz::TimeZone* sessionTimeZone)
+      : sessionTimeZone_(sessionTimeZone) {
+    using velox::exec::ConstantExpr;
+    VELOX_CHECK_EQ(
+        expr->inputs().size(), 2, "date_format expects exactly 2 inputs");
+
+    auto formatExpr =
+        std::dynamic_pointer_cast<ConstantExpr>(expr->inputs()[1]);
+    VELOX_CHECK_NOT_NULL(
+        formatExpr, "date_format format string must be a constant");
+    auto prestoFormat = formatExpr->value()->toString(0);
+
+    auto cudfFormat = prestoToCudfDateFormat(prestoFormat);
+    VELOX_CHECK(
+        cudfFormat.has_value(),
+        "date_format: unsupported format specifier in '{}'",
+        prestoFormat);
+    cudfFormat_ = std::move(cudfFormat.value());
+  }
+
+  ColumnOrView eval(
+      std::vector<ColumnOrView>& inputColumns,
+      rmm::cuda_stream_view stream,
+      rmm::device_async_resource_ref mr) const override {
+    auto inputCol = asView(inputColumns[0]);
+
+    // Presto's date_format formats timestamps in the session timezone.
+    // cudf::strings::from_timestamps formats in UTC, so convert first.
+    std::unique_ptr<cudf::column> localCol;
+    if (sessionTimeZone_ != nullptr) {
+      localCol = TimeZoneOffsetTable::get(sessionTimeZone_)
+                     ->toLocal(inputCol, stream, mr);
+      inputCol = localCol->view();
+    }
+
+    cudf::column_view emptyNames{
+        cudf::data_type{cudf::type_id::STRING}, 0, nullptr, nullptr, 0};
+    return cudf::strings::from_timestamps(
+        inputCol,
+        cudfFormat_,
+        cudf::strings_column_view(emptyNames),
+        stream,
+        mr);
+  }
+
+ private:
+  std::string cudfFormat_;
+  // Session timezone for UTC-to-local conversion before formatting, or nullptr
+  // if timestamps are not adjusted to a session timezone.
+  const tz::TimeZone* sessionTimeZone_;
 };
 
 class CardinalityFunction : public CudfFunction {
@@ -1288,7 +1488,8 @@ struct ExtractComponentFactory {
 
   std::shared_ptr<CudfFunction> operator()(
       const std::string&,
-      const std::shared_ptr<velox::exec::Expr>& expr) const {
+      const std::shared_ptr<velox::exec::Expr>& expr,
+      const tz::TimeZone*) const {
     return std::make_shared<ExtractComponentFunction>(expr, component);
   }
 };
@@ -2032,7 +2233,8 @@ void registerCudfFunctions(
 
 std::shared_ptr<CudfFunction> createCudfFunction(
     const std::string& name,
-    const std::shared_ptr<velox::exec::Expr>& expr) {
+    const std::shared_ptr<velox::exec::Expr>& expr,
+    const tz::TimeZone* sessionTimeZone) {
   auto& registry = getCudfFunctionRegistry();
   auto it = registry.find(name);
   if (it == registry.end()) {
@@ -2045,7 +2247,7 @@ std::shared_ptr<CudfFunction> createCudfFunction(
         !matchCallAgainstSignatures(*expr, spec.signatures)) {
       continue;
     }
-    return spec.factory(name, expr);
+    return spec.factory(name, expr, sessionTimeZone);
   }
   return nullptr;
 }
@@ -2055,9 +2257,9 @@ bool registerBuiltinFunctions(const std::string& prefix) {
 
   registerCudfFunction(
       prefix + "split",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
-        return std::make_shared<SplitFunction>(expr);
-      },
+      [](const std::string&,
+         const std::shared_ptr<velox::exec::Expr>& expr,
+         const tz::TimeZone*) { return std::make_shared<SplitFunction>(expr); },
       {FunctionSignatureBuilder()
            .returnType("array(varchar)")
            .argumentType("varchar")
@@ -2076,7 +2278,9 @@ bool registerBuiltinFunctions(const std::string& prefix) {
 
   registerCudfFunction(
       prefix + "cardinality",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
+      [](const std::string&,
+         const std::shared_ptr<velox::exec::Expr>& expr,
+         const tz::TimeZone*) {
         return std::make_shared<CardinalityFunction>(expr);
       },
       {FunctionSignatureBuilder()
@@ -2086,7 +2290,9 @@ bool registerBuiltinFunctions(const std::string& prefix) {
 
   registerCudfFunctions(
       {prefix + "substr", prefix + "substring"},
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
+      [](const std::string&,
+         const std::shared_ptr<velox::exec::Expr>& expr,
+         const tz::TimeZone*) {
         return std::make_shared<SubstrFunction>(expr);
       },
       {FunctionSignatureBuilder()
@@ -2104,7 +2310,9 @@ bool registerBuiltinFunctions(const std::string& prefix) {
   // Coalesce is special form and doesn't have a prefix in its name.
   registerCudfFunction(
       "coalesce",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
+      [](const std::string&,
+         const std::shared_ptr<velox::exec::Expr>& expr,
+         const tz::TimeZone*) {
         return std::make_shared<CoalesceFunction>(expr);
       },
       {FunctionSignatureBuilder()
@@ -2117,14 +2325,18 @@ bool registerBuiltinFunctions(const std::string& prefix) {
   // row_constructor is a special form and doesn't have a prefix in its name.
   registerCudfFunction(
       "row_constructor",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
+      [](const std::string&,
+         const std::shared_ptr<velox::exec::Expr>& expr,
+         const tz::TimeZone*) {
         return std::make_shared<RowConstructorFunction>(expr);
       },
       {});
 
   registerCudfFunction(
       "and",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
+      [](const std::string&,
+         const std::shared_ptr<velox::exec::Expr>& expr,
+         const tz::TimeZone*) {
         return std::make_shared<LogicalFunction>(
             expr, cudf::binary_operator::NULL_LOGICAL_AND);
       },
@@ -2136,7 +2348,9 @@ bool registerBuiltinFunctions(const std::string& prefix) {
 
   registerCudfFunction(
       "or",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
+      [](const std::string&,
+         const std::shared_ptr<velox::exec::Expr>& expr,
+         const tz::TimeZone*) {
         return std::make_shared<LogicalFunction>(
             expr, cudf::binary_operator::NULL_LOGICAL_OR);
       },
@@ -2148,9 +2362,9 @@ bool registerBuiltinFunctions(const std::string& prefix) {
 
   registerCudfFunction(
       prefix + "round",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
-        return std::make_shared<RoundFunction>(expr);
-      },
+      [](const std::string&,
+         const std::shared_ptr<velox::exec::Expr>& expr,
+         const tz::TimeZone*) { return std::make_shared<RoundFunction>(expr); },
       {FunctionSignatureBuilder()
            .integerVariable("p")
            .integerVariable("s")
@@ -2211,414 +2425,468 @@ bool registerBuiltinFunctions(const std::string& prefix) {
           .argumentType("date")
           .build()};
 
-  registerCudfFunction(
-      prefix + "year",
-      ExtractComponentFactory{cudf::datetime::datetime_component::YEAR},
-      timestampDateIntegerSignatures);
+      registerCudfFunction(
+          prefix + "year",
+          ExtractComponentFactory{cudf::datetime::datetime_component::YEAR},
+          timestampDateIntegerSignatures);
 
-  registerCudfFunction(
-      prefix + "month",
-      ExtractComponentFactory{cudf::datetime::datetime_component::MONTH},
-      timestampDateIntegerSignatures);
+      registerCudfFunction(
+          prefix + "month",
+          ExtractComponentFactory{cudf::datetime::datetime_component::MONTH},
+          timestampDateIntegerSignatures);
 
-  registerCudfFunction(
-      prefix + "day",
-      ExtractComponentFactory{cudf::datetime::datetime_component::DAY},
-      timestampDateIntegerSignatures);
+      registerCudfFunction(
+          prefix + "day",
+          ExtractComponentFactory{cudf::datetime::datetime_component::DAY},
+          timestampDateIntegerSignatures);
 
-  registerCudfFunctions(
-      {prefix + "dow", prefix + "day_of_week"},
-      ExtractComponentFactory{cudf::datetime::datetime_component::WEEKDAY},
-      timestampDateIntegerSignatures);
+      registerCudfFunctions(
+          {prefix + "dow", prefix + "day_of_week"},
+          ExtractComponentFactory{cudf::datetime::datetime_component::WEEKDAY},
+          timestampDateIntegerSignatures);
 
-  registerCudfFunctions(
-      {prefix + "doy", prefix + "day_of_year"},
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
-        return std::make_shared<DayOfYearFunction>(expr);
-      },
-      timestampDateIntegerSignatures);
+      registerCudfFunctions(
+          {prefix + "doy", prefix + "day_of_year"},
+          [](const std::string&,
+             const std::shared_ptr<velox::exec::Expr>& expr,
+             const tz::TimeZone*) {
+            return std::make_shared<DayOfYearFunction>(expr);
+          },
+          timestampDateIntegerSignatures);
 
-  registerCudfFunctions(
-      {prefix + "week", prefix + "week_of_year"},
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
-        return std::make_shared<WeekFunction>(expr);
-      },
-      timestampDateIntegerSignatures);
+      registerCudfFunctions(
+          {prefix + "week", prefix + "week_of_year"},
+          [](const std::string&,
+             const std::shared_ptr<velox::exec::Expr>& expr,
+             const tz::TimeZone*) {
+            return std::make_shared<WeekFunction>(expr);
+          },
+          timestampDateIntegerSignatures);
 
-  registerCudfFunction(
-      prefix + "quarter",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
-        return std::make_shared<QuarterFunction>(expr);
-      },
-      timestampDateIntegerSignatures);
+      registerCudfFunction(
+          prefix + "quarter",
+          [](const std::string&,
+             const std::shared_ptr<velox::exec::Expr>& expr,
+             const tz::TimeZone*) {
+            return std::make_shared<QuarterFunction>(expr);
+          },
+          timestampDateIntegerSignatures);
 
-  registerCudfFunctions(
-      {prefix + "yow", prefix + "year_of_week"},
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
-        return std::make_shared<YearOfWeekFunction>(expr);
-      },
-      timestampDateIntegerSignatures);
+      registerCudfFunctions(
+          {prefix + "yow", prefix + "year_of_week"},
+          [](const std::string&,
+             const std::shared_ptr<velox::exec::Expr>& expr,
+             const tz::TimeZone*) {
+            return std::make_shared<YearOfWeekFunction>(expr);
+          },
+          timestampDateIntegerSignatures);
 
-  registerCudfFunction(
-      prefix + "hour",
-      ExtractComponentFactory{cudf::datetime::datetime_component::HOUR},
-      timestampDateIntegerSignatures);
+      registerCudfFunction(
+          prefix + "hour",
+          ExtractComponentFactory{cudf::datetime::datetime_component::HOUR},
+          timestampDateIntegerSignatures);
 
-  registerCudfFunction(
-      prefix + "minute",
-      ExtractComponentFactory{cudf::datetime::datetime_component::MINUTE},
-      timestampDateIntegerSignatures);
+      registerCudfFunction(
+          prefix + "minute",
+          ExtractComponentFactory{cudf::datetime::datetime_component::MINUTE},
+          timestampDateIntegerSignatures);
 
-  registerCudfFunction(
-      prefix + "second",
-      ExtractComponentFactory{cudf::datetime::datetime_component::SECOND},
-      timestampDateIntegerSignatures);
+      registerCudfFunction(
+          prefix + "second",
+          ExtractComponentFactory{cudf::datetime::datetime_component::SECOND},
+          timestampDateIntegerSignatures);
 
-  registerCudfFunction(
-      prefix + "millisecond",
-      ExtractComponentFactory{cudf::datetime::datetime_component::MILLISECOND},
-      timestampDateIntegerSignatures);
+      registerCudfFunction(
+          prefix + "millisecond",
+          ExtractComponentFactory{
+              cudf::datetime::datetime_component::MILLISECOND},
+          timestampDateIntegerSignatures);
 
-  registerCudfFunction(
-      prefix + "length",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
-        return std::make_shared<LengthFunction>(expr);
-      },
-      {FunctionSignatureBuilder()
-           .returnType("bigint")
-           .argumentType("varchar")
-           .build()});
+      registerCudfFunction(
+          prefix + "length",
+          [](const std::string&,
+             const std::shared_ptr<velox::exec::Expr>& expr,
+             const tz::TimeZone*) {
+            return std::make_shared<LengthFunction>(expr);
+          },
+          {FunctionSignatureBuilder()
+               .returnType("bigint")
+               .argumentType("varchar")
+               .build()});
 
-  registerCudfFunction(
-      prefix + "lower",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
-        return std::make_shared<LowerFunction>(expr);
-      },
-      {FunctionSignatureBuilder()
-           .returnType("varchar")
-           .argumentType("varchar")
-           .build()});
+      registerCudfFunction(
+          prefix + "lower",
+          [](const std::string&,
+             const std::shared_ptr<velox::exec::Expr>& expr,
+             const tz::TimeZone*) {
+            return std::make_shared<LowerFunction>(expr);
+          },
+          {FunctionSignatureBuilder()
+               .returnType("varchar")
+               .argumentType("varchar")
+               .build()});
 
-  registerCudfFunction(
-      prefix + "upper",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
-        return std::make_shared<UpperFunction>(expr);
-      },
-      {FunctionSignatureBuilder()
-           .returnType("varchar")
-           .argumentType("varchar")
-           .build()});
+      registerCudfFunction(
+          prefix + "upper",
+          [](const std::string&,
+             const std::shared_ptr<velox::exec::Expr>& expr,
+             const tz::TimeZone*) {
+            return std::make_shared<UpperFunction>(expr);
+          },
+          {FunctionSignatureBuilder()
+               .returnType("varchar")
+               .argumentType("varchar")
+               .build()});
 
-  registerCudfFunction(
-      prefix + "like",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
-        return std::make_shared<LikeFunction>(expr);
-      },
-      {FunctionSignatureBuilder()
-           .returnType("boolean")
-           .argumentType("varchar")
-           .argumentType("varchar")
-           .build(),
-       FunctionSignatureBuilder()
-           .returnType("boolean")
-           .argumentType("varchar")
-           .argumentType("varchar")
-           .constantArgumentType("varchar")
-           .build()});
+      registerCudfFunction(
+          prefix + "like",
+          [](const std::string&,
+             const std::shared_ptr<velox::exec::Expr>& expr,
+             const tz::TimeZone*) {
+            return std::make_shared<LikeFunction>(expr);
+          },
+          {FunctionSignatureBuilder()
+               .returnType("boolean")
+               .argumentType("varchar")
+               .argumentType("varchar")
+               .build(),
+           FunctionSignatureBuilder()
+               .returnType("boolean")
+               .argumentType("varchar")
+               .argumentType("varchar")
+               .constantArgumentType("varchar")
+               .build()});
 
-  registerCudfFunction(
-      prefix + "startswith",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
-        return std::make_shared<StartswithFunction>(expr);
-      },
-      {FunctionSignatureBuilder()
-           .returnType("boolean")
-           .argumentType("varchar")
-           .argumentType("varchar")
-           .build()});
+      registerCudfFunction(
+          prefix + "startswith",
+          [](const std::string&,
+             const std::shared_ptr<velox::exec::Expr>& expr,
+             const tz::TimeZone*) {
+            return std::make_shared<StartswithFunction>(expr);
+          },
+          {FunctionSignatureBuilder()
+               .returnType("boolean")
+               .argumentType("varchar")
+               .argumentType("varchar")
+               .build()});
 
-  registerCudfFunction(
-      prefix + "endswith",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
-        return std::make_shared<EndswithFunction>(expr);
-      },
-      {FunctionSignatureBuilder()
-           .returnType("boolean")
-           .argumentType("varchar")
-           .argumentType("varchar")
-           .build()});
+      registerCudfFunction(
+          prefix + "endswith",
+          [](const std::string&,
+             const std::shared_ptr<velox::exec::Expr>& expr,
+             const tz::TimeZone*) {
+            return std::make_shared<EndswithFunction>(expr);
+          },
+          {FunctionSignatureBuilder()
+               .returnType("boolean")
+               .argumentType("varchar")
+               .argumentType("varchar")
+               .build()});
 
-  registerCudfFunction(
-      prefix + "contains",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
-        return std::make_shared<ContainsFunction>(expr);
-      },
-      {FunctionSignatureBuilder()
-           .returnType("boolean")
-           .argumentType("varchar")
-           .argumentType("varchar")
-           .build()});
+      registerCudfFunction(
+          prefix + "contains",
+          [](const std::string&,
+             const std::shared_ptr<velox::exec::Expr>& expr,
+             const tz::TimeZone*) {
+            return std::make_shared<ContainsFunction>(expr);
+          },
+          {FunctionSignatureBuilder()
+               .returnType("boolean")
+               .argumentType("varchar")
+               .argumentType("varchar")
+               .build()});
 
-  registerCudfFunction(
-      prefix + "concat",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
-        return std::make_shared<ConcatFunction>(expr);
-      },
-      {FunctionSignatureBuilder()
-           .returnType("varchar")
-           .argumentType("varchar")
-           .variableArity("varchar")
-           .build()});
+      registerCudfFunction(
+          prefix + "concat",
+          [](const std::string&,
+             const std::shared_ptr<velox::exec::Expr>& expr,
+             const tz::TimeZone*) {
+            return std::make_shared<ConcatFunction>(expr);
+          },
+          {FunctionSignatureBuilder()
+               .returnType("varchar")
+               .argumentType("varchar")
+               .variableArity("varchar")
+               .build()});
 
-  // No prefix because switch and if are special form
-  registerCudfFunctions(
-      {"switch", "if"},
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
-        return std::make_shared<SwitchFunction>(expr);
-      },
-      {FunctionSignatureBuilder()
-           .typeVariable("T")
-           .returnType("T")
-           .argumentType("boolean")
-           .argumentType("T")
-           .argumentType("T")
-           .build()});
+      // No prefix because switch and if are special form
+      registerCudfFunctions(
+          {"switch", "if"},
+          [](const std::string&,
+             const std::shared_ptr<velox::exec::Expr>& expr,
+             const tz::TimeZone*) {
+            return std::make_shared<SwitchFunction>(expr);
+          },
+          {FunctionSignatureBuilder()
+               .typeVariable("T")
+               .returnType("T")
+               .argumentType("boolean")
+               .argumentType("T")
+               .argumentType("T")
+               .build()});
 
-  registerCudfFunctions(
-      // No signatures required for cast and try_cast. They are special forms.
-      {"try_cast", "cast"},
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
-        return std::make_shared<CastFunction>(expr);
-      },
-      {
-          // Cast needs special handling dynamically using cudf.
-      });
+      registerCudfFunctions(
+          // No signatures required for cast and try_cast. They are special
+          // forms.
+          {"try_cast", "cast"},
+          [](const std::string&,
+             const std::shared_ptr<velox::exec::Expr>& expr,
+             const tz::TimeZone* sessionTimeZone) {
+            return std::make_shared<CastFunction>(expr, sessionTimeZone);
+          },
+          {
+              // Cast needs special handling dynamically using cudf.
+          });
 
-  //
-  // regular binary operators
-  //
+      //
+      // regular binary operators
+      //
 
-  auto registerBinaryOp = [&](const std::vector<std::string>& aliases,
-                              cudf::binary_operator op) {
-    auto decimalBinarySignature = [&]() {
-      return FunctionSignatureBuilder()
-          .integerVariable("a_precision")
-          .integerVariable("a_scale")
-          .integerVariable("b_precision")
-          .integerVariable("b_scale")
-          .integerVariable("r_precision")
-          .integerVariable("r_scale")
-          .returnType("decimal(r_precision, r_scale)")
-          .argumentType("decimal(a_precision, a_scale)")
-          .argumentType("decimal(b_precision, b_scale)")
-          .build();
-    };
-
-    registerCudfFunctions(
-        aliases,
-        [op](
-            const std::string&,
-            const std::shared_ptr<velox::exec::Expr>& expr) {
-          return std::make_shared<BinaryFunction>(expr, op);
-        },
-        {FunctionSignatureBuilder()
-             .returnType("double")
-             .argumentType("double")
-             .argumentType("double")
-             .build(),
-         decimalBinarySignature()});
-  };
-
-  registerBinaryOp(
-      {prefix + "plus", prefix + "add"}, cudf::binary_operator::ADD);
-  registerBinaryOp(
-      {prefix + "minus", prefix + "subtract"}, cudf::binary_operator::SUB);
-  registerBinaryOp({prefix + "multiply"}, cudf::binary_operator::MUL);
-  registerBinaryOp({prefix + "divide"}, cudf::binary_operator::DIV);
-  registerBinaryOp({prefix + "mod"}, cudf::binary_operator::MOD);
-
-  //
-  // regular comparison operators
-  //
-
-  const std::vector<exec::FunctionSignaturePtr> comparisonSignatures{
-      FunctionSignatureBuilder()
-          .returnType("boolean")
-          .argumentType("double")
-          .argumentType("double")
-          .build(),
-      FunctionSignatureBuilder()
-          .returnType("boolean")
-          .argumentType("timestamp")
-          .argumentType("timestamp")
-          .build(),
-      FunctionSignatureBuilder()
-          .returnType("boolean")
-          .argumentType("date")
-          .argumentType("date")
-          .build(),
-      FunctionSignatureBuilder()
-          .integerVariable("a_precision")
-          .integerVariable("a_scale")
-          .integerVariable("b_precision")
-          .integerVariable("b_scale")
-          .returnType("boolean")
-          .argumentType("decimal(a_precision, a_scale)")
-          .argumentType("decimal(b_precision, b_scale)")
-          .build()};
-
-  auto registerComparisonOp = [&](const std::vector<std::string>& aliases,
+      auto registerBinaryOp = [&](const std::vector<std::string>& aliases,
                                   cudf::binary_operator op) {
-    registerCudfFunctions(
-        aliases,
-        [op](
-            const std::string&,
-            const std::shared_ptr<velox::exec::Expr>& expr) {
-          return std::make_shared<BinaryFunction>(expr, op);
-        },
-        comparisonSignatures);
-  };
+        auto decimalBinarySignature = [&]() {
+          return FunctionSignatureBuilder()
+              .integerVariable("a_precision")
+              .integerVariable("a_scale")
+              .integerVariable("b_precision")
+              .integerVariable("b_scale")
+              .integerVariable("r_precision")
+              .integerVariable("r_scale")
+              .returnType("decimal(r_precision, r_scale)")
+              .argumentType("decimal(a_precision, a_scale)")
+              .argumentType("decimal(b_precision, b_scale)")
+              .build();
+        };
 
-  registerComparisonOp(
-      {prefix + "equalto", prefix + "eq"}, cudf::binary_operator::EQUAL);
-  registerComparisonOp(
-      {prefix + "notequalto", prefix + "neq"},
-      cudf::binary_operator::NOT_EQUAL);
-  registerComparisonOp(
-      {prefix + "greaterthanorequal", prefix + "gte"},
-      cudf::binary_operator::GREATER_EQUAL);
-  registerComparisonOp(
-      {prefix + "lessthanorequal", prefix + "lte"},
-      cudf::binary_operator::LESS_EQUAL);
-  registerComparisonOp(
-      {prefix + "greaterthan", prefix + "gt"}, cudf::binary_operator::GREATER);
-  registerComparisonOp(
-      {prefix + "lessthan", prefix + "lt"}, cudf::binary_operator::LESS);
+        registerCudfFunctions(
+            aliases,
+            [op](
+                const std::string&,
+                const std::shared_ptr<velox::exec::Expr>& expr,
+                const tz::TimeZone*) {
+              return std::make_shared<BinaryFunction>(expr, op);
+            },
+            {FunctionSignatureBuilder()
+                 .returnType("double")
+                 .argumentType("double")
+                 .argumentType("double")
+                 .build(),
+             decimalBinarySignature()});
+      };
 
-  //
-  // regular unary operators
-  //
+      registerBinaryOp(
+          {prefix + "plus", prefix + "add"}, cudf::binary_operator::ADD);
+      registerBinaryOp(
+          {prefix + "minus", prefix + "subtract"}, cudf::binary_operator::SUB);
+      registerBinaryOp({prefix + "multiply"}, cudf::binary_operator::MUL);
+      registerBinaryOp({prefix + "divide"}, cudf::binary_operator::DIV);
+      registerBinaryOp({prefix + "mod"}, cudf::binary_operator::MOD);
 
-  auto registerUnaryOp = [&](const std::vector<std::string>& aliases,
-                             cudf::unary_operator op) {
-    registerCudfFunctions(
-        aliases,
-        [op](
-            const std::string&,
-            const std::shared_ptr<velox::exec::Expr>& expr) {
-          return std::make_shared<UnaryFunction>(expr, op);
-        },
-        {FunctionSignatureBuilder()
-             .returnType("double")
-             .argumentType("double")
-             .build(),
-         FunctionSignatureBuilder()
-             .integerVariable("p")
-             .integerVariable("s")
-             .returnType("decimal(p,s)")
-             .argumentType("decimal(p,s)")
-             .build()});
-  };
+      //
+      // regular comparison operators
+      //
 
-  registerUnaryOp({prefix + "abs"}, cudf::unary_operator::ABS);
-  registerUnaryOp({prefix + "negate"}, cudf::unary_operator::NEGATE);
-  registerUnaryOp({prefix + "floor"}, cudf::unary_operator::FLOOR);
-  registerUnaryOp({prefix + "ceil"}, cudf::unary_operator::CEIL);
+      const std::vector<exec::FunctionSignaturePtr> comparisonSignatures{
+          FunctionSignatureBuilder()
+              .returnType("boolean")
+              .argumentType("double")
+              .argumentType("double")
+              .build(),
+          FunctionSignatureBuilder()
+              .returnType("boolean")
+              .argumentType("timestamp")
+              .argumentType("timestamp")
+              .build(),
+          FunctionSignatureBuilder()
+              .returnType("boolean")
+              .argumentType("date")
+              .argumentType("date")
+              .build(),
+          FunctionSignatureBuilder()
+              .integerVariable("a_precision")
+              .integerVariable("a_scale")
+              .integerVariable("b_precision")
+              .integerVariable("b_scale")
+              .returnType("boolean")
+              .argumentType("decimal(a_precision, a_scale)")
+              .argumentType("decimal(b_precision, b_scale)")
+              .build()};
 
-  // @TODO (seves 1/28/26)
-  // truncate
-  // no direct cudf mapping
-  // perhaps a compound operation using round/round_decimal
+      auto registerComparisonOp = [&](const std::vector<std::string>& aliases,
+                                      cudf::binary_operator op) {
+        registerCudfFunctions(
+            aliases,
+            [op](
+                const std::string&,
+                const std::shared_ptr<velox::exec::Expr>& expr,
+                const tz::TimeZone*) {
+              return std::make_shared<BinaryFunction>(expr, op);
+            },
+            comparisonSignatures);
+      };
 
-  //
-  // between
-  //
+      registerComparisonOp(
+          {prefix + "equalto", prefix + "eq"}, cudf::binary_operator::EQUAL);
+      registerComparisonOp(
+          {prefix + "notequalto", prefix + "neq"},
+          cudf::binary_operator::NOT_EQUAL);
+      registerComparisonOp(
+          {prefix + "greaterthanorequal", prefix + "gte"},
+          cudf::binary_operator::GREATER_EQUAL);
+      registerComparisonOp(
+          {prefix + "lessthanorequal", prefix + "lte"},
+          cudf::binary_operator::LESS_EQUAL);
+      registerComparisonOp(
+          {prefix + "greaterthan", prefix + "gt"},
+          cudf::binary_operator::GREATER);
+      registerComparisonOp(
+          {prefix + "lessthan", prefix + "lt"}, cudf::binary_operator::LESS);
 
-  const std::vector<exec::FunctionSignaturePtr> betweenSignatures{
-      FunctionSignatureBuilder()
-          .returnType("boolean")
-          .argumentType("double")
-          .argumentType("double")
-          .argumentType("double")
-          .build(),
-      FunctionSignatureBuilder()
-          .returnType("boolean")
-          .argumentType("timestamp")
-          .argumentType("timestamp")
-          .argumentType("timestamp")
-          .build(),
-      FunctionSignatureBuilder()
-          .returnType("boolean")
-          .argumentType("date")
-          .argumentType("date")
-          .argumentType("date")
-          .build(),
-      FunctionSignatureBuilder()
-          .integerVariable("p")
-          .integerVariable("s")
-          .returnType("boolean")
-          .argumentType("decimal(p,s)")
-          .argumentType("decimal(p,s)")
-          .argumentType("decimal(p,s)")
-          .build()};
+      //
+      // regular unary operators
+      //
 
-  registerCudfFunction(
-      prefix + "between",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
-        return std::make_shared<BetweenFunction>(expr);
-      },
-      betweenSignatures);
+      auto registerUnaryOp = [&](const std::vector<std::string>& aliases,
+                                 cudf::unary_operator op) {
+        registerCudfFunctions(
+            aliases,
+            [op](
+                const std::string&,
+                const std::shared_ptr<velox::exec::Expr>& expr,
+                const tz::TimeZone*) {
+              return std::make_shared<UnaryFunction>(expr, op);
+            },
+            {FunctionSignatureBuilder()
+                 .returnType("double")
+                 .argumentType("double")
+                 .build(),
+             FunctionSignatureBuilder()
+                 .integerVariable("p")
+                 .integerVariable("s")
+                 .returnType("decimal(p,s)")
+                 .argumentType("decimal(p,s)")
+                 .build()});
+      };
 
-  //
-  // greatest & least
-  //
+      registerUnaryOp({prefix + "abs"}, cudf::unary_operator::ABS);
+      registerUnaryOp({prefix + "negate"}, cudf::unary_operator::NEGATE);
+      registerUnaryOp({prefix + "floor"}, cudf::unary_operator::FLOOR);
+      registerUnaryOp({prefix + "ceil"}, cudf::unary_operator::CEIL);
 
-  registerCudfFunction(
-      prefix + "greatest",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
-        return std::make_shared<GreatestLeastFunction>(
-            expr, cudf::binary_operator::NULL_MAX);
-      },
-      {FunctionSignatureBuilder()
-           .returnType("double")
-           .argumentType("double")
-           .variableArity("double")
-           .build(),
-       FunctionSignatureBuilder()
-           .integerVariable("p")
-           .integerVariable("s")
-           .returnType("decimal(p,s)")
-           .argumentType("decimal(p,s)")
-           .variableArity("decimal(p,s)")
-           .build()});
+      // @TODO (seves 1/28/26)
+      // truncate
+      // no direct cudf mapping
+      // perhaps a compound operation using round/round_decimal
 
-  registerCudfFunction(
-      prefix + "least",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
-        return std::make_shared<GreatestLeastFunction>(
-            expr, cudf::binary_operator::NULL_MIN);
-      },
-      {FunctionSignatureBuilder()
-           .returnType("double")
-           .argumentType("double")
-           .variableArity("double")
-           .build(),
-       FunctionSignatureBuilder()
-           .integerVariable("p")
-           .integerVariable("s")
-           .returnType("decimal(p,s)")
-           .argumentType("decimal(p,s)")
-           .variableArity("decimal(p,s)")
-           .build()});
+      //
+      // between
+      //
 
-  // Note: Spark and Presto functions are now registered separately via
-  // registerSparkFunctions() and registerPrestoFunctions()
-  return true;
+      const std::vector<exec::FunctionSignaturePtr> betweenSignatures{
+          FunctionSignatureBuilder()
+              .returnType("boolean")
+              .argumentType("double")
+              .argumentType("double")
+              .argumentType("double")
+              .build(),
+          FunctionSignatureBuilder()
+              .returnType("boolean")
+              .argumentType("timestamp")
+              .argumentType("timestamp")
+              .argumentType("timestamp")
+              .build(),
+          FunctionSignatureBuilder()
+              .returnType("boolean")
+              .argumentType("date")
+              .argumentType("date")
+              .argumentType("date")
+              .build(),
+          FunctionSignatureBuilder()
+              .integerVariable("p")
+              .integerVariable("s")
+              .returnType("boolean")
+              .argumentType("decimal(p,s)")
+              .argumentType("decimal(p,s)")
+              .argumentType("decimal(p,s)")
+              .build()};
+
+      registerCudfFunction(
+          prefix + "between",
+          [](const std::string&,
+             const std::shared_ptr<velox::exec::Expr>& expr,
+             const tz::TimeZone*) {
+            return std::make_shared<BetweenFunction>(expr);
+          },
+          betweenSignatures);
+
+      //
+      // greatest & least
+      //
+
+      registerCudfFunction(
+          prefix + "greatest",
+          [](const std::string&,
+             const std::shared_ptr<velox::exec::Expr>& expr,
+             const tz::TimeZone*) {
+            return std::make_shared<GreatestLeastFunction>(
+                expr, cudf::binary_operator::NULL_MAX);
+          },
+          {FunctionSignatureBuilder()
+               .returnType("double")
+               .argumentType("double")
+               .variableArity("double")
+               .build(),
+           FunctionSignatureBuilder()
+               .integerVariable("p")
+               .integerVariable("s")
+               .returnType("decimal(p,s)")
+               .argumentType("decimal(p,s)")
+               .variableArity("decimal(p,s)")
+               .build()});
+
+      registerCudfFunction(
+          prefix + "least",
+          [](const std::string&,
+             const std::shared_ptr<velox::exec::Expr>& expr,
+             const tz::TimeZone*) {
+            return std::make_shared<GreatestLeastFunction>(
+                expr, cudf::binary_operator::NULL_MIN);
+          },
+          {FunctionSignatureBuilder()
+               .returnType("double")
+               .argumentType("double")
+               .variableArity("double")
+               .build(),
+           FunctionSignatureBuilder()
+               .integerVariable("p")
+               .integerVariable("s")
+               .returnType("decimal(p,s)")
+               .argumentType("decimal(p,s)")
+               .variableArity("decimal(p,s)")
+               .build()});
+
+      registerCudfFunction(
+          prefix + "date_format",
+          [](const std::string&,
+             const std::shared_ptr<velox::exec::Expr>& expr,
+             const tz::TimeZone* sessionTimeZone) {
+            return std::make_shared<DateFormatFunction>(expr, sessionTimeZone);
+          },
+          {FunctionSignatureBuilder()
+               .returnType("varchar")
+               .argumentType("timestamp")
+               .constantArgumentType("varchar")
+               .build()});
+
+      // Note: Spark and Presto functions are now registered separately via
+      // registerSparkFunctions() and registerPrestoFunctions()
+      return true;
 }
 
 std::shared_ptr<FunctionExpression> FunctionExpression::create(
     const std::shared_ptr<velox::exec::Expr>& expr,
-    const RowTypePtr& inputRowSchema) {
+    const RowTypePtr& inputRowSchema,
+    const tz::TimeZone* sessionTimeZone) {
   using velox::exec::FieldReference;
 
   auto node = std::make_shared<FunctionExpression>();
@@ -2626,7 +2894,7 @@ std::shared_ptr<FunctionExpression> FunctionExpression::create(
   node->inputRowSchema_ = inputRowSchema;
 
   auto name = expr->name();
-  node->function_ = createCudfFunction(name, expr);
+  node->function_ = createCudfFunction(name, expr, sessionTimeZone);
 
   if (auto fieldExpr = std::dynamic_pointer_cast<FieldReference>(expr)) {
     if (!fieldExpr->inputs().empty()) {
@@ -2647,7 +2915,7 @@ std::shared_ptr<FunctionExpression> FunctionExpression::create(
     for (const auto& input : expr->inputs()) {
       if (!std::dynamic_pointer_cast<velox::exec::ConstantExpr>(input)) {
         node->subexpressions_.push_back(
-            createCudfExpression(input, inputRowSchema));
+            createCudfExpression(input, inputRowSchema, sessionTimeZone));
       }
     }
   }
@@ -2767,6 +3035,23 @@ bool FunctionExpression::canEvaluate(std::shared_ptr<velox::exec::Expr> expr) {
     if (srcType == nullptr || dstType == nullptr) {
       return false;
     }
+    // VARCHAR -> TIMESTAMP is handled by CastFunction via
+    // cudf::strings::to_timestamps, not cudf::cast.
+    if (srcType->kind() == TypeKind::VARCHAR &&
+        dstType->kind() == TypeKind::TIMESTAMP) {
+      return true;
+    }
+    // DATE -> VARCHAR via cudf::strings::from_timestamps.
+    if (srcType->isDate() && dstType->kind() == TypeKind::VARCHAR) {
+      return true;
+    }
+    // Integer types -> VARCHAR via cudf::strings::from_integers.
+    auto srcKind = srcType->kind();
+    if ((srcKind == TypeKind::TINYINT || srcKind == TypeKind::SMALLINT ||
+         srcKind == TypeKind::INTEGER || srcKind == TypeKind::BIGINT) &&
+        dstType->kind() == TypeKind::VARCHAR) {
+      return true;
+    }
     auto src = cudf_velox::veloxToCudfDataType(srcType);
     auto dst = cudf_velox::veloxToCudfDataType(dstType);
     return cudf::is_supported_cast(src, dst);
@@ -2781,6 +3066,16 @@ bool FunctionExpression::canEvaluate(std::shared_ptr<velox::exec::Expr> expr) {
     if (!spec.signatures.empty() &&
         !matchCallAgainstSignatures(*expr, spec.signatures)) {
       continue;
+    }
+    // Validate date_format's format string is translatable to cuDF.
+    if (opName == "date_format" && expr->inputs().size() == 2) {
+      auto formatExpr = std::dynamic_pointer_cast<velox::exec::ConstantExpr>(
+          expr->inputs()[1]);
+      if (!formatExpr) {
+        return false;
+      }
+      return prestoToCudfDateFormat(formatExpr->value()->toString(0))
+          .has_value();
     }
     return true;
   }
@@ -2816,7 +3111,8 @@ bool canBeEvaluatedByCudf(std::shared_ptr<velox::exec::Expr> expr, bool deep) {
 
 std::shared_ptr<CudfExpression> createCudfExpression(
     std::shared_ptr<velox::exec::Expr> expr,
-    const RowTypePtr& inputRowSchema) {
+    const RowTypePtr& inputRowSchema,
+    const tz::TimeZone* sessionTimeZone) {
   ensureBuiltinExpressionEvaluatorsRegistered();
   const auto& registry = getCudfExpressionEvaluatorRegistry();
 
@@ -2830,10 +3126,10 @@ std::shared_ptr<CudfExpression> createCudfExpression(
   }
 
   if (best != nullptr) {
-    return best->create(expr, inputRowSchema);
+    return best->create(expr, inputRowSchema, sessionTimeZone);
   }
 
-  return FunctionExpression::create(expr, inputRowSchema);
+  return FunctionExpression::create(expr, inputRowSchema, sessionTimeZone);
 }
 
 void unregisterFunctions() {
