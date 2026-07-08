@@ -273,7 +273,7 @@ class OutputBuffer {
   /// called to update the total number of broadcast or arbitrary destinations
   /// while the task is running. The function throws if this is partitioned
   /// output buffer type.
-  void updateOutputBuffers(int numBuffers, bool noMoreBuffers);
+  void updateOutputBuffers(int numDestinations, bool noMoreBuffers);
 
   /// When we understand the final number of split groups (for grouped
   /// execution only), we need to update the number of producing drivers here.
@@ -351,7 +351,7 @@ class OutputBuffer {
 
   /// Given an updated total number of broadcast buffers, add any missing ones
   /// and enqueue data that has been produced so far (e.g. dataToBroadcast_).
-  void addOutputBuffersLocked(int numBuffers);
+  void addOutputBuffersLocked(int numDestinations);
 
   void enqueueBroadcastOutputLocked(
       std::unique_ptr<SerializedPageBase> data,

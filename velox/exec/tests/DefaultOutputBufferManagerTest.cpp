@@ -407,9 +407,8 @@ class DefaultOutputBufferManagerTest : public testing::Test {
   void verifyOutputBuffer(
       std::shared_ptr<Task> task,
       OutputBufferStatus outputBufferStatus) {
-    TaskStats finishStats = task->taskStats();
-    const auto utilization = finishStats.outputBufferUtilization;
-    const auto overutilized = finishStats.outputBufferOverutilized;
+    const auto utilization = bufferManager_->getUtilization(task->taskId());
+    const auto overutilized = bufferManager_->isOverutilized(task->taskId());
     if (outputBufferStatus == OutputBufferStatus::kInitiated ||
         outputBufferStatus == OutputBufferStatus::kFinished) {
       // zero utilization on a fresh new output buffer

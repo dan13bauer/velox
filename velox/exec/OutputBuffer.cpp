@@ -344,9 +344,11 @@ OutputBuffer::OutputBuffer(
   finishedBufferStats_.resize(numDestinations);
 }
 
-void OutputBuffer::updateOutputBuffers(int numBuffers, bool noMoreBuffers) {
+void OutputBuffer::updateOutputBuffers(
+    int numDestinations,
+    bool noMoreBuffers) {
   if (isPartitioned()) {
-    VELOX_CHECK_EQ(buffers_.size(), numBuffers);
+    VELOX_CHECK_EQ(buffers_.size(), numDestinations);
     VELOX_CHECK(noMoreBuffers);
     noMoreBuffers_ = true;
     return;
@@ -357,8 +359,8 @@ void OutputBuffer::updateOutputBuffers(int numBuffers, bool noMoreBuffers) {
   {
     std::lock_guard<std::mutex> l(mutex_);
 
-    if (numBuffers > buffers_.size()) {
-      addOutputBuffersLocked(numBuffers);
+    if (numDestinations > buffers_.size()) {
+      addOutputBuffersLocked(numDestinations);
     }
 
     if (!noMoreBuffers) {
@@ -391,11 +393,11 @@ void OutputBuffer::updateNumDrivers(uint32_t newNumDrivers) {
   }
 }
 
-void OutputBuffer::addOutputBuffersLocked(int numBuffers) {
+void OutputBuffer::addOutputBuffersLocked(int numDestinations) {
   VELOX_CHECK(!noMoreBuffers_);
   VELOX_CHECK(!isPartitioned());
-  buffers_.reserve(numBuffers);
-  for (int32_t i = buffers_.size(); i < numBuffers; ++i) {
+  buffers_.reserve(numDestinations);
+  for (int32_t i = buffers_.size(); i < numDestinations; ++i) {
     auto buffer = std::make_unique<DestinationBuffer>();
     if (isBroadcast()) {
       for (const auto& data : dataToBroadcast_) {
@@ -407,7 +409,7 @@ void OutputBuffer::addOutputBuffersLocked(int numBuffers) {
     }
     buffers_.emplace_back(std::move(buffer));
   }
-  finishedBufferStats_.resize(numBuffers);
+  finishedBufferStats_.resize(numDestinations);
 }
 
 void OutputBuffer::updateStatsWithEnqueuedPageLocked(
