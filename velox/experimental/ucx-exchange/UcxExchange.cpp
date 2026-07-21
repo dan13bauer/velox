@@ -181,6 +181,16 @@ RowVectorPtr UcxExchange::getOutputFromPackedTable() {
   // Get the packed_table and stream from the PackedTableWithStream
   PackedTableWithStream& data = *currentData_;
   auto numRows = data.packedTable->table.num_rows();
+
+  // Velox requires operators to return either nullptr or a non-empty vector.
+  // Discard an empty batch and report no output; the driver fetches the next
+  // batch on the following getOutput() call. Mirrors
+  // CudfFilterProject::doGetOutput().
+  if (numRows == 0) {
+    currentData_.reset();
+    return nullptr;
+  }
+
   auto gpuDataSize = data.gpuDataSize();
 
   // Use the stream that was allocated in UcxExchangeSource::onMetadata

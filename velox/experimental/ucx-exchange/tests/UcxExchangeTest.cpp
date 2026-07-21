@@ -30,6 +30,7 @@
 #include <chrono>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <vector>
 #include "velox/common/memory/MemoryPool.h"
@@ -918,6 +919,79 @@ TEST_P(UcxExchangeTest, sharedClientSurvivesOneExchangeClose) {
   EXPECT_EQ(rowsReceived, static_cast<uint64_t>(numChunks) * numRowsPerChunk);
 
   queueManager_->removeTask(srcTaskId);
+}
+
+// Regression test: getOutput() must return nullptr for a batch that carries
+// zero rows, never a non-null empty vector. Velox requires operators to return
+// either nullptr or a non-empty vector (CudfFilterProject::doGetOutput() drops
+// empty results the same way). A 0-row packed table can reach the exchange when
+// an upstream partition produced an empty chunk; before the fix,
+// getOutputFromPackedTable() wrapped it in a 0-row CudfVector and returned it.
+TEST_P(UcxExchangeTest, getOutputReturnsNullForEmptyBatch) {
+  // This test doesn't use parameters — run only for the first param set.
+  if (GetParam() != generateTestParams().front()) {
+    GTEST_SKIP() << "getOutputReturnsNullForEmptyBatch: runs only once";
+  }
+
+  const std::string taskPrefix = getUniqueTaskPrefix();
+  const std::string sinkTaskId = taskPrefix + "emptyBatchSink";
+  const int partitionId = 0;
+
+  // Build a sink exchange task and a client whose queue we populate directly,
+  // bypassing the network path so we can inject a controlled 0-row batch.
+  core::PlanNodeId exchangeNodeId;
+  auto sinkTask = createExchangeTask(
+      sinkTaskId, UcxTestData::kTestRowType, partitionId, exchangeNodeId);
+  auto exchangeClient = std::make_shared<UcxExchangeClient>(
+      sinkTask->taskId(), sinkTask->destination(), /*numberOfConsumers=*/1);
+
+  // Create a 0-row packed table matching the output schema and bundle it into a
+  // PackedTableWithStream, mirroring how UcxExchangeSource wraps received data.
+  auto stream = rmm::cuda_stream_default;
+  auto emptyTable = makeTable(/*numRows=*/0, UcxTestData::kTestRowType, stream);
+  auto packedColumns = cudf::pack(emptyTable->view(), stream);
+  stream.synchronize();
+  auto tableView = cudf::unpack(packedColumns);
+  auto packedTable = std::make_unique<cudf::packed_table>(
+      cudf::packed_table{tableView, std::move(packedColumns)});
+  auto data =
+      std::make_unique<PackedTableWithStream>(std::move(packedTable), stream);
+  ASSERT_EQ(data->packedTable->table.num_rows(), 0);
+
+  // Enqueue the empty batch directly into the client's queue.
+  {
+    std::lock_guard<std::mutex> l(exchangeClient->queue()->mutex());
+    std::vector<ContinuePromise> promises;
+    exchangeClient->queue()->enqueueLocked(std::move(data), promises);
+  }
+
+  // Drive the operator on driver 1 so it does not process splits; the injected
+  // queue is its only data source.
+  auto planNode = sinkTask->planFragment().planNode;
+  auto driverCtx = std::make_shared<DriverCtx>(
+      sinkTask,
+      /*driverId=*/1,
+      /*pipelineId=*/0,
+      kUngroupedGroupId,
+      /*partitionId=*/0);
+  UcxExchange exchange(
+      /*operatorId=*/0, driverCtx.get(), planNode, exchangeClient);
+
+  // isBlocked() pulls the empty batch into the operator's currentData_.
+  ContinueFuture future;
+  ASSERT_EQ(exchange.isBlocked(&future), BlockingReason::kNotBlocked);
+
+  // getOutput() must not surface the 0-row batch as a non-null empty vector.
+  RowVectorPtr result = exchange.getOutput();
+  if (result != nullptr) {
+    EXPECT_GT(result->size(), 0)
+        << "getOutput() returned a non-null empty vector for a 0-row batch; "
+           "velox requires nullptr or a non-empty vector";
+  }
+  EXPECT_EQ(result, nullptr)
+      << "getOutput() must return nullptr for a 0-row batch";
+
+  exchange.close();
 }
 
 // Test that verifies intra-node exchange does not livelock when a producing
