@@ -24,7 +24,9 @@
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
 #include "velox/exec/tests/utils/OperatorTestBase.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
+#include "velox/functions/prestosql/types/TimestampWithTimeZoneType.h"
 #include "velox/type/Time.h"
+#include "velox/type/tz/TimeZoneMap.h"
 
 namespace facebook::velox::exec::test {
 
@@ -213,6 +215,28 @@ TEST_F(ToCudfSelectionTest, prestoDateTruncTimestampAdjustTimezoneUsesCudf) {
       .config(QueryConfig::kSessionTimezone, "Asia/Kolkata")
       .config(QueryConfig::kAdjustTimestampToTimezone, "true")
       .countResults(task);
+
+  ASSERT_TRUE(wasCudfFilterProjectUsed(task));
+  ASSERT_FALSE(wasDefaultFilterProjectUsed(task));
+}
+
+TEST_F(ToCudfSelectionTest, prestoDateTruncTimestampWithTimeZoneUsesCudf) {
+  // date_trunc(timestamp with time zone) is evaluated on GPU (per-row embedded
+  // zone), so the plan runs on cuDF rather than falling back.
+  auto input = makeRowVector(
+      {"c0"},
+      {makeFlatVector<int64_t>(
+          {pack(1'736'971'261'123, tz::getTimeZoneID("America/Los_Angeles")),
+           pack(1'736'971'261'123, tz::getTimeZoneID("Asia/Kolkata"))},
+          TIMESTAMP_WITH_TIME_ZONE())});
+
+  auto plan = PlanBuilder()
+                  .values({input})
+                  .project({"date_trunc('day', c0) AS result"})
+                  .planNode();
+
+  std::shared_ptr<Task> task;
+  AssertQueryBuilder(plan).config("cudf.enabled", true).countResults(task);
 
   ASSERT_TRUE(wasCudfFilterProjectUsed(task));
   ASSERT_FALSE(wasDefaultFilterProjectUsed(task));
