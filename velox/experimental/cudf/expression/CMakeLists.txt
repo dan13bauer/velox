@@ -32,6 +32,7 @@ add_library(
   sparksql/HashFunction.cpp
   sparksql/SubStringFunction.cpp
   SubfieldFiltersToAst.cpp
+  TimestampWithTimeZoneColumn.cpp
   TimezoneConversion.cpp
 )
 
