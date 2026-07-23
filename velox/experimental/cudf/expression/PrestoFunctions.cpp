@@ -24,6 +24,7 @@
 #include "velox/common/base/Exceptions.h"
 #include "velox/expression/ConstantExpr.h"
 #include "velox/expression/FunctionSignature.h"
+#include "velox/functions/prestosql/types/TimestampWithTimeZoneType.h"
 #include "velox/vector/BaseVector.h"
 
 #include <cudf/scalar/scalar.hpp>
@@ -156,6 +157,10 @@ void registerPrestoFunctions(const std::string& prefix) {
       prefix + "date_add",
       [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr)
           -> std::shared_ptr<CudfFunction> {
+        if (isTimestampWithTimeZoneType(expr->inputs()[2]->type())) {
+          return std::make_shared<
+              prestosql::DateAddTimestampWithTimeZoneFunction>(expr);
+        }
         if (expr->inputs()[2]->type()->isTimestamp()) {
           return std::make_shared<prestosql::DateAddTimestampFunction>(expr);
         }
@@ -172,11 +177,18 @@ void registerPrestoFunctions(const std::string& prefix) {
            .constantArgumentType("varchar")
            .argumentType("bigint")
            .argumentType("timestamp")
+           .build(),
+       FunctionSignatureBuilder()
+           .returnType("timestamp with time zone")
+           .constantArgumentType("varchar")
+           .argumentType("bigint")
+           .argumentType("timestamp with time zone")
            .build()},
       true,
       [](const std::shared_ptr<velox::exec::Expr>& expr) {
         return prestosql::DateAddFunction::canEvaluate(expr) ||
-            prestosql::DateAddTimestampFunction::canEvaluate(expr);
+            prestosql::DateAddTimestampFunction::canEvaluate(expr) ||
+            prestosql::DateAddTimestampWithTimeZoneFunction::canEvaluate(expr);
       });
 
   registerCudfFunction(

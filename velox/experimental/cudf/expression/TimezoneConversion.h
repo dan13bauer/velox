@@ -38,8 +38,8 @@ namespace facebook::velox::cudf_velox {
 /// The offset comes from a per-zone transition table built from Velox's own
 /// time zone database (the same source the CPU path uses) and cached for the
 /// process lifetime; a sorted search (cudf::upper_bound) + cudf::gather selects
-/// each row's offset and cudf::binary_operation adds it. Instants after the last
-/// codified transition reuse its offset.
+/// each row's offset and cudf::binary_operation adds it. Instants after the
+/// last codified transition reuse its offset.
 ///
 /// Null rows propagate. This is the inverse of toUtcTimestamp.
 std::unique_ptr<cudf::column> toLocalTimestamp(
@@ -61,9 +61,23 @@ std::unique_ptr<cudf::column> toLocalTimestamp(
 /// tzdb-sourced transition table, in its local-keyed form with a gap flag per
 /// breakpoint. Building the table from Velox's own time zone database -- the
 /// source the CPU path uses -- makes the gap and overlap boundaries match
-/// exactly. The conversion is a sorted search (cudf::upper_bound) plus an offset
-/// subtract.
+/// exactly. The conversion is a sorted search (cudf::upper_bound) plus an
+/// offset subtract.
 std::unique_ptr<cudf::column> toUtcTimestamp(
+    const cudf::column_view& localTimestamps,
+    std::string_view timezoneName,
+    rmm::cuda_stream_view stream,
+    rmm::device_async_resource_ref mr);
+
+/// Like toUtcTimestamp, but a local time in a spring-forward gap resolves
+/// forward instead of raising, matching addToTimestampWithTimezone's day-and-
+/// above path (correct_nonexistent_time followed by to_sys(kEarliest)). That
+/// combination shifts the nonexistent local by the gap size and then subtracts
+/// the post-transition offset, which reduces to subtracting the pre-transition
+/// offset -- exactly the offset the local-keyed transition table already stores
+/// across the gap. Overlaps still resolve to the earliest instant, and null
+/// rows propagate. Reads the same cached table as toUtcTimestamp.
+std::unique_ptr<cudf::column> toUtcTimestampCorrecting(
     const cudf::column_view& localTimestamps,
     std::string_view timezoneName,
     rmm::cuda_stream_view stream,

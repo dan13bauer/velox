@@ -1467,6 +1467,119 @@ TEST_F(CudfFilterProjectTest, dateAddTimestampValueOutOfRange) {
       "date_add value is out of range");
 }
 
+// date_add(timestamp with time zone) adds on each row's embedded zone,
+// independent of the session zone, matching CPU addToTimestampWithTimezone.
+// Sub-day units add on the UTC instant; day-and-above units add on the local
+// wall clock and convert back to UTC.
+TEST_F(CudfFilterProjectTest, dateAddTimestampWithTimeZoneUnits) {
+  // 2025-01-15 20:01:01.123 UTC == 12:01:01.123 America/Los_Angeles.
+  auto input = makeRowVector({makeFlatVector<int64_t>(
+      {pack(1'736'971'261'123, tz::getTimeZoneID("America/Los_Angeles"))},
+      TIMESTAMP_WITH_TIME_ZONE())});
+  std::vector<std::string> projections;
+  for (const auto* unit :
+       {"second",
+        "minute",
+        "hour",
+        "day",
+        "week",
+        "month",
+        "quarter",
+        "year"}) {
+    projections.push_back(
+        std::string("date_add('") + unit + "', 3, c0) AS add_" + unit);
+    projections.push_back(
+        std::string("date_add('") + unit + "', -5, c0) AS sub_" + unit);
+  }
+  assertProjectMatchesVelox({input}, projections);
+}
+
+// A fractional-offset zone (+05:30) exercises both the sub-day UTC add and the
+// day+ local->UTC round-trip on a non-whole-hour offset.
+TEST_F(CudfFilterProjectTest, dateAddTimestampWithTimeZoneFractionalOffset) {
+  auto input = makeRowVector({makeFlatVector<int64_t>(
+      {pack(1'736'971'261'123, tz::getTimeZoneID("Asia/Kolkata"))},
+      TIMESTAMP_WITH_TIME_ZONE())});
+  assertProjectMatchesVelox(
+      {input},
+      {"date_add('hour', 5, c0) AS h",
+       "date_add('day', 2, c0) AS d",
+       "date_add('month', 1, c0) AS mo"});
+}
+
+// Each row adds on its own embedded zone.
+TEST_F(CudfFilterProjectTest, dateAddTimestampWithTimeZoneMixedZones) {
+  auto input = makeRowVector({makeFlatVector<int64_t>(
+      {pack(1'736'971'261'123, tz::getTimeZoneID("America/Los_Angeles")),
+       pack(1'736'971'261'123, tz::getTimeZoneID("Asia/Kolkata"))},
+      TIMESTAMP_WITH_TIME_ZONE())});
+  assertProjectMatchesVelox(
+      {input},
+      {"date_add('day', 10, c0) AS d", "date_add('hour', 2, c0) AS h"});
+}
+
+// A per-row value column.
+TEST_F(CudfFilterProjectTest, dateAddTimestampWithTimeZoneColumnValue) {
+  auto input = makeRowVector(
+      {"amt", "c0"},
+      {makeFlatVector<int64_t>({1, -2, 100}),
+       makeFlatVector<int64_t>(
+           {pack(1'736'971'261'123, tz::getTimeZoneID("America/Los_Angeles")),
+            pack(0, tz::getTimeZoneID("Asia/Kolkata")),
+            pack(1'709'251'200'000, tz::getTimeZoneID("America/Los_Angeles"))},
+           TIMESTAMP_WITH_TIME_ZONE())});
+  assertProjectMatchesVelox(
+      {input},
+      {"date_add('month', amt, c0) AS mo", "date_add('hour', amt, c0) AS h"});
+}
+
+// A null row stays null through the TSWTZ path.
+TEST_F(CudfFilterProjectTest, dateAddTimestampWithTimeZoneNull) {
+  auto input = makeRowVector({makeNullableFlatVector<int64_t>(
+      {pack(1'736'971'261'123, tz::getTimeZoneID("Asia/Kolkata")),
+       std::nullopt},
+      TIMESTAMP_WITH_TIME_ZONE())});
+  assertProjectMatchesVelox(
+      {input}, {"date_add('day', 3, c0) AS d", "date_add('hour', 3, c0) AS h"});
+}
+
+// Unlike date_add(timestamp) under a session zone, a TSWTZ day-add whose result
+// lands in a spring-forward gap does NOT throw: it resolves the nonexistent
+// local forward, matching CPU addToTimestampWithTimezone. 2024-03-09 02:30
+// America/Los_Angeles + 1 day == 2024-03-10 02:30, which does not exist.
+TEST_F(
+    CudfFilterProjectTest,
+    dateAddTimestampWithTimeZoneSpringForwardNoThrow) {
+  auto input = makeRowVector({makeFlatVector<int64_t>(
+      {pack(1'709'980'200'000, tz::getTimeZoneID("America/Los_Angeles"))},
+      TIMESTAMP_WITH_TIME_ZONE())});
+  assertProjectMatchesVelox({input}, {"date_add('day', 1, c0) AS d"});
+}
+
+// A day add whose result lands in a fall-back overlap resolves to the earliest
+// instant, matching CPU to_sys(kEarliest). 2024-11-02 01:30 America/Los_Angeles
+// (PDT) + 1 day == 2024-11-03 01:30, ambiguous during the fall-back overlap.
+TEST_F(CudfFilterProjectTest, dateAddTimestampWithTimeZoneFallBack) {
+  auto input = makeRowVector({makeFlatVector<int64_t>(
+      {pack(1'730'536'200'000, tz::getTimeZoneID("America/Los_Angeles"))},
+      TIMESTAMP_WITH_TIME_ZONE())});
+  assertProjectMatchesVelox({input}, {"date_add('day', 1, c0) AS d"});
+}
+
+// A value outside int32 range throws, matching CPU checkValueInInt32Range.
+TEST_F(CudfFilterProjectTest, dateAddTimestampWithTimeZoneValueOutOfRange) {
+  auto input = makeRowVector({makeFlatVector<int64_t>(
+      {pack(0, tz::getTimeZoneID("America/Los_Angeles"))},
+      TIMESTAMP_WITH_TIME_ZONE())});
+  auto plan = PlanBuilder()
+                  .values({input})
+                  .project({"date_add('day', 3000000000, c0) AS result"})
+                  .planNode();
+  VELOX_ASSERT_THROW(
+      AssertQueryBuilder(plan).copyResults(pool()),
+      "date_add value is out of range");
+}
+
 TEST_F(CudfFilterProjectTest, dateTruncTimestampUnits) {
   auto vectors = makeTimestampExtractVectors();
   const std::vector<std::string> projections{

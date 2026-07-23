@@ -255,11 +255,12 @@ std::unique_ptr<cudf::column> tswtzLocalToUtc(
     auto maskedLocal = cudf::copy_if_else(
         localMillisTs, nullTs->view(), isThisZone->view(), stream, mr);
     const auto zoneName = tz::getTimeZoneName(zoneKey);
-    // correctForward is wired to toUtcTimestampCorrecting in Phase 4
-    // (date_add(TSWTZ)); Phase 2 (date_trunc) only uses the throwing path.
-    VELOX_CHECK(
-        !correctForward, "gap-correcting local-to-UTC is not yet implemented");
-    auto utc = toUtcTimestamp(maskedLocal->view(), zoneName, stream, mr);
+    // date_trunc snaps to local midnight (never a gap) and uses the throwing
+    // path; date_add can land a same-wall-clock time in a spring-forward gap
+    // and uses the correcting path (matches addToTimestampWithTimezone).
+    auto utc = correctForward
+        ? toUtcTimestampCorrecting(maskedLocal->view(), zoneName, stream, mr)
+        : toUtcTimestamp(maskedLocal->view(), zoneName, stream, mr);
     result = cudf::copy_if_else(
         utc->view(), result->view(), isThisZone->view(), stream, mr);
   }

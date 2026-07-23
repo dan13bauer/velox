@@ -15,11 +15,13 @@
  */
 #include "velox/experimental/cudf/CudfNoDefaults.h"
 #include "velox/experimental/cudf/expression/AstUtils.h"
+#include "velox/experimental/cudf/expression/TimestampWithTimeZoneColumn.h"
 #include "velox/experimental/cudf/expression/TimezoneConversion.h"
 #include "velox/experimental/cudf/expression/prestosql/DateAddFunction.h"
 
 #include "velox/expression/ConstantExpr.h"
 #include "velox/functions/prestosql/DateTimeFunctions.h"
+#include "velox/functions/prestosql/types/TimestampWithTimeZoneType.h"
 #include "velox/vector/ConstantVector.h"
 
 #include <cudf/binaryop.hpp>
@@ -505,6 +507,124 @@ ColumnOrView DateAddTimestampFunction::eval(
       mr);
   // A spring-forward gap raises in toUtcTimestamp, matching CPU toGMT parity.
   return toUtcTimestamp(added->view(), zone, stream, mr);
+}
+
+bool DateAddTimestampWithTimeZoneFunction::canEvaluate(
+    const std::shared_ptr<velox::exec::Expr>& expr) {
+  if (expr->inputs().size() != 3 ||
+      !isTimestampWithTimeZoneType(expr->type()) ||
+      !isTimestampWithTimeZoneType(expr->inputs()[2]->type())) {
+    return false;
+  }
+
+  auto valueExpr =
+      std::dynamic_pointer_cast<velox::exec::ConstantExpr>(expr->inputs()[1]);
+  auto timestampExpr =
+      std::dynamic_pointer_cast<velox::exec::ConstantExpr>(expr->inputs()[2]);
+  if (valueExpr && timestampExpr) {
+    return false;
+  }
+
+  auto unitString = constantVarcharValue(expr->inputs()[0]);
+  if (!unitString.has_value()) {
+    return false;
+  }
+  return functions::fromDateTimeUnitString(*unitString, false).has_value();
+}
+
+DateAddTimestampWithTimeZoneFunction::DateAddTimestampWithTimeZoneFunction(
+    const std::shared_ptr<velox::exec::Expr>& expr) {
+  using velox::exec::ConstantExpr;
+  VELOX_CHECK(
+      canEvaluate(expr),
+      "date_add expression cannot be evaluated by "
+      "prestosql::DateAddTimestampWithTimeZoneFunction");
+
+  auto unitString = constantVarcharValue(expr->inputs()[0]);
+  unit_ = *functions::fromDateTimeUnitString(*unitString, true);
+
+  auto valueExpr = std::dynamic_pointer_cast<ConstantExpr>(expr->inputs()[1]);
+  valueIsLiteral_ = valueExpr != nullptr;
+  timestampIsLiteral_ =
+      std::dynamic_pointer_cast<ConstantExpr>(expr->inputs()[2]) != nullptr;
+
+  if (valueIsLiteral_) {
+    literalValueIsValid_ = !valueExpr->value()->isNullAt(0);
+    if (literalValueIsValid_) {
+      literalValue_ =
+          valueExpr->value()->as<ConstantVector<int64_t>>()->value();
+    }
+  }
+  if (timestampIsLiteral_) {
+    // A TSWTZ constant is physically a bigint (the packed value), so the
+    // dispatched scalar is a numeric int64 scalar holding the packed instant.
+    literalTimestamp_ = makeScalarFromConstantExpr(expr->inputs()[2]);
+  }
+}
+
+ColumnOrView DateAddTimestampWithTimeZoneFunction::eval(
+    std::vector<ColumnOrView>& inputColumns,
+    [[maybe_unused]] cudf::size_type numRows,
+    rmm::cuda_stream_view stream,
+    rmm::device_async_resource_ref mr) const {
+  size_t idx = 0;
+
+  std::optional<cudf::column_view> valueCol;
+  if (!valueIsLiteral_) {
+    valueCol = asView(inputColumns[idx++]);
+  }
+
+  std::unique_ptr<cudf::column> literalPackedColumn;
+  cudf::column_view packedCol;
+  if (!timestampIsLiteral_) {
+    packedCol = asView(inputColumns[idx++]);
+  } else {
+    VELOX_CHECK_NOT_NULL(literalTimestamp_);
+    VELOX_CHECK(
+        valueCol.has_value(),
+        "date_add with only literal inputs is not supported");
+    literalPackedColumn = cudf::make_column_from_scalar(
+        *literalTimestamp_, valueCol->size(), stream, mr);
+    packedCol = literalPackedColumn->view();
+  }
+
+  auto perRowZoneKey = tswtzZoneKey(packedCol, stream, mr);
+
+  // Sub-day units add directly to the UTC instant (DST-agnostic); day-and-above
+  // units add on each row's local wall clock, then convert back to UTC,
+  // resolving a spring-forward gap forward instead of throwing. This matches
+  // addToTimestampWithTimezone.
+  if (functions::isTimeUnit(unit_)) {
+    auto utcInstant = tswtzUtcInstant(packedCol, stream, mr);
+    auto added = addUnitToInstant(
+        utcInstant->view(),
+        valueCol,
+        literalValue_,
+        literalValueIsValid_,
+        unit_,
+        stream,
+        mr);
+    return tswtzPack(added->view(), perRowZoneKey->view(), stream, mr);
+  }
+
+  auto local = tswtzLocalWallClock(packedCol, stream, mr);
+  auto added = addUnitToInstant(
+      local->view(),
+      valueCol,
+      literalValue_,
+      literalValueIsValid_,
+      unit_,
+      stream,
+      mr);
+  auto distinctKeys = tswtzDistinctZoneKeys(perRowZoneKey->view(), stream, mr);
+  auto utc = tswtzLocalToUtc(
+      added->view(),
+      perRowZoneKey->view(),
+      distinctKeys,
+      /*correctForward=*/true,
+      stream,
+      mr);
+  return tswtzPack(utc->view(), perRowZoneKey->view(), stream, mr);
 }
 
 } // namespace facebook::velox::cudf_velox::prestosql

@@ -191,8 +191,8 @@ std::unique_ptr<cudf::table> buildForwardTable(
 // Builds the local-keyed inverse table [localInstant (TIMESTAMP_SECONDS),
 // offset (DURATION_SECONDS), gap (BOOL8)] from the zone's transitions. A
 // transition from prevOffset to curOffset at UTC instant `inst` shifts the wall
-// clock between inst+prevOffset and inst+curOffset. A forward shift (curOffset >
-// prevOffset, spring forward) makes that local range nonexistent, so it is
+// clock between inst+prevOffset and inst+curOffset. A forward shift (curOffset
+// > prevOffset, spring forward) makes that local range nonexistent, so it is
 // flagged as a gap; a backward shift (fall back) makes it ambiguous, and
 // keeping the pre-transition offset over the overlap matches toGMT's kEarliest
 // choice (so only the later local boundary needs a breakpoint). Synchronizes
@@ -315,11 +315,15 @@ class OffsetTable {
       rmm::cuda_stream_view stream,
       rmm::device_async_resource_ref mr) const;
 
-  // local - offset; raises a user error on a nonexistent (spring-forward gap)
-  // local time and resolves an ambiguous (fall-back overlap) one to the
-  // earliest instant. Null rows are never treated as gaps.
+  // local - offset. When correctForward is false, raises a user error on a
+  // nonexistent (spring-forward gap) local time; when true, keeps the computed
+  // instant (local minus the pre-transition offset the gap interval stores),
+  // matching addToTimestampWithTimezone. An ambiguous (fall-back overlap) local
+  // always resolves to the earliest instant. Null rows are never treated as
+  // gaps.
   std::unique_ptr<cudf::column> toUtc(
       const cudf::column_view& localTimestamps,
+      bool correctForward,
       rmm::cuda_stream_view stream,
       rmm::device_async_resource_ref mr) const;
 
@@ -403,6 +407,7 @@ std::unique_ptr<cudf::column> OffsetTable::toLocal(
 
 std::unique_ptr<cudf::column> OffsetTable::toUtc(
     const cudf::column_view& localTimestamps,
+    bool correctForward,
     rmm::cuda_stream_view stream,
     rmm::device_async_resource_ref mr) const {
   auto indices = activeIntervalIndices(
@@ -430,32 +435,37 @@ std::unique_ptr<cudf::column> OffsetTable::toUtc(
       stream,
       mr);
 
-  // A nonexistent local time (spring-forward gap) has no UTC instant; match
-  // CPU's toGMT and fail. Null rows are not gaps, so mask them out first.
-  cudf::column_view gap = gatheredView.column(1);
-  std::unique_ptr<cudf::column> maskedGap;
-  if (localTimestamps.nullable() && localTimestamps.null_count() > 0) {
-    auto valid = cudf::is_valid(localTimestamps, stream, mr);
-    maskedGap = cudf::binary_operation(
+  // A nonexistent local time (spring-forward gap) has no UTC instant. The
+  // throwing path matches CPU's toGMT and fails; the correcting path keeps
+  // `result` (local minus the pre-transition offset the gap interval stores),
+  // matching addToTimestampWithTimezone. Null rows are not gaps, so mask them
+  // out before the gap check.
+  if (!correctForward) {
+    cudf::column_view gap = gatheredView.column(1);
+    std::unique_ptr<cudf::column> maskedGap;
+    if (localTimestamps.nullable() && localTimestamps.null_count() > 0) {
+      auto valid = cudf::is_valid(localTimestamps, stream, mr);
+      maskedGap = cudf::binary_operation(
+          gap,
+          valid->view(),
+          cudf::binary_operator::LOGICAL_AND,
+          cudf::data_type{cudf::type_id::BOOL8},
+          stream,
+          mr);
+      gap = maskedGap->view();
+    }
+    auto anyGap = cudf::reduce(
         gap,
-        valid->view(),
-        cudf::binary_operator::LOGICAL_AND,
+        *cudf::make_any_aggregation<cudf::reduce_aggregation>(),
         cudf::data_type{cudf::type_id::BOOL8},
         stream,
         mr);
-    gap = maskedGap->view();
-  }
-  auto anyGap = cudf::reduce(
-      gap,
-      *cudf::make_any_aggregation<cudf::reduce_aggregation>(),
-      cudf::data_type{cudf::type_id::BOOL8},
-      stream,
-      mr);
-  auto& anyGapScalar = static_cast<cudf::numeric_scalar<bool>&>(*anyGap);
-  if (anyGapScalar.is_valid(stream) && anyGapScalar.value(stream)) {
-    VELOX_USER_FAIL(
-        "Cannot convert local time to UTC: the time does not exist in the "
-        "time zone (daylight savings gap)");
+    auto& anyGapScalar = static_cast<cudf::numeric_scalar<bool>&>(*anyGap);
+    if (anyGapScalar.is_valid(stream) && anyGapScalar.value(stream)) {
+      VELOX_USER_FAIL(
+          "Cannot convert local time to UTC: the time does not exist in the "
+          "time zone (daylight savings gap)");
+    }
   }
   return result;
 }
@@ -486,7 +496,16 @@ std::unique_ptr<cudf::column> toUtcTimestamp(
     rmm::cuda_stream_view stream,
     rmm::device_async_resource_ref mr) {
   return OffsetTable::get(tz::locateZone(timezoneName))
-      ->toUtc(localTimestamps, stream, mr);
+      ->toUtc(localTimestamps, /*correctForward=*/false, stream, mr);
+}
+
+std::unique_ptr<cudf::column> toUtcTimestampCorrecting(
+    const cudf::column_view& localTimestamps,
+    std::string_view timezoneName,
+    rmm::cuda_stream_view stream,
+    rmm::device_async_resource_ref mr) {
+  return OffsetTable::get(tz::locateZone(timezoneName))
+      ->toUtc(localTimestamps, /*correctForward=*/true, stream, mr);
 }
 
 } // namespace facebook::velox::cudf_velox
