@@ -218,6 +218,7 @@ add_executable(
   velox_exec_infra_test
   AssertQueryBuilderTest.cpp
   DriverTest.cpp
+  ExchangeTransportTest.cpp
   FunctionSignatureBuilderTest.cpp
   GroupedExecutionTest.cpp
   Main.cpp
@@ -471,6 +472,21 @@ add_test(
 )
 target_link_libraries(
   velox_output_transport_registry_test
+  velox_exec
+  GTest::gtest
+  GTest::gtest_main
+  GTest::gmock
+)
+
+add_executable(
+  velox_exchange_transport_registry_test ExchangeTransportRegistryTest.cpp)
+add_test(
+  NAME velox_exchange_transport_registry_test
+  COMMAND velox_exchange_transport_registry_test
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_link_libraries(
+  velox_exchange_transport_registry_test
   velox_exec
   GTest::gtest
   GTest::gtest_main

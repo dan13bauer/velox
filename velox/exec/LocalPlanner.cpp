@@ -21,6 +21,7 @@
 #include "velox/exec/EnforceDistinct.h"
 #include "velox/exec/EnforceSingleRow.h"
 #include "velox/exec/Exchange.h"
+#include "velox/exec/ExchangeTransportRegistry.h"
 #include "velox/exec/Expand.h"
 #include "velox/exec/FilterProject.h"
 #include "velox/exec/GroupId.h"
@@ -499,7 +500,7 @@ void LocalPlanner::markMixedJoinBridges(
 
 std::shared_ptr<Driver> DriverFactory::createDriver(
     std::unique_ptr<DriverCtx> ctx,
-    std::shared_ptr<InMemoryExchangeClient> exchangeClient,
+    std::shared_ptr<ExchangeClient> exchangeClient,
     const PartitionedOutputFactory& outputOperatorFactory,
     std::shared_ptr<PipelinePushdownFilters> filters,
     std::function<int(int pipelineId)> numDrivers) {
@@ -574,11 +575,16 @@ std::shared_ptr<Driver> DriverFactory::createDriver(
     } else if (
         auto exchangeNode =
             std::dynamic_pointer_cast<const core::ExchangeNode>(planNode)) {
-      // NOTE: the exchange client can only be used by one operator in a driver.
+      // The exchange client is Task-owned and shared across this node's drivers.
       VELOX_CHECK_NOT_NULL(exchangeClient);
-      operators.push_back(
-          std::make_unique<Exchange>(
-              id, ctx.get(), exchangeNode, std::move(exchangeClient)));
+      auto entry = ExchangeTransportRegistry::tryGet(
+          *ctx->task->queryCtx(), exchangeNode->transportKind());
+      VELOX_USER_CHECK_NOT_NULL(
+          entry,
+          "No exchange transport registered for transport: {}",
+          exchangeNode->transportKind());
+      operators.push_back(entry->makeOperator(
+          id, ctx.get(), exchangeNode, std::move(exchangeClient)));
     } else if (
         auto partitionedOutputNode =
             std::dynamic_pointer_cast<const core::PartitionedOutputNode>(
@@ -735,16 +741,7 @@ std::shared_ptr<Driver> DriverFactory::createDriver(
           std::make_unique<trace::OperatorTraceScan>(
               id, ctx.get(), traceScanNode));
     } else {
-      std::unique_ptr<Operator> extended;
-      if (planNode->requiresExchangeClient()) {
-        // NOTE: the exchange client can only be used by one operator in a
-        // driver.
-        VELOX_CHECK_NOT_NULL(exchangeClient);
-        extended = Operator::fromPlanNode(
-            ctx.get(), id, planNode, std::move(exchangeClient));
-      } else {
-        extended = Operator::fromPlanNode(ctx.get(), id, planNode);
-      }
+      auto extended = Operator::fromPlanNode(ctx.get(), id, planNode);
       VELOX_CHECK(extended, "Unsupported plan node: {}", planNode->toString());
       operators.push_back(std::move(extended));
     }

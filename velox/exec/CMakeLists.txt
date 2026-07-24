@@ -74,6 +74,7 @@ velox_add_library(
   OutputBuffer.cpp
   DefaultOutputBufferManager.cpp
   OutputTransportRegistry.cpp
+  ExchangeTransportRegistry.cpp
   ParallelProject.cpp
   PartitionFunction.cpp
   PartitionedOutput.cpp

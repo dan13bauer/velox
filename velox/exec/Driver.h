@@ -37,6 +37,7 @@
 namespace facebook::velox::exec {
 
 class Driver;
+class ExchangeClient;
 class InMemoryExchangeClient;
 class Operator;
 struct OperatorStats;
@@ -829,7 +830,7 @@ struct DriverFactory {
 
   std::shared_ptr<Driver> createDriver(
       std::unique_ptr<DriverCtx> ctx,
-      std::shared_ptr<InMemoryExchangeClient> exchangeClient,
+      std::shared_ptr<ExchangeClient> exchangeClient,
       const PartitionedOutputFactory& outputOperatorFactory,
       std::shared_ptr<PipelinePushdownFilters> filters,
       std::function<int(int pipelineId)> numDrivers);
@@ -871,15 +872,14 @@ struct DriverFactory {
     return nullptr;
   }
 
-  /// Returns Exchange plan node ID if the pipeline receives data from an
-  /// exchange.
-  std::optional<core::PlanNodeId> needsExchangeClient() const {
+  /// Returns the leaf ExchangeNode if the pipeline receives data from an
+  /// exchange, else nullptr. The caller reads the node's transportKind to
+  /// resolve the transport. MergeExchangeNode derives from ExchangeNode and is
+  /// matched here too.
+  std::shared_ptr<const core::ExchangeNode> needsExchangeClient() const {
     VELOX_CHECK(!planNodes.empty());
-    const auto& leafNode = planNodes.front();
-    if (leafNode->requiresExchangeClient()) {
-      return leafNode->id();
-    }
-    return std::nullopt;
+    return std::dynamic_pointer_cast<const core::ExchangeNode>(
+        planNodes.front());
   }
 
   /// Returns true if the pipeline gets data from a local exchange. The function

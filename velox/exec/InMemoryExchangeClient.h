@@ -15,15 +15,19 @@
  */
 #pragma once
 
+#include "velox/exec/ExchangeClient.h"
 #include "velox/exec/ExchangeQueue.h"
 #include "velox/exec/ExchangeSource.h"
 
 namespace facebook::velox::exec {
 
+struct ExchangeTransportEntry;
+
 // Handle for a set of producers. This may be shared by multiple Exchanges, one
 // per consumer thread.
 class InMemoryExchangeClient
-    : public std::enable_shared_from_this<InMemoryExchangeClient> {
+    : public ExchangeClient,
+      public std::enable_shared_from_this<InMemoryExchangeClient> {
  public:
   static constexpr int32_t kDefaultMaxQueuedBytes = 32 << 20; // 32 MB.
   static constexpr std::chrono::milliseconds kRequestDataMaxWait{100};
@@ -84,17 +88,22 @@ class InMemoryExchangeClient
   // upstream task. If 'close' has been called already, creates an exchange
   // source and immediately closes it to notify the upstream task that data is
   // no longer needed. Repeated calls with the same 'taskId' are ignored.
-  void addRemoteTaskId(const std::string& remoteTaskId);
+  void addRemoteTaskId(const std::string& remoteTaskId) override;
 
-  void noMoreRemoteTasks();
+  void noMoreRemoteTasks() override;
 
   // Closes exchange sources.
-  void close();
+  void close() override;
 
   // Returns runtime statistics aggregated across all of the exchange sources.
   // InMemoryExchangeClient is expected to report background CPU time by
   // including a runtime metric named Operator::kBackgroundCpuTimeNanos.
-  folly::F14FastMap<std::string, RuntimeMetric> stats();
+  folly::F14FastMap<std::string, RuntimeMetric> stats() override;
+
+  /// Builds the built-in in-memory transport entry: a client factory that
+  /// constructs an InMemoryExchangeClient from query config, and an operator
+  /// factory that builds the Exchange operator bound to it.
+  static std::shared_ptr<ExchangeTransportEntry> makeDefaultTransportEntry();
 
   const std::shared_ptr<ExchangeQueue>& queue() const {
     return queue_;
@@ -113,7 +122,7 @@ class InMemoryExchangeClient
 
   std::string toString() const;
 
-  folly::dynamic toJson() const;
+  folly::dynamic toJson() const override;
 
   std::chrono::seconds requestDataSizesMaxWaitSec() const {
     return requestDataSizesMaxWaitSec_;

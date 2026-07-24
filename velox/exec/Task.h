@@ -35,6 +35,7 @@ namespace facebook::velox::exec {
 
 class OutputBufferManager;
 
+class ExchangeClient;
 class HashJoinBridge;
 class IndexLookupJoinBridge;
 class NestedLoopJoinBridge;
@@ -1173,28 +1174,30 @@ class Task : public std::enable_shared_from_this<Task> {
   int getOutputPipelineId() const;
 
   // Create an exchange client for the specified exchange plan node at a given
-  // pipeline.
+  // pipeline. Resolves the transport entry by 'transportKind' via
+  // ExchangeTransportRegistry and builds the client from its factory.
   void createExchangeClientLocked(
       int32_t pipelineId,
       const core::PlanNodeId& planNodeId,
+      const std::string& transportKind,
       int32_t numberOfConsumers);
 
   // Get a shared reference to the exchange client with the specified exchange
   // plan node 'planNodeId'. The function returns null if there is no client
   // created for 'planNodeId' in 'exchangeClientByPlanNode_'.
-  std::shared_ptr<InMemoryExchangeClient> getExchangeClient(
+  std::shared_ptr<ExchangeClient> getExchangeClient(
       const core::PlanNodeId& planNodeId) const {
     std::lock_guard<std::timed_mutex> l(mutex_);
     return getExchangeClientLocked(planNodeId);
   }
 
-  std::shared_ptr<InMemoryExchangeClient> getExchangeClientLocked(
+  std::shared_ptr<ExchangeClient> getExchangeClientLocked(
       const core::PlanNodeId& planNodeId) const;
 
   // Get a shared reference to the exchange client with the specified
   // 'pipelineId'. The function returns null if there is no client created for
   // 'pipelineId' set in 'exchangeClients_'.
-  std::shared_ptr<InMemoryExchangeClient> getExchangeClientLocked(
+  std::shared_ptr<ExchangeClient> getExchangeClientLocked(
       int32_t pipelineId) const;
 
   // Builds the query trace config.
@@ -1302,11 +1305,11 @@ class Task : public std::enable_shared_from_this<Task> {
   // the exchange clients are also referenced by 'exchangeClientByPlanNode_'.
   // Hence, exchange clients can be indexed either by pipeline ID or by plan
   // node ID.
-  std::vector<std::shared_ptr<InMemoryExchangeClient>> exchangeClients_;
+  std::vector<std::shared_ptr<ExchangeClient>> exchangeClients_;
 
   // Exchange clients keyed by the corresponding Exchange plan node ID. Used to
   // process remaining remote splits after the task has completed early.
-  std::unordered_map<core::PlanNodeId, std::shared_ptr<InMemoryExchangeClient>>
+  std::unordered_map<core::PlanNodeId, std::shared_ptr<ExchangeClient>>
       exchangeClientByPlanNode_;
 
   // Pool of unique row ids shared by all AssignUniqueId operators in this task.
@@ -1571,7 +1574,7 @@ class TaskListener {
       const core::PlanFragment& /*fragment*/,
       const std::unordered_map<
           core::PlanNodeId,
-          std::shared_ptr<InMemoryExchangeClient>>&
+          std::shared_ptr<ExchangeClient>>&
       /*exchangeClientMap*/) {
     onTaskCompletion(taskUuid, taskId, state, error, stats);
   }

@@ -28,6 +28,7 @@
 #include "velox/common/testutil/TestValue.h"
 #include "velox/common/time/Timer.h"
 #include "velox/exec/Exchange.h"
+#include "velox/exec/ExchangeTransportRegistry.h"
 #include "velox/exec/HashJoinBridge.h"
 #include "velox/exec/IndexLookupJoinBridge.h"
 #include "velox/exec/LocalPlanner.h"
@@ -1313,9 +1314,12 @@ void Task::initializePartitionOutput() {
       // the task has failed. Correspondingly, MergeExchangeNode creates one
       // exchange client for each merge source to fetch data as we can't mix
       // the data from different sources for merging.
-      if (auto exchangeNodeId = factory->needsExchangeClient()) {
+      if (auto exchangeNode = factory->needsExchangeClient()) {
         createExchangeClientLocked(
-            pipeline, exchangeNodeId.value(), factory->numDrivers);
+            pipeline,
+            exchangeNode->id(),
+            exchangeNode->transportKind(),
+            factory->numDrivers);
       }
     }
   }
@@ -1875,7 +1879,7 @@ void Task::noMoreSplitsForGroup(
 void Task::noMoreSplits(const core::PlanNodeId& planNodeId) {
   std::vector<ContinuePromise> splitPromises;
   bool allFinished;
-  std::shared_ptr<InMemoryExchangeClient> exchangeClient;
+  std::shared_ptr<ExchangeClient> exchangeClient;
   {
     std::lock_guard<std::timed_mutex> l(mutex_);
 
@@ -2684,7 +2688,7 @@ ContinueFuture Task::terminate(TaskState terminalState) {
   EventCompletionNotifier taskCompletionNotifier;
   EventCompletionNotifier stateChangeNotifier;
   std::vector<ContinuePromise> barrierPromises;
-  std::vector<std::shared_ptr<InMemoryExchangeClient>> exchangeClients;
+  std::vector<std::shared_ptr<ExchangeClient>> exchangeClients;
   {
     std::lock_guard<std::timed_mutex> l(mutex_);
     if (taskStats_.executionEndTimeMs == 0) {
@@ -3759,6 +3763,7 @@ bool Task::pauseRequested(ContinueFuture* future) {
 void Task::createExchangeClientLocked(
     int32_t pipelineId,
     const core::PlanNodeId& planNodeId,
+    const std::string& transportKind,
     int32_t numberOfConsumers) {
   VELOX_CHECK_NULL(
       getExchangeClientLocked(pipelineId),
@@ -3769,23 +3774,23 @@ void Task::createExchangeClientLocked(
       getExchangeClientLocked(planNodeId),
       "Exchange client has been created for planNode: {}",
       planNodeId);
-  // Low-water mark for filling the exchange queue is 1/2 of the per worker
-  // buffer size of the producers.
-  exchangeClients_[pipelineId] = std::make_shared<InMemoryExchangeClient>(
+  auto entry = ExchangeTransportRegistry::tryGet(*queryCtx(), transportKind);
+  VELOX_USER_CHECK_NOT_NULL(
+      entry,
+      "No exchange transport registered for transport: {}",
+      transportKind);
+  const ExchangeClientContext context{
       taskId_,
       destination_,
-      queryCtx()->queryConfig().maxExchangeBufferSize(),
       numberOfConsumers,
-      queryCtx()->queryConfig().minExchangeOutputBatchBytes(),
       addExchangeClientPool(planNodeId, pipelineId),
       queryCtx()->executor(),
-      queryCtx()->queryConfig().requestDataSizesMaxWaitSec(),
-      queryCtx()->queryConfig().singleSourceExchangeOptimizationEnabled(),
-      queryCtx()->queryConfig().exchangeLazyFetchingEnabled());
+      queryCtx()->queryConfig()};
+  exchangeClients_[pipelineId] = entry->makeClient(context);
   exchangeClientByPlanNode_.emplace(planNodeId, exchangeClients_[pipelineId]);
 }
 
-std::shared_ptr<InMemoryExchangeClient> Task::getExchangeClientLocked(
+std::shared_ptr<ExchangeClient> Task::getExchangeClientLocked(
     const core::PlanNodeId& planNodeId) const {
   auto it = exchangeClientByPlanNode_.find(planNodeId);
   if (it == exchangeClientByPlanNode_.end()) {
@@ -3794,7 +3799,7 @@ std::shared_ptr<InMemoryExchangeClient> Task::getExchangeClientLocked(
   return it->second;
 }
 
-std::shared_ptr<InMemoryExchangeClient> Task::getExchangeClientLocked(
+std::shared_ptr<ExchangeClient> Task::getExchangeClientLocked(
     int32_t pipelineId) const {
   VELOX_CHECK_LT(pipelineId, exchangeClients_.size());
   return exchangeClients_[pipelineId];

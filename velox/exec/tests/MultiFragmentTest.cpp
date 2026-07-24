@@ -22,6 +22,8 @@
 #include "velox/dwio/common/tests/utils/BatchMaker.h"
 #include "velox/exec/DefaultOutputBufferManager.h"
 #include "velox/exec/Exchange.h"
+#include "velox/exec/ExchangeTransportRegistry.h"
+#include "velox/exec/InMemoryExchangeClient.h"
 #include "velox/exec/PartitionedOutput.h"
 #include "velox/exec/PlanNodeStats.h"
 #include "velox/exec/RoundRobinPartitionFunction.h"
@@ -2095,46 +2097,23 @@ TEST_P(MultiFragmentTest, cancelledExchange) {
   EXPECT_EQ(1, exchangeTask.use_count());
 }
 
-class TestCustomExchangeNode : public core::PlanNode {
+class TestCustomExchangeNode : public core::ExchangeNode {
  public:
+  static constexpr std::string_view kTransportKind{"test-custom-exchange"};
+
   TestCustomExchangeNode(
       const core::PlanNodeId& id,
       const RowTypePtr type,
       std::string serdeKind)
-      : PlanNode(id), outputType_(type), serdeKind_(serdeKind) {}
-
-  const RowTypePtr& outputType() const override {
-    return outputType_;
-  }
-
-  const std::string& serdeKind() const {
-    return serdeKind_;
-  }
-
-  const std::vector<core::PlanNodePtr>& sources() const override {
-    static std::vector<core::PlanNodePtr> kEmptySources;
-    return kEmptySources;
-  }
-
-  bool requiresExchangeClient() const override {
-    return true;
-  }
-
-  bool requiresSplits() const override {
-    return true;
-  }
+      : core::ExchangeNode(
+            id,
+            type,
+            std::move(serdeKind),
+            std::string{kTransportKind}) {}
 
   std::string_view name() const override {
     return "CustomExchange";
   }
-
- private:
-  void addDetails(std::stringstream& stream) const override {
-    // Nothing to add
-  }
-
-  const RowTypePtr outputType_;
-  const std::string serdeKind_;
 };
 
 class TestCustomExchange : public exec::Exchange {
@@ -2142,16 +2121,12 @@ class TestCustomExchange : public exec::Exchange {
   TestCustomExchange(
       int32_t operatorId,
       DriverCtx* ctx,
-      const std::shared_ptr<const TestCustomExchangeNode>& customExchangeNode,
+      const std::shared_ptr<const core::ExchangeNode>& exchangeNode,
       std::shared_ptr<InMemoryExchangeClient> exchangeClient)
       : exec::Exchange(
             operatorId,
             ctx,
-            std::make_shared<core::ExchangeNode>(
-                customExchangeNode->id(),
-                customExchangeNode->outputType(),
-                customExchangeNode->serdeKind(),
-                std::string{core::TransportKind::kInMemory}),
+            exchangeNode,
             std::move(exchangeClient)) {}
 
   RowVectorPtr getOutput() override {
@@ -2160,25 +2135,36 @@ class TestCustomExchange : public exec::Exchange {
   }
 };
 
-class TestCustomExchangeTranslator : public exec::Operator::PlanNodeTranslator {
- public:
-  std::unique_ptr<exec::Operator> toOperator(
-      exec::DriverCtx* ctx,
-      int32_t id,
-      const core::PlanNodePtr& node,
-      std::shared_ptr<InMemoryExchangeClient> exchangeClient) override {
-    if (auto customExchangeNode =
-            std::dynamic_pointer_cast<const TestCustomExchangeNode>(node)) {
-      return std::make_unique<TestCustomExchange>(
-          id, ctx, customExchangeNode, std::move(exchangeClient));
-    }
-    return nullptr;
-  }
-};
-
 TEST_P(MultiFragmentTest, customPlanNodeWithExchangeClient) {
   setupSources(5, 100);
-  Operator::registerOperator(std::make_unique<TestCustomExchangeTranslator>());
+  ExchangeTransportRegistry::global().insert(
+      std::string{TestCustomExchangeNode::kTransportKind},
+      std::make_shared<ExchangeTransportEntry>(ExchangeTransportEntry{
+          // Reuse the in-memory client; only the operator differs.
+          [](const ExchangeClientContext& c) -> std::shared_ptr<ExchangeClient> {
+            return std::make_shared<InMemoryExchangeClient>(
+                c.taskId,
+                c.destination,
+                c.queryConfig.maxExchangeBufferSize(),
+                c.numberOfConsumers,
+                c.queryConfig.minExchangeOutputBatchBytes(),
+                c.pool,
+                c.executor,
+                c.queryConfig.requestDataSizesMaxWaitSec(),
+                c.queryConfig.singleSourceExchangeOptimizationEnabled(),
+                c.queryConfig.exchangeLazyFetchingEnabled());
+          },
+          [](int32_t operatorId,
+             DriverCtx* ctx,
+             const std::shared_ptr<const core::ExchangeNode>& node,
+             std::shared_ptr<ExchangeClient> client)
+              -> std::unique_ptr<Operator> {
+            auto inMemory = std::dynamic_pointer_cast<InMemoryExchangeClient>(
+                std::move(client));
+            VELOX_CHECK_NOT_NULL(inMemory);
+            return std::make_unique<TestCustomExchange>(
+                operatorId, ctx, node, std::move(inMemory));
+          }}));
   auto leafTaskId = makeTaskId("leaf", 0);
   core::PlanNodeId partitionNodeId;
   auto leafPlan =
@@ -2231,6 +2217,8 @@ TEST_P(MultiFragmentTest, customPlanNodeWithExchangeClient) {
   ASSERT_EQ(
       serdeKindRuntimsStats.max,
       static_cast<int64_t>(VectorSerde::kindByName(GetParam().serdeKind)));
+
+  ExchangeTransportRegistry::unregisterAll();
 }
 
 // This test is to reproduce the race condition between task terminate and no

@@ -17,8 +17,45 @@
 
 #include "velox/common/base/Counters.h"
 #include "velox/common/base/StatsReporter.h"
+#include "velox/core/PlanNode.h"
+#include "velox/core/QueryConfig.h"
+#include "velox/exec/Exchange.h"
+#include "velox/exec/ExchangeTransportRegistry.h"
 
 namespace facebook::velox::exec {
+
+// static
+std::shared_ptr<ExchangeTransportEntry>
+InMemoryExchangeClient::makeDefaultTransportEntry() {
+  return std::make_shared<ExchangeTransportEntry>(ExchangeTransportEntry{
+      // makeClient: reproduce Task::createExchangeClientLocked's construction.
+      [](const ExchangeClientContext& c) -> std::shared_ptr<ExchangeClient> {
+        return std::make_shared<InMemoryExchangeClient>(
+            c.taskId,
+            c.destination,
+            c.queryConfig.maxExchangeBufferSize(),
+            c.numberOfConsumers,
+            c.queryConfig.minExchangeOutputBatchBytes(),
+            c.pool,
+            c.executor,
+            c.queryConfig.requestDataSizesMaxWaitSec(),
+            c.queryConfig.singleSourceExchangeOptimizationEnabled(),
+            c.queryConfig.exchangeLazyFetchingEnabled());
+      },
+      // makeOperator: downcast to the concrete client and build Exchange.
+      [](int32_t operatorId,
+         DriverCtx* ctx,
+         const std::shared_ptr<const core::ExchangeNode>& node,
+         std::shared_ptr<ExchangeClient> client) -> std::unique_ptr<Operator> {
+        auto inMemory =
+            std::dynamic_pointer_cast<InMemoryExchangeClient>(std::move(client));
+        VELOX_CHECK_NOT_NULL(
+            inMemory,
+            "In-memory exchange transport requires an InMemoryExchangeClient");
+        return std::make_unique<Exchange>(
+            operatorId, ctx, node, std::move(inMemory));
+      }});
+}
 
 void InMemoryExchangeClient::addRemoteTaskId(const std::string& remoteTaskId) {
   std::vector<RequestSpec> requestSpecs;

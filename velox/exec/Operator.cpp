@@ -157,14 +157,6 @@ std::unique_ptr<Operator> Operator::PlanNodeTranslator::toOperator(
   return nullptr;
 }
 
-std::unique_ptr<Operator> Operator::PlanNodeTranslator::toOperator(
-    DriverCtx* /*ctx*/,
-    int32_t /*id*/,
-    const core::PlanNodePtr& /*node*/,
-    std::shared_ptr<InMemoryExchangeClient> /*exchangeClient*/) {
-  return nullptr;
-}
-
 std::vector<std::unique_ptr<Operator::PlanNodeTranslator>>&
 Operator::translators() {
   static std::vector<std::unique_ptr<PlanNodeTranslator>> translators;
@@ -175,18 +167,9 @@ Operator::translators() {
 std::unique_ptr<Operator> Operator::fromPlanNode(
     DriverCtx* ctx,
     int32_t id,
-    const core::PlanNodePtr& planNode,
-    std::shared_ptr<InMemoryExchangeClient> exchangeClient) {
-  VELOX_CHECK_EQ(exchangeClient != nullptr, planNode->requiresExchangeClient());
+    const core::PlanNodePtr& planNode) {
   for (auto& translator : translators()) {
-    std::unique_ptr<Operator> op;
-    if (planNode->requiresExchangeClient()) {
-      op = translator->toOperator(ctx, id, planNode, exchangeClient);
-    } else {
-      op = translator->toOperator(ctx, id, planNode);
-    }
-
-    if (op) {
+    if (auto op = translator->toOperator(ctx, id, planNode)) {
       return op;
     }
   }
