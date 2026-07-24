@@ -38,7 +38,6 @@ namespace facebook::velox::exec {
 
 class Driver;
 class ExchangeClient;
-class InMemoryExchangeClient;
 class Operator;
 struct OperatorStats;
 class Task;

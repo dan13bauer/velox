@@ -61,7 +61,7 @@ class Task : public std::enable_shared_from_this<Task> {
   /// @param planFragment Plan fragment.
   /// @param destination Partition number if task is expected to receive data
   /// for a particular partition from a set of upstream tasks participating in a
-  /// distributed execution. Used to initialize a InMemoryExchangeClient.
+  /// distributed execution. Used to initialize an exchange client.
   /// Ignored if plan fragment doesn't have an ExchangeNode.
   /// @param queryCtx Query context containing MemoryPool and MemoryAllocator
   /// instances to use for memory allocations during execution, executor to
@@ -1056,7 +1056,7 @@ class Task : public std::enable_shared_from_this<Task> {
       uint32_t splitGroupId,
       const core::PlanNodeId& planNodeId);
 
-  /// Add remote split to InMemoryExchangeClient for the specified plan node.
+  /// Add remote split to the exchange client for the specified plan node.
   /// Used to close remote sources that are added after the task completed
   /// early.
   void addRemoteSplit(

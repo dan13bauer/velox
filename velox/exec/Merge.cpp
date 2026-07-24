@@ -860,7 +860,9 @@ BlockingReason MergeExchange::addMergeSources(ContinueFuture* future) {
         auto client = std::dynamic_pointer_cast<InMemoryExchangeClient>(
             entry->makeClient(context));
         VELOX_CHECK_NOT_NULL(
-            client, "Merge exchange requires an InMemoryExchangeClient");
+            client,
+            "Merge exchange requires an InMemoryExchangeClient for transport: {}",
+            transportKind_);
         sources_.emplace_back(
             MergeSource::createMergeExchangeSource(
                 this,
