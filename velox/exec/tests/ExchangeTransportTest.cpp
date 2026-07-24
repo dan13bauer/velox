@@ -65,9 +65,9 @@ class ExchangeTransportTest : public OperatorTestBase {
               return std::make_shared<InMemoryExchangeClient>(
                   c.taskId,
                   c.destination,
-                  c.queryConfig.maxExchangeBufferSize(),
+                  c.maxExchangeBufferSize,
                   c.numberOfConsumers,
-                  c.queryConfig.minExchangeOutputBatchBytes(),
+                  c.minExchangeOutputBatchBytes,
                   c.pool,
                   c.executor,
                   c.queryConfig.requestDataSizesMaxWaitSec(),
@@ -135,6 +135,52 @@ class ExchangeTransportTest : public OperatorTestBase {
         << result.first->task()->taskId();
     return result;
   }
+
+  // Runs a leaf task producing sorted 'data' through a single-partition
+  // PartitionedOutput, then a MergeExchange task consuming it via
+  // 'transportKind'. The MergeExchange resolves its client from the registry.
+  // Returns the cursor together with the merged rows; the caller must keep the
+  // cursor alive while using the rows, which borrow its memory.
+  std::pair<std::unique_ptr<TaskCursor>, std::vector<RowVectorPtr>>
+  runMergeExchange(
+      const std::string& leafTaskId,
+      const RowVectorPtr& data,
+      const std::string& transportKind) {
+    auto leafPlan = PlanBuilder()
+                        .values({data})
+                        .partitionedOutput({}, 1, /*outputLayout=*/{})
+                        .planFragment();
+    auto leafTask = Task::create(
+        leafTaskId,
+        std::move(leafPlan),
+        0,
+        core::QueryCtx::create(driverExecutor_.get()),
+        Task::ExecutionMode::kParallel,
+        exec::Consumer{});
+    leafTask->start(1);
+
+    core::PlanNodeId mergeExchangeNodeId;
+    CursorParameters params;
+    params.planNode =
+        PlanBuilder()
+            .mergeExchange(asRowType(data->type()), {"c0"}, "Presto", transportKind)
+            .capturePlanNodeId(mergeExchangeNodeId)
+            .planNode();
+    params.maxDrivers = 1;
+    params.queryCtx = core::QueryCtx::create(driverExecutor_.get());
+
+    auto result = readCursor(params, [&](TaskCursor* taskCursor) {
+      taskCursor->task()->addSplit(mergeExchangeNodeId, remoteSplit(leafTaskId));
+      taskCursor->task()->noMoreSplits(mergeExchangeNodeId);
+      taskCursor->setNoMoreSplits();
+    });
+
+    EXPECT_TRUE(waitForTaskCompletion(leafTask.get(), 3'000'000))
+        << leafTask->taskId();
+    EXPECT_TRUE(waitForTaskCompletion(result.first->task().get(), 3'000'000))
+        << result.first->task()->taskId();
+    return result;
+  }
 };
 
 TEST_F(ExchangeTransportTest, selectsOperatorByTransportKind) {
@@ -150,6 +196,23 @@ TEST_F(ExchangeTransportTest, selectsOperatorByTransportKind) {
 
   EXPECT_GT(clientInvocations->load(), 0);
   EXPECT_GT(operatorInvocations->load(), 0);
+  EXPECT_TRUE(assertEqualResults({data}, results));
+}
+
+TEST_F(ExchangeTransportTest, mergeExchangeUsesTransportKind) {
+  const std::string transportKind{"test-merge-transport"};
+  auto clientInvocations = std::make_shared<std::atomic<int>>(0);
+  auto operatorInvocations = std::make_shared<std::atomic<int>>(0);
+  registerTestTransport(transportKind, clientInvocations, operatorInvocations);
+
+  auto data = makeRowVector({"c0"}, {makeFlatVector<int64_t>(
+                     100, [](vector_size_t row) { return row; })});
+  auto [cursor, results] =
+      runMergeExchange("local://merge-exchange-leaf", data, transportKind);
+
+  // The merge path resolved its client from the registry (operator factory is
+  // unused on the merge path -- MergeExchange builds its own operator).
+  EXPECT_GT(clientInvocations->load(), 0);
   EXPECT_TRUE(assertEqualResults({data}, results));
 }
 

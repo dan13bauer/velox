@@ -3783,6 +3783,8 @@ void Task::createExchangeClientLocked(
       taskId_,
       destination_,
       numberOfConsumers,
+      static_cast<int64_t>(queryCtx()->queryConfig().maxExchangeBufferSize()),
+      queryCtx()->queryConfig().minExchangeOutputBatchBytes(),
       addExchangeClientPool(planNodeId, pipelineId),
       queryCtx()->executor(),
       queryCtx()->queryConfig()};

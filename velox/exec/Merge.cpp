@@ -18,6 +18,8 @@
 #include <folly/Traits.h>
 #include <exception>
 #include "velox/common/testutil/TestValue.h"
+#include "velox/exec/ExchangeTransportRegistry.h"
+#include "velox/exec/InMemoryExchangeClient.h"
 #include "velox/exec/OperatorType.h"
 #include "velox/exec/OperatorUtils.h"
 #include "velox/exec/Task.h"
@@ -786,7 +788,8 @@ MergeExchange::MergeExchange(
               driverCtx->queryConfig().shuffleCompressionKind()),
           mergeExchangeNode->serdeKind(),
           std::nullopt,
-          driverCtx->queryConfig().minShuffleCompressionPageSizeBytes())) {}
+          driverCtx->queryConfig().minShuffleCompressionPageSizeBytes())),
+      transportKind_(mergeExchangeNode->transportKind()) {}
 
 BlockingReason MergeExchange::addMergeSources(ContinueFuture* future) {
   if (operatorCtx_->driverCtx()->driverId != 0) {
@@ -830,6 +833,13 @@ BlockingReason MergeExchange::addMergeSources(ContinueFuture* future) {
               maxMergeExchangeBufferSize / remoteSourceTaskIds_.size(),
               MergeSource::kMaxQueuedBytesLowerLimit),
           MergeSource::kMaxQueuedBytesUpperLimit);
+      const auto& queryCtx = *operatorCtx_->task()->queryCtx();
+      auto entry =
+          ExchangeTransportRegistry::tryGet(queryCtx, transportKind_);
+      VELOX_USER_CHECK_NOT_NULL(
+          entry,
+          "No exchange transport registered for transport: {}",
+          transportKind_);
       for (uint32_t remoteSourceIndex = 0;
            remoteSourceIndex < remoteSourceTaskIds_.size();
            ++remoteSourceIndex) {
@@ -837,14 +847,25 @@ BlockingReason MergeExchange::addMergeSources(ContinueFuture* future) {
             operatorCtx_->planNodeId(),
             operatorCtx_->driverCtx()->pipelineId,
             remoteSourceIndex);
+        const ExchangeClientContext context{
+            operatorCtx_->task()->taskId(),
+            operatorCtx_->task()->destination(),
+            /*numberOfConsumers=*/1,
+            /*maxExchangeBufferSize=*/maxQueuedBytesPerSource,
+            // Deliver right away to avoid blocking other sources.
+            /*minExchangeOutputBatchBytes=*/0,
+            pool,
+            operatorCtx_->task()->queryCtx()->executor(),
+            operatorCtx_->driverCtx()->queryConfig()};
+        auto client = std::dynamic_pointer_cast<InMemoryExchangeClient>(
+            entry->makeClient(context));
+        VELOX_CHECK_NOT_NULL(
+            client, "Merge exchange requires an InMemoryExchangeClient");
         sources_.emplace_back(
             MergeSource::createMergeExchangeSource(
                 this,
                 remoteSourceTaskIds_[remoteSourceIndex],
-                operatorCtx_->task()->destination(),
-                maxQueuedBytesPerSource,
-                pool,
-                operatorCtx_->task()->queryCtx()->executor()));
+                std::move(client)));
       }
     }
     // TODO Delay this call until all input data has been processed.

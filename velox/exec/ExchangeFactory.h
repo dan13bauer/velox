@@ -39,12 +39,19 @@ class Operator;
 class ExchangeClient;
 
 /// Task-supplied context for building a per-node exchange client. Transport
-/// implementations read only the fields they need; the in-memory transport
-/// reads the exchange knobs off 'queryConfig'.
+/// implementations read only the fields they need. The caller sizes the
+/// exchange buffer: the plain-exchange path sets 'maxExchangeBufferSize' /
+/// 'minExchangeOutputBatchBytes' from 'queryConfig', while the merge path sets
+/// them to its per-source budget and zero (deliver immediately).
 struct ExchangeClientContext {
   std::string taskId;
   int destination;
   int32_t numberOfConsumers;
+  /// Total bytes the client may buffer before applying backpressure.
+  int64_t maxExchangeBufferSize;
+  /// Minimum accumulated bytes before a batch is delivered; zero delivers each
+  /// page immediately.
+  uint64_t minExchangeOutputBatchBytes;
   memory::MemoryPool* pool;
   folly::Executor* executor;
   const core::QueryConfig& queryConfig;

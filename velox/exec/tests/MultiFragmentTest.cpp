@@ -2145,9 +2145,9 @@ TEST_P(MultiFragmentTest, customPlanNodeWithExchangeClient) {
             return std::make_shared<InMemoryExchangeClient>(
                 c.taskId,
                 c.destination,
-                c.queryConfig.maxExchangeBufferSize(),
+                c.maxExchangeBufferSize,
                 c.numberOfConsumers,
-                c.queryConfig.minExchangeOutputBatchBytes(),
+                c.minExchangeOutputBatchBytes,
                 c.pool,
                 c.executor,
                 c.queryConfig.requestDataSizesMaxWaitSec(),

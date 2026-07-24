@@ -18,6 +18,7 @@
 
 #include <boost/circular_buffer.hpp>
 #include "velox/common/testutil/TestValue.h"
+#include "velox/exec/InMemoryExchangeClient.h"
 #include "velox/exec/Merge.h"
 #include "velox/vector/VectorStream.h"
 
@@ -215,21 +216,8 @@ class MergeExchangeSource : public MergeSource {
   MergeExchangeSource(
       MergeExchange* mergeExchange,
       const std::string& taskId,
-      int destination,
-      int64_t maxQueuedBytes,
-      memory::MemoryPool* pool,
-      folly::Executor* executor)
-      : mergeExchange_(mergeExchange),
-        client_(
-            std::make_shared<InMemoryExchangeClient>(
-                mergeExchange->taskId(),
-                destination,
-                maxQueuedBytes,
-                1,
-                // Deliver right away to avoid blocking other sources
-                0,
-                pool,
-                executor)) {
+      std::shared_ptr<InMemoryExchangeClient> client)
+      : mergeExchange_(mergeExchange), client_(std::move(client)) {
     client_->addRemoteTaskId(taskId);
     client_->noMoreRemoteTasks();
   }
@@ -324,12 +312,9 @@ std::shared_ptr<MergeSource> MergeSource::createLocalMergeSource(
 std::shared_ptr<MergeSource> MergeSource::createMergeExchangeSource(
     MergeExchange* mergeExchange,
     const std::string& taskId,
-    int destination,
-    int64_t maxQueuedBytes,
-    memory::MemoryPool* pool,
-    folly::Executor* executor) {
+    std::shared_ptr<InMemoryExchangeClient> client) {
   return std::make_shared<MergeExchangeSource>(
-      mergeExchange, taskId, destination, maxQueuedBytes, pool, executor);
+      mergeExchange, taskId, std::move(client));
 }
 
 BlockingReason MergeJoinSource::next(

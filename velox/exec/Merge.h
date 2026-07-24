@@ -401,6 +401,9 @@ class MergeExchange : public Merge {
   bool noMoreSplits_ = false;
   // Task Ids from all the splits we took to process so far.
   std::vector<std::string> remoteSourceTaskIds_;
+  // Transport kind naming the ExchangeTransportRegistry entry that supplies
+  // this node's merge-source clients.
+  const std::string transportKind_;
 };
 
 } // namespace facebook::velox::exec

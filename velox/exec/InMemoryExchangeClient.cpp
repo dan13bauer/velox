@@ -28,14 +28,15 @@ namespace facebook::velox::exec {
 std::shared_ptr<ExchangeTransportEntry>
 InMemoryExchangeClient::makeDefaultTransportEntry() {
   return std::make_shared<ExchangeTransportEntry>(ExchangeTransportEntry{
-      // makeClient: reproduce Task::createExchangeClientLocked's construction.
+      // makeClient: build the in-memory client from the caller-sized context
+      // (buffering) and query config (the rest).
       [](const ExchangeClientContext& c) -> std::shared_ptr<ExchangeClient> {
         return std::make_shared<InMemoryExchangeClient>(
             c.taskId,
             c.destination,
-            c.queryConfig.maxExchangeBufferSize(),
+            c.maxExchangeBufferSize,
             c.numberOfConsumers,
-            c.queryConfig.minExchangeOutputBatchBytes(),
+            c.minExchangeOutputBatchBytes,
             c.pool,
             c.executor,
             c.queryConfig.requestDataSizesMaxWaitSec(),

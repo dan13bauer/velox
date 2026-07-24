@@ -20,6 +20,7 @@
 namespace facebook::velox::exec {
 
 class MergeExchange;
+class InMemoryExchangeClient;
 
 class MergeSource {
  public:
@@ -54,10 +55,7 @@ class MergeSource {
   static std::shared_ptr<MergeSource> createMergeExchangeSource(
       MergeExchange* mergeExchange,
       const std::string& taskId,
-      int destination,
-      int64_t maxQueuedBytes,
-      memory::MemoryPool* pool,
-      folly::Executor* executor);
+      std::shared_ptr<InMemoryExchangeClient> client);
 };
 
 /// Coordinates data transfer between single producer and single consumer. Used
