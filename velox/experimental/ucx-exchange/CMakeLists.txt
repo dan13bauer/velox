@@ -46,11 +46,19 @@ add_library(velox_ucx_exchange OBJECT ${UCX_EXCHANGE_SOURCES})
 
 target_include_directories(velox_ucx_exchange PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 
+# UCXX 0.51 deprecates its non-builder factory and transfer methods
+# (createContext, createWorker, createListener, createEndpoint*, tagSend,
+# tagRecv, amSend) in favor of the *Builder() APIs, with removal slated for
+# UCXX 0.52. The module still calls the non-builder forms; migrating to the
+# builder APIs is tracked as follow-up work. Keep the deprecation warnings
+# visible but non-fatal so the module compiles under -Werror.
+target_compile_options(velox_ucx_exchange PRIVATE -Wno-error=deprecated-declarations)
+
 find_package(ucx REQUIRED)
 
 target_link_libraries(
   velox_ucx_exchange
-  PUBLIC ucxx::ucxx ucx::ucp
+  PUBLIC ucxx::ucxx ucx::ucp nvtx3::nvtx3-cpp
   PRIVATE cudf::cudf CUDA::cudart CUDA::cuda_driver Folly::folly velox_core ucx::ucs
 )
 
