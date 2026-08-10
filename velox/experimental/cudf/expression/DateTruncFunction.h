@@ -30,18 +30,28 @@ class DateTruncFunction : public CudfFunction {
  public:
   static bool canEvaluate(const std::shared_ptr<velox::exec::Expr>& expr);
 
-  static bool isTimezoneSensitive(
-      const std::shared_ptr<velox::exec::Expr>& expr);
-
   explicit DateTruncFunction(const std::shared_ptr<velox::exec::Expr>& expr);
 
   ColumnOrView eval(
       std::vector<ColumnOrView>& inputColumns,
+      [[maybe_unused]] cudf::size_type numRows,
       rmm::cuda_stream_view stream,
       rmm::device_async_resource_ref mr) const override;
 
  private:
+  // Truncates inputCol to unit_ on the values as given, with no timezone
+  // conversion. The timezone-aware eval wraps this with toLocalTimestamp /
+  // toUtcTimestamp for day-and-above units under a session timezone.
+  ColumnOrView truncateOnColumn(
+      cudf::column_view inputCol,
+      rmm::cuda_stream_view stream,
+      rmm::device_async_resource_ref mr) const;
+
   functions::DateTimeUnit unit_{};
+  // True when the input is TIMESTAMP WITH TIME ZONE; eval then truncates on
+  // each row's embedded zone (per-row multi-zone), independent of the session
+  // zone.
+  bool isTimestampWithTimeZone_{false};
   std::unique_ptr<cudf::scalar> oneScalar_;
   std::unique_ptr<cudf::scalar> threeScalar_;
   std::unique_ptr<cudf::scalar> negOneScalar_;

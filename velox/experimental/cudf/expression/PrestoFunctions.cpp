@@ -24,6 +24,7 @@
 #include "velox/common/base/Exceptions.h"
 #include "velox/expression/ConstantExpr.h"
 #include "velox/expression/FunctionSignature.h"
+#include "velox/functions/prestosql/types/TimestampWithTimeZoneType.h"
 #include "velox/vector/BaseVector.h"
 
 #include <cudf/scalar/scalar.hpp>
@@ -99,6 +100,7 @@ class SubstrFunction : public CudfFunction {
 
   ColumnOrView eval(
       std::vector<ColumnOrView>& inputColumns,
+      [[maybe_unused]] cudf::size_type numRows,
       rmm::cuda_stream_view stream,
       rmm::device_async_resource_ref mr) const override {
     auto inputCol = asView(inputColumns[0]);
@@ -153,7 +155,15 @@ void registerPrestoFunctions(const std::string& prefix) {
 
   registerCudfFunction(
       prefix + "date_add",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
+      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr)
+          -> std::shared_ptr<CudfFunction> {
+        if (isTimestampWithTimeZoneType(expr->inputs()[2]->type())) {
+          return std::make_shared<
+              prestosql::DateAddTimestampWithTimeZoneFunction>(expr);
+        }
+        if (expr->inputs()[2]->type()->isTimestamp()) {
+          return std::make_shared<prestosql::DateAddTimestampFunction>(expr);
+        }
         return std::make_shared<prestosql::DateAddFunction>(expr);
       },
       {FunctionSignatureBuilder()
@@ -161,9 +171,25 @@ void registerPrestoFunctions(const std::string& prefix) {
            .constantArgumentType("varchar")
            .argumentType("bigint")
            .argumentType("date")
+           .build(),
+       FunctionSignatureBuilder()
+           .returnType("timestamp")
+           .constantArgumentType("varchar")
+           .argumentType("bigint")
+           .argumentType("timestamp")
+           .build(),
+       FunctionSignatureBuilder()
+           .returnType("timestamp with time zone")
+           .constantArgumentType("varchar")
+           .argumentType("bigint")
+           .argumentType("timestamp with time zone")
            .build()},
       true,
-      prestosql::DateAddFunction::canEvaluate);
+      [](const std::shared_ptr<velox::exec::Expr>& expr) {
+        return prestosql::DateAddFunction::canEvaluate(expr) ||
+            prestosql::DateAddTimestampFunction::canEvaluate(expr) ||
+            prestosql::DateAddTimestampWithTimeZoneFunction::canEvaluate(expr);
+      });
 
   registerCudfFunction(
       prefix + "date_trunc",
@@ -179,6 +205,11 @@ void registerPrestoFunctions(const std::string& prefix) {
            .returnType("date")
            .constantArgumentType("varchar")
            .argumentType("date")
+           .build(),
+       FunctionSignatureBuilder()
+           .returnType("timestamp with time zone")
+           .constantArgumentType("varchar")
+           .argumentType("timestamp with time zone")
            .build()},
       true,
       DateTruncFunction::canEvaluate);

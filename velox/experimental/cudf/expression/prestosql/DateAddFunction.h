@@ -42,6 +42,7 @@ class DateAddFunction : public CudfFunction {
 
   ColumnOrView eval(
       std::vector<ColumnOrView>& inputColumns,
+      [[maybe_unused]] cudf::size_type numRows,
       rmm::cuda_stream_view stream,
       rmm::device_async_resource_ref mr) const override;
 
@@ -75,6 +76,86 @@ class DateAddFunction : public CudfFunction {
   int64_t literalValue_{};
   // Pre-built scalar of the constant date input, when dateIsLiteral_ is true.
   std::unique_ptr<cudf::scalar> literalDate_;
+};
+
+/// date_add(unit, value, timestamp) -> TIMESTAMP.
+/// Adds value units to a timestamp. unit is a constant string from the full
+/// Presto set (millisecond, second, minute, hour, day, week, month, quarter,
+/// year). Sub-day units add directly to the UTC instant (DST-agnostic); when
+/// the session applies a timezone, day-and-above units convert to the session
+/// wall clock, add, then convert back to UTC (a spring-forward gap throws,
+/// matching addToTimestamp/toGMT). value (bigint) and timestamp may each be a
+/// constant or a column, but at least one must be a column.
+class DateAddTimestampFunction : public CudfFunction {
+ public:
+  /// Returns true if expr is date_add with 3 inputs, TIMESTAMP return type,
+  /// TIMESTAMP third argument, a constant parseable unit, and not both value
+  /// and timestamp constant.
+  static bool canEvaluate(const std::shared_ptr<velox::exec::Expr>& expr);
+
+  explicit DateAddTimestampFunction(
+      const std::shared_ptr<velox::exec::Expr>& expr);
+
+  ColumnOrView eval(
+      std::vector<ColumnOrView>& inputColumns,
+      [[maybe_unused]] cudf::size_type numRows,
+      rmm::cuda_stream_view stream,
+      rmm::device_async_resource_ref mr) const override;
+
+ private:
+  // Increment unit; any of the Presto date/time units including sub-day.
+  functions::DateTimeUnit unit_{};
+  // True if the value (second) argument is a constant ConstantExpr.
+  bool valueIsLiteral_{};
+  // True if the timestamp (third) argument is a constant ConstantExpr.
+  bool timestampIsLiteral_{};
+  // True if literalValue_ is non-null (else the increment is a null scalar).
+  bool literalValueIsValid_{};
+  // Constant value when valueIsLiteral_ is true.
+  int64_t literalValue_{};
+  // Pre-built scalar of the constant timestamp input, when
+  // timestampIsLiteral_ is true.
+  std::unique_ptr<cudf::scalar> literalTimestamp_;
+};
+
+/// date_add(unit, value, timestamp with time zone) -> TIMESTAMP WITH TIME ZONE.
+/// Adds value units to a packed TSWTZ instant, preserving each row's zone key.
+/// unit is a constant string from the full Presto set. Matching
+/// addToTimestampWithTimezone: sub-day units (millisecond, second, minute,
+/// hour) add directly to the UTC instant; day-and-above units add on each row's
+/// local wall clock and convert back to UTC, resolving a spring-forward gap
+/// forward instead of throwing. value (bigint) and the TSWTZ argument may each
+/// be a constant or a column, but at least one must be a column.
+class DateAddTimestampWithTimeZoneFunction : public CudfFunction {
+ public:
+  /// Returns true if expr is date_add with 3 inputs, TIMESTAMP WITH TIME ZONE
+  /// return type, TIMESTAMP WITH TIME ZONE third argument, a constant parseable
+  /// unit, and not both value and the TSWTZ argument constant.
+  static bool canEvaluate(const std::shared_ptr<velox::exec::Expr>& expr);
+
+  explicit DateAddTimestampWithTimeZoneFunction(
+      const std::shared_ptr<velox::exec::Expr>& expr);
+
+  ColumnOrView eval(
+      std::vector<ColumnOrView>& inputColumns,
+      [[maybe_unused]] cudf::size_type numRows,
+      rmm::cuda_stream_view stream,
+      rmm::device_async_resource_ref mr) const override;
+
+ private:
+  // Increment unit; any of the Presto date/time units including sub-day.
+  functions::DateTimeUnit unit_{};
+  // True if the value (second) argument is a constant ConstantExpr.
+  bool valueIsLiteral_{};
+  // True if the TSWTZ (third) argument is a constant ConstantExpr.
+  bool timestampIsLiteral_{};
+  // True if literalValue_ is non-null (else the increment is a null scalar).
+  bool literalValueIsValid_{};
+  // Constant value when valueIsLiteral_ is true.
+  int64_t literalValue_{};
+  // Pre-built scalar of the constant TSWTZ input (packed int64), when
+  // timestampIsLiteral_ is true.
+  std::unique_ptr<cudf::scalar> literalTimestamp_;
 };
 
 } // namespace facebook::velox::cudf_velox::prestosql

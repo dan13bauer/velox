@@ -24,7 +24,9 @@
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
 #include "velox/exec/tests/utils/OperatorTestBase.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
+#include "velox/functions/prestosql/types/TimestampWithTimeZoneType.h"
 #include "velox/type/Time.h"
+#include "velox/type/tz/TimeZoneMap.h"
 
 namespace facebook::velox::exec::test {
 
@@ -171,7 +173,10 @@ TEST_F(ToCudfSelectionTest, prestoDateAddVariableUnitFallsBack) {
   ASSERT_TRUE(wasDefaultFilterProjectUsed(task));
 }
 
-TEST_F(ToCudfSelectionTest, prestoDateAddTimestampFallsBack) {
+TEST_F(ToCudfSelectionTest, prestoDateAddTimestampUsesCudf) {
+  // date_add(timestamp) is now evaluated on GPU (session-timezone aware), so
+  // the plan runs on cuDF rather than falling back -- both plain and under a
+  // session timezone.
   auto input = makeRowVector(
       {"amount", "event_ts"},
       {makeFlatVector<int64_t>({1, 2, -1, 13}),
@@ -189,12 +194,45 @@ TEST_F(ToCudfSelectionTest, prestoDateAddTimestampFallsBack) {
 
   std::shared_ptr<Task> task;
   AssertQueryBuilder(plan).config("cudf.enabled", true).countResults(task);
+  ASSERT_TRUE(wasCudfFilterProjectUsed(task));
+  ASSERT_FALSE(wasDefaultFilterProjectUsed(task));
 
-  ASSERT_FALSE(wasCudfFilterProjectUsed(task));
-  ASSERT_TRUE(wasDefaultFilterProjectUsed(task));
+  std::shared_ptr<Task> tzTask;
+  AssertQueryBuilder(plan)
+      .config("cudf.enabled", true)
+      .config(QueryConfig::kSessionTimezone, "America/Los_Angeles")
+      .config(QueryConfig::kAdjustTimestampToTimezone, "true")
+      .countResults(tzTask);
+  ASSERT_TRUE(wasCudfFilterProjectUsed(tzTask));
+  ASSERT_FALSE(wasDefaultFilterProjectUsed(tzTask));
 }
 
-TEST_F(ToCudfSelectionTest, prestoDateTruncTimestampAdjustTimezoneFallsBack) {
+TEST_F(ToCudfSelectionTest, prestoDateAddTimestampWithTimeZoneUsesCudf) {
+  // date_add(timestamp with time zone) is evaluated on GPU (per-row embedded
+  // zone), so the plan runs on cuDF rather than falling back.
+  auto input = makeRowVector(
+      {"amount", "c0"},
+      {makeFlatVector<int64_t>({1, 2}),
+       makeFlatVector<int64_t>(
+           {pack(1'736'971'261'123, tz::getTimeZoneID("America/Los_Angeles")),
+            pack(1'736'971'261'123, tz::getTimeZoneID("Asia/Kolkata"))},
+           TIMESTAMP_WITH_TIME_ZONE())});
+
+  auto plan = PlanBuilder()
+                  .values({input})
+                  .project({"date_add('day', amount, c0) AS result"})
+                  .planNode();
+
+  std::shared_ptr<Task> task;
+  AssertQueryBuilder(plan).config("cudf.enabled", true).countResults(task);
+
+  ASSERT_TRUE(wasCudfFilterProjectUsed(task));
+  ASSERT_FALSE(wasDefaultFilterProjectUsed(task));
+}
+
+TEST_F(ToCudfSelectionTest, prestoDateTruncTimestampAdjustTimezoneUsesCudf) {
+  // date_trunc(timestamp) is timezone-aware on GPU, so it runs on cuDF even
+  // when adjust_timestamp_to_session_timezone is enabled.
   auto input = makeRowVector(
       {"event_ts"},
       {makeFlatVector<Timestamp>(
@@ -212,8 +250,30 @@ TEST_F(ToCudfSelectionTest, prestoDateTruncTimestampAdjustTimezoneFallsBack) {
       .config(QueryConfig::kAdjustTimestampToTimezone, "true")
       .countResults(task);
 
-  ASSERT_FALSE(wasCudfFilterProjectUsed(task));
-  ASSERT_TRUE(wasDefaultFilterProjectUsed(task));
+  ASSERT_TRUE(wasCudfFilterProjectUsed(task));
+  ASSERT_FALSE(wasDefaultFilterProjectUsed(task));
+}
+
+TEST_F(ToCudfSelectionTest, prestoDateTruncTimestampWithTimeZoneUsesCudf) {
+  // date_trunc(timestamp with time zone) is evaluated on GPU (per-row embedded
+  // zone), so the plan runs on cuDF rather than falling back.
+  auto input = makeRowVector(
+      {"c0"},
+      {makeFlatVector<int64_t>(
+          {pack(1'736'971'261'123, tz::getTimeZoneID("America/Los_Angeles")),
+           pack(1'736'971'261'123, tz::getTimeZoneID("Asia/Kolkata"))},
+          TIMESTAMP_WITH_TIME_ZONE())});
+
+  auto plan = PlanBuilder()
+                  .values({input})
+                  .project({"date_trunc('day', c0) AS result"})
+                  .planNode();
+
+  std::shared_ptr<Task> task;
+  AssertQueryBuilder(plan).config("cudf.enabled", true).countResults(task);
+
+  ASSERT_TRUE(wasCudfFilterProjectUsed(task));
+  ASSERT_FALSE(wasDefaultFilterProjectUsed(task));
 }
 
 TEST_F(ToCudfSelectionTest, prestoDateTruncSubHourAdjustTimezoneUsesCudf) {
@@ -242,7 +302,7 @@ TEST_F(ToCudfSelectionTest, prestoDateTruncSubHourAdjustTimezoneUsesCudf) {
 
 TEST_F(
     ToCudfSelectionTest,
-    nestedPrestoDateTruncTimestampAdjustTimezoneFallsBack) {
+    nestedPrestoDateTruncTimestampAdjustTimezoneUsesCudf) {
   auto input = makeRowVector(
       {"event_ts"},
       {makeFlatVector<Timestamp>(
@@ -259,15 +319,17 @@ TEST_F(
   ASSERT_TRUE(wasCudfFilterProjectUsed(cudfTask));
   ASSERT_FALSE(wasDefaultFilterProjectUsed(cudfTask));
 
-  std::shared_ptr<Task> fallbackTask;
+  // A nested timezone-sensitive date_trunc(timestamp) also stays on cuDF under
+  // adjust_timestamp_to_session_timezone now that it is timezone-aware.
+  std::shared_ptr<Task> adjustTask;
   AssertQueryBuilder(plan)
       .config("cudf.enabled", true)
       .config(QueryConfig::kSessionTimezone, "Asia/Kolkata")
       .config(QueryConfig::kAdjustTimestampToTimezone, "true")
-      .countResults(fallbackTask);
+      .countResults(adjustTask);
 
-  ASSERT_FALSE(wasCudfFilterProjectUsed(fallbackTask));
-  ASSERT_TRUE(wasDefaultFilterProjectUsed(fallbackTask));
+  ASSERT_TRUE(wasCudfFilterProjectUsed(adjustTask));
+  ASSERT_FALSE(wasDefaultFilterProjectUsed(adjustTask));
 }
 
 TEST_F(ToCudfSelectionTest, prestoDateTruncDateAdjustTimezoneUsesCudf) {
