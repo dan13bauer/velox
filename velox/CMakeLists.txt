@@ -76,6 +76,12 @@ if(VELOX_ENABLE_WAVE OR VELOX_ENABLE_CUDF)
   add_subdirectory(experimental/gpu)
   if(${VELOX_ENABLE_CUDF})
     add_subdirectory(experimental/cudf)
+    # Build the experimental ucx-exchange library when a system UCX install
+    # was found (UCX_FOUND is set while resolving the cudf dependency, which
+    # also fetches ucxx).
+    if(UCX_FOUND)
+      add_subdirectory(experimental/ucx-exchange)
+    endif()
   endif()
   if(${VELOX_ENABLE_WAVE})
     add_subdirectory(experimental/wave)
