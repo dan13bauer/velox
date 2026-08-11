@@ -16,7 +16,8 @@
 #pragma once
 
 #include "velox/exec/Driver.h"
-#include "velox/experimental/ucx-exchange/UcxExchange.h"
+#include "velox/exec/Operator.h"
+#include "velox/experimental/ucx-exchange/UcxExchangeClient.h"
 #include "velox/experimental/ucx-exchange/tests/UcxTestData.h"
 #include "velox/experimental/ucx-exchange/tests/UcxTestHelpers.h"
 
@@ -27,7 +28,8 @@ using exec::DriverCtx;
 /// @class SinkTaskMock
 /// @brief A mock class that receives data through an exchange from one or more
 /// upstream remote tasks. This class mocks the setup and execution of a plan
-/// fragment with a single UcxExchange operator.
+/// fragment with a single exchange operator, resolved via
+/// exec::ExchangeTransportRegistry for the kUcx transport.
 
 class SinkDriverMock {
  public:
@@ -81,7 +83,7 @@ class SinkDriverMock {
 
  private:
   // Drives a single hybrid exchange operator until all data has been received.
-  void receiveAllData(UcxExchange* hybridExchange);
+  void receiveAllData(exec::Operator* hybridExchange);
 
   /// @brief checks if the received table corresponds to that sent, sets
   /// dataValidFlag_=false if not
@@ -93,7 +95,7 @@ class SinkDriverMock {
   std::shared_ptr<UcxExchangeClient> exchangeClient_;
 
   std::vector<std::shared_ptr<DriverCtx>> driverCtxs_;
-  std::vector<std::unique_ptr<UcxExchange>> hybridExchanges_;
+  std::vector<std::unique_ptr<exec::Operator>> hybridExchanges_;
   uint32_t numDrivers_;
   std::atomic<uint64_t> numRows_;
   std::atomic<uint64_t> numBytes_{0};

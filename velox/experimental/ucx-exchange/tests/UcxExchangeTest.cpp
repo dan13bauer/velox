@@ -206,6 +206,14 @@ class UcxExchangeTest : public testing::TestWithParam<ExchangeTestParams> {
     VLOG(0) << "creating pool";
     pool_ = facebook::velox::memory::memoryManager()->addLeafPool(
         "UcxTestMemoryPool");
+    registerUcxExchange();
+  }
+
+  void TearDown() override {
+    // Restores the baseline (built-in in-memory default only) between test
+    // cases; registerUcxExchange() re-seeds kUcx at the start of the next
+    // SetUp().
+    exec::ExchangeTransportRegistry::unregisterAll();
   }
 
   exec::Split remoteSplit(std::string_view taskId, int partitionId) {
@@ -920,8 +928,28 @@ TEST_P(UcxExchangeTest, sharedClientSurvivesOneExchangeClose) {
   core::PlanNodeId exchangeNodeId;
   auto sinkTask =
       createExchangeTask(sinkTaskId, rowType, partitionId, exchangeNodeId);
-  auto exchangeClient = std::make_shared<UcxExchangeClient>(
-      sinkTask->taskId(), sinkTask->destination(), numSinkDrivers);
+
+  // Resolve the client through the registry rather than constructing it
+  // directly, so this test tracks the same client type Task would produce;
+  // the operators below are still built directly to isolate close behavior.
+  auto entry = exec::ExchangeTransportRegistry::tryGet(
+      std::string{core::TransportKind::kUcx});
+  ASSERT_NE(entry, nullptr);
+  const auto& sinkQueryConfig = sinkTask->queryCtx()->queryConfig();
+  const exec::ExchangeClientContext context{
+      .taskId = sinkTask->taskId(),
+      .destination = sinkTask->destination(),
+      .numberOfConsumers = numSinkDrivers,
+      .maxExchangeBufferSize =
+          static_cast<int64_t>(sinkQueryConfig.maxExchangeBufferSize()),
+      .minExchangeOutputBatchBytes =
+          sinkQueryConfig.minExchangeOutputBatchBytes(),
+      .pool = sinkTask->pool(),
+      .executor = sinkTask->queryCtx()->executor(),
+      .queryConfig = sinkQueryConfig};
+  auto exchangeClient =
+      std::dynamic_pointer_cast<UcxExchangeClient>(entry->makeClient(context));
+  ASSERT_NE(exchangeClient, nullptr);
 
   auto split = remoteSplit(srcTaskId, partitionId);
   auto remoteConnectorSplit =

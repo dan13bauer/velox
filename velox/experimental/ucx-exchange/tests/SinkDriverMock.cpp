@@ -22,6 +22,8 @@
 #include <cudf/strings/strings_column_view.hpp>
 #include <cudf/table/table_view.hpp>
 #include <cudf/unary.hpp>
+#include "velox/core/PlanNode.h"
+#include "velox/exec/ExchangeTransportRegistry.h"
 
 using namespace facebook::velox::exec;
 
@@ -39,19 +41,49 @@ SinkDriverMock::SinkDriverMock(
       numRows_{0},
       numBytes_{0},
       referenceData_(referenceData) {
-  // Create a UcxExchangeClient shared across all exchange operators.
-  exchangeClient_ = std::make_shared<UcxExchangeClient>(
-      task_->taskId(), task_->destination(), numDrivers_);
+  // Resolve the registered kUcx transport instead of constructing the
+  // client/operator pair directly, so this harness exercises the same
+  // resolution path Task uses in production.
+  auto entry =
+      ExchangeTransportRegistry::tryGet(std::string{core::TransportKind::kUcx});
+  VELOX_CHECK_NOT_NULL(
+      entry,
+      "No exchange transport registered for transport: {}",
+      core::TransportKind::kUcx);
+
+  const auto& queryConfig = task_->queryCtx()->queryConfig();
+  const ExchangeClientContext context{
+      .taskId = task_->taskId(),
+      .destination = task_->destination(),
+      .numberOfConsumers = static_cast<int32_t>(numDrivers_),
+      .maxExchangeBufferSize =
+          static_cast<int64_t>(queryConfig.maxExchangeBufferSize()),
+      .minExchangeOutputBatchBytes = queryConfig.minExchangeOutputBatchBytes(),
+      .pool = task_->pool(),
+      .executor = task_->queryCtx()->executor(),
+      .queryConfig = queryConfig};
+  // Shared across all exchange operators.
+  exchangeClient_ =
+      std::dynamic_pointer_cast<UcxExchangeClient>(entry->makeClient(context));
+  VELOX_CHECK_NOT_NULL(
+      exchangeClient_,
+      "UCX exchange requires a UcxExchangeClient for transport: {}",
+      core::TransportKind::kUcx);
+
+  auto exchangeNode = std::dynamic_pointer_cast<const core::ExchangeNode>(
+      task_->planFragment().planNode);
+  VELOX_CHECK_NOT_NULL(
+      exchangeNode,
+      "SinkDriverMock requires a plan fragment rooted at an ExchangeNode");
+
   uint32_t operatorId = 0;
-  auto planNode = task_->planFragment().planNode;
   // create the set of exchange operators.
   for (uint32_t driverId = 0; driverId < numDrivers; ++driverId) {
     driverCtxs_.emplace_back(
         std::make_shared<DriverCtx>(
             task_, driverId, kPipelineId, kUngroupedGroupId, kPartitionId));
-    hybridExchanges_.emplace_back(
-        std::make_unique<UcxExchange>(
-            operatorId, driverCtxs_.back().get(), planNode, exchangeClient_));
+    hybridExchanges_.emplace_back(entry->makeOperator(
+        operatorId, driverCtxs_.back().get(), exchangeNode, exchangeClient_));
   }
 }
 
@@ -81,7 +113,7 @@ void SinkDriverMock::run() {
   }
 }
 
-void SinkDriverMock::receiveAllData(UcxExchange* hybridExchange) {
+void SinkDriverMock::receiveAllData(exec::Operator* hybridExchange) {
   while (true) {
     ContinueFuture future;
     auto blocked = hybridExchange->isBlocked(&future);
