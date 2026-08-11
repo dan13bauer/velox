@@ -37,7 +37,8 @@ void UcxOutputQueueManager::initializeTask(
     std::shared_ptr<exec::Task> task,
     core::PartitionedOutputNode::Kind kind,
     int numDestinations,
-    int numDrivers) {
+    int numDrivers,
+    const std::string& /*transportOptions*/) {
   const auto& taskId = task->taskId();
   queues_.withLock([&](auto& queues) {
     auto it = queues.find(taskId);
@@ -60,11 +61,27 @@ void UcxOutputQueueManager::initializeTask(
   IntraNodeTransferRegistry::getInstance()->clearCancelledTask(taskId);
 }
 
-void UcxOutputQueueManager::updateOutputBuffers(
-    std::string_view taskId,
-    int numBuffers,
+bool UcxOutputQueueManager::updateOutputBuffers(
+    const std::string& taskId,
+    int numDestinations,
     bool noMoreBuffers) {
-  getQueue(taskId)->updateOutputBuffers(numBuffers, noMoreBuffers);
+  auto queue = getQueueIfExists(taskId);
+  if (queue == nullptr) {
+    return false;
+  }
+  queue->updateOutputBuffers(numDestinations, noMoreBuffers);
+  return true;
+}
+
+bool UcxOutputQueueManager::updateNumDrivers(
+    const std::string& taskId,
+    uint32_t newNumDrivers) {
+  auto queue = getQueueIfExists(taskId);
+  if (queue == nullptr) {
+    return false;
+  }
+  queue->updateNumDrivers(newNumDrivers);
+  return true;
 }
 
 void UcxOutputQueueManager::enqueue(
@@ -146,7 +163,7 @@ bool UcxOutputQueueManager::canUseIntraNode(std::string_view taskId) {
       queue->kind() != core::PartitionedOutputNode::Kind::kBroadcast;
 }
 
-void UcxOutputQueueManager::removeTask(std::string_view taskId) {
+void UcxOutputQueueManager::removeTask(const std::string& taskId) {
   std::string taskIdStr{taskId};
   auto queue =
       queues_.withLock([&](auto& queues) -> std::shared_ptr<UcxOutputQueue> {
@@ -197,13 +214,39 @@ std::shared_ptr<UcxOutputQueue> UcxOutputQueueManager::getQueue(
   });
 }
 
-std::optional<exec::OutputBuffer::Stats> UcxOutputQueueManager::stats(
-    std::string_view taskId) {
+std::optional<exec::OutputBufferStats> UcxOutputQueueManager::stats(
+    const std::string& taskId) {
   auto queue = getQueueIfExists(taskId);
   if (queue != nullptr) {
     return queue->stats();
   }
   return std::nullopt;
+}
+
+std::optional<double> UcxOutputQueueManager::getUtilization(
+    const std::string& taskId) {
+  auto queue = getQueueIfExists(taskId);
+  if (queue == nullptr) {
+    return std::nullopt;
+  }
+  return queue->getUtilization();
+}
+
+std::optional<bool> UcxOutputQueueManager::isOverutilized(
+    const std::string& taskId) {
+  auto queue = getQueueIfExists(taskId);
+  if (queue == nullptr) {
+    return std::nullopt;
+  }
+  return queue->isOverutilized();
+}
+
+std::string UcxOutputQueueManager::toString(const std::string& taskId) {
+  auto queue = getQueueIfExists(taskId);
+  if (queue == nullptr) {
+    return "";
+  }
+  return queue->toString();
 }
 
 } // namespace facebook::velox::ucx_exchange

@@ -552,6 +552,30 @@ void UcxOutputQueue::terminate() {
   }
 }
 
+std::string UcxOutputQueue::toString() {
+  std::lock_guard<std::mutex> l(mutex_);
+  std::stringstream out;
+  out << "[UcxOutputQueue: kind=" << static_cast<int>(kind_)
+      << ", numDestinations=" << queues_.size()
+      << ", queuedBytes=" << queuedBytes_ << ", maxSize=" << maxSize_
+      << ", noMoreQueues=" << noMoreQueues_ << ", atEnd=" << atEnd_
+      << ", finished=" << isFinishedLocked() << "]";
+  return out.str();
+}
+
+std::optional<double> UcxOutputQueue::getUtilization() {
+  std::lock_guard<std::mutex> l(mutex_);
+  if (maxSize_ == 0) {
+    return std::nullopt;
+  }
+  return queuedBytes_ / static_cast<double>(maxSize_);
+}
+
+bool UcxOutputQueue::isOverutilized() {
+  std::lock_guard<std::mutex> l(mutex_);
+  return (queuedBytes_ > (0.5 * maxSize_)) || atEnd_;
+}
+
 exec::OutputBuffer::Stats UcxOutputQueue::stats() {
   std::lock_guard<std::mutex> l(mutex_);
   std::vector<UcxDestinationQueue::Stats> queueStats;

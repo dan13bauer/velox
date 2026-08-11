@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 #include <rmm/device_buffer.hpp>
 #include <memory>
+#include <type_traits>
 #include <vector>
 #include "velox/common/memory/MemoryPool.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
@@ -47,7 +48,7 @@ class UcxOutputQueueManagerTest : public testing::Test {
   }
 
   std::shared_ptr<Task> initializeTask(
-      std::string_view taskId,
+      const std::string& taskId,
       int numDestinations,
       int numDrivers,
       bool cleanup = true,
@@ -226,6 +227,48 @@ class UcxOutputQueueManagerTest : public testing::Test {
   std::shared_ptr<facebook::velox::memory::MemoryPool> pool_;
   std::shared_ptr<UcxOutputQueueManager> queueManager_;
 };
+
+TEST_F(UcxOutputQueueManagerTest, implementsOutputBufferManager) {
+  static_assert(
+      std::is_base_of_v<exec::OutputBufferManager, UcxOutputQueueManager>);
+
+  // Hold the process-wide singleton through the base pointer and drive the
+  // lifecycle exclusively through the exec::OutputBufferManager surface.
+  std::shared_ptr<exec::OutputBufferManager> mgr = queueManager_;
+  ASSERT_NE(mgr, nullptr);
+
+  // Unknown task: every method tolerates it per the interface contract.
+  EXPECT_NO_THROW(mgr->toString("nonexistent.task"));
+  EXPECT_EQ(mgr->toString("nonexistent.task"), "");
+  EXPECT_FALSE(mgr->updateNumDrivers("nonexistent.task", 1));
+  EXPECT_FALSE(mgr->updateOutputBuffers("nonexistent.task", 1, true));
+  EXPECT_EQ(mgr->stats("nonexistent.task"), std::nullopt);
+  EXPECT_EQ(mgr->getUtilization("nonexistent.task"), std::nullopt);
+  EXPECT_EQ(mgr->isOverutilized("nonexistent.task"), std::nullopt);
+
+  // Known task: use an id unique to this case since the manager is shared
+  // with every other case in the binary.
+  const std::string taskId = "outputBufferManagerIface";
+  const int numDestinations = 2;
+  initializeTask(taskId, numDestinations, 1 /*numDrivers*/);
+
+  EXPECT_TRUE(mgr->stats(taskId).has_value());
+
+  auto utilization = mgr->getUtilization(taskId);
+  ASSERT_TRUE(utilization.has_value());
+  EXPECT_GE(*utilization, 0.0);
+  EXPECT_LE(*utilization, 1.0);
+
+  auto overutilized = mgr->isOverutilized(taskId);
+  ASSERT_TRUE(overutilized.has_value());
+  EXPECT_FALSE(*overutilized);
+
+  EXPECT_TRUE(mgr->updateNumDrivers(taskId, 2));
+  EXPECT_TRUE(mgr->updateOutputBuffers(taskId, numDestinations, true));
+  EXPECT_FALSE(mgr->toString(taskId).empty());
+
+  queueManager_->removeTask(taskId);
+}
 
 TEST_F(UcxOutputQueueManagerTest, basicPartitioned) {
   vector_size_t size = 100;

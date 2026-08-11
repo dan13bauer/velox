@@ -20,11 +20,18 @@
 #include <functional>
 #include <string_view>
 #include <unordered_set>
+#include "velox/exec/OutputBufferManager.h"
 #include "velox/experimental/ucx-exchange/UcxQueues.h"
 
 namespace facebook::velox::ucx_exchange {
 
-class UcxOutputQueueManager {
+/// Implements exec::OutputBufferManager for the UCX/cuDF exchange transport.
+/// The data plane (enqueue / getData / deleteResults / checkBlocked / ...)
+/// is deliberately outside that interface -- payloads are GPU-resident
+/// cudf::packed_columns, transport-specific, and driven directly by the
+/// UcxPartitionedOutput operator and UcxExchangeServer rather than through
+/// OutputBufferManager.
+class UcxOutputQueueManager : public exec::OutputBufferManager {
  public:
   /// Factory method to retrieve a reference to the output queue manager.
   static std::shared_ptr<UcxOutputQueueManager> getInstanceRef();
@@ -36,27 +43,21 @@ class UcxOutputQueueManager {
   // no copy assignment.
   UcxOutputQueueManager& operator=(const UcxOutputQueueManager&) = delete;
 
-  /// @brief Initializes a task and creates the corresponding output queues that
-  /// are associated with this task.
-  /// @param task The task.
-  /// @param kind The output mode (partitioned, broadcast, etc.)
-  /// @param numDestinations The number of queues (destinations or partitions)
-  /// associated with this task.
-  /// @param numDrivers The number of drivers that contribute data to these
-  /// queues. Used to recognize when the queues are complete.
+  /// Ignores 'transportOptions': UCX has no transport-level options today.
   void initializeTask(
       std::shared_ptr<exec::Task> task,
       core::PartitionedOutputNode::Kind kind,
       int numDestinations,
-      int numDrivers);
+      int numDrivers,
+      const std::string& transportOptions = {}) override;
 
-  /// @brief Updates the number of destination buffers for a task.
-  /// For broadcast mode, new destinations are backfilled with previously
-  /// broadcast data.
-  void updateOutputBuffers(
-      std::string_view taskId,
-      int numBuffers,
-      bool noMoreBuffers);
+  bool updateOutputBuffers(
+      const std::string& taskId,
+      int numDestinations,
+      bool noMoreBuffers) override;
+
+  bool updateNumDrivers(const std::string& taskId, uint32_t newNumDrivers)
+      override;
 
   /// @brief Enqueues a cudf packed column into the queue.
   /// @param taskId The unique task Id.
@@ -110,11 +111,19 @@ class UcxOutputQueueManager {
 
   /// @brief Removes the queue for the given task from the queue manager.
   /// Calls "terminate" on the queue to awake waiting producers.
-  void removeTask(std::string_view taskId);
+  void removeTask(const std::string& taskId) override;
 
-  /// @brief Returns the queue statistics of the queue associated with the given
-  /// task. Returns nullopt when the specified output queue doesn't exist.
-  std::optional<exec::OutputBuffer::Stats> stats(std::string_view taskId);
+  std::optional<exec::OutputBufferStats> stats(
+      const std::string& taskId) override;
+
+  /// Nullopt if 'taskId' is unknown, or if its queue is still an
+  /// uninitialized placeholder (created by getData() before
+  /// initializeTask()) and so has no known configured capacity yet.
+  std::optional<double> getUtilization(const std::string& taskId) override;
+
+  std::optional<bool> isOverutilized(const std::string& taskId) override;
+
+  std::string toString(const std::string& taskId) override;
 
  private:
   // Retrieves the queue for a task if it exists.

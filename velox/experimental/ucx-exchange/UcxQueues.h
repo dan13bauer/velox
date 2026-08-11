@@ -20,6 +20,7 @@
 #include <deque>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <vector>
 #include "velox/core/PlanNode.h"
 #include "velox/exec/OutputBuffer.h" // for the Stats structure
@@ -219,6 +220,15 @@ class UcxOutputQueue : public std::enable_shared_from_this<UcxOutputQueue> {
   void terminate();
 
   std::string toString();
+
+  /// Returns queued bytes as a fraction of the configured max output buffer
+  /// size, or nullopt if the queue is an uninitialized placeholder (created
+  /// by getData() before initializeTask()) and so has no known capacity yet.
+  std::optional<double> getUtilization();
+
+  /// Returns true if the queue is filled past half its configured max output
+  /// buffer size, or has reached end-of-stream.
+  bool isOverutilized();
 
   /// @brief The stats of this output queue are shoe-horned into the stats
   /// object of OutputBuffer. Since the OutputBuffer's stat object is part of
