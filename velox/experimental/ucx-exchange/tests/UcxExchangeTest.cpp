@@ -36,10 +36,12 @@
 #include "velox/common/memory/MemoryPool.h"
 #include "velox/core/QueryConfig.h"
 #include "velox/exec/ExchangeClient.h"
+#include "velox/exec/ExchangeTransportRegistry.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/experimental/cudf/CudfConfig.h"
 #include "velox/experimental/ucx-exchange/Communicator.h"
 #include "velox/experimental/ucx-exchange/UcxExchangeProtocol.h"
+#include "velox/experimental/ucx-exchange/UcxExchangeRegistration.h"
 #include "velox/experimental/ucx-exchange/UcxOutputQueueManager.h"
 #include "velox/experimental/ucx-exchange/tests/SinkDriverMock.h"
 #include "velox/experimental/ucx-exchange/tests/SourceDriverMock.h"
@@ -225,6 +227,23 @@ INSTANTIATE_TEST_SUITE_P(
     UcxExchangeTest,
     ::testing::ValuesIn(generateTestParams()),
     ExchangeTestParamsPrinter());
+
+TEST_P(UcxExchangeTest, registersUcxReceiveTransport) {
+  exec::ExchangeTransportRegistry::unregisterAll();
+  EXPECT_EQ(
+      exec::ExchangeTransportRegistry::tryGet(
+          std::string{core::TransportKind::kUcx}),
+      nullptr);
+  registerUcxExchange();
+  auto entry = exec::ExchangeTransportRegistry::tryGet(
+      std::string{core::TransportKind::kUcx});
+  ASSERT_NE(entry, nullptr);
+  EXPECT_TRUE(static_cast<bool>(entry->makeClient));
+  EXPECT_TRUE(static_cast<bool>(entry->makeOperator));
+  // Restore the baseline so later tests in this binary see the built-in
+  // default transport rather than a leftover kUcx registration.
+  exec::ExchangeTransportRegistry::unregisterAll();
+}
 
 TEST_P(UcxExchangeTest, basicTest) {
   VLOG(3) << "+ UcxExchangeTest::basicTest";
