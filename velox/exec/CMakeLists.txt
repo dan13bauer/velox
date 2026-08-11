@@ -133,8 +133,11 @@ velox_add_library(
   EnforceSingleRow.h
   Exchange.h
   InMemoryExchangeClient.h
+  ExchangeClient.h
+  ExchangeFactory.h
   ExchangeQueue.h
   ExchangeSource.h
+  ExchangeTransportRegistry.h
   Expand.h
   FilterProject.h
   GroupId.h
