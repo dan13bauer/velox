@@ -164,25 +164,38 @@ class UcxExchangeTest : public testing::TestWithParam<ExchangeTestParams> {
     VLOG(0) << "setup test case, creating queue manager, communicator, etc..";
     memory::MemoryManager::testingSetInstance(memory::MemoryManager::Options{});
 
+    // Communicator::initAndGet() returns nullptr unless cuDF exchange is
+    // enabled, and it defaults to off process-wide. Every test in this suite
+    // needs the communicator, so enable it here instead of depending on an
+    // external config source.
+    cudf_velox::CudfConfig::getInstance().exchange = true;
+
     queueManager_ = UcxOutputQueueManager::getInstanceRef();
     ContinueFuture future;
     communicator_ = facebook::velox::ucx_exchange::Communicator::initAndGet(
         kCommunicatorPort, std::string(kUnusedCoordinatorUrl), &future);
-    if (communicator_) {
-      communicatorThread_ = std::make_shared<std::thread>(
-          &facebook::velox::ucx_exchange::Communicator::run,
-          communicator_.get());
-    } else {
-      ADD_FAILURE() << "Communicator initialization failed";
-    }
+    // Stop here rather than letting every test throw "Communicator not
+    // initialized" on a null instance.
+    ASSERT_NE(communicator_, nullptr) << "Communicator initialization failed";
+    communicatorThread_ = std::make_shared<std::thread>(
+        &facebook::velox::ucx_exchange::Communicator::run, communicator_.get());
     future.wait();
   }
 
   static void TearDownTestCase() {
-    communicator_->stop();
+    // Both members can be null when SetUpTestCase() bailed out, and gtest runs
+    // this regardless.
+    if (communicator_) {
+      communicator_->stop();
+    }
+    // Join before dropping the last reference. The thread was started with a
+    // raw pointer from communicator_.get(), so releasing the Communicator
+    // first would leave run() touching freed memory.
+    if (communicatorThread_) {
+      communicatorThread_->join();
+      communicatorThread_.reset();
+    }
     communicator_.reset();
-    communicatorThread_->join();
-    communicatorThread_.reset();
   }
 
   void SetUp() override {
