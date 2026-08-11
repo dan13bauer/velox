@@ -254,10 +254,16 @@ TEST_F(UcxOutputQueueManagerTest, implementsOutputBufferManager) {
 
   EXPECT_TRUE(mgr->stats(taskId).has_value());
 
+  // Enqueue one batch so utilization reflects actual queued bytes, rather
+  // than trivially satisfying bounds on an untouched empty queue. Producers
+  // are only blocked *after* adding data (see UcxOutputQueue::checkBlocked),
+  // so queuedBytes_ can exceed maxSize_ and utilization is not guaranteed to
+  // stay <= 1.0; only assert the lower bound this enqueue proves.
+  enqueue(taskId, 0, /*size=*/10);
+
   auto utilization = mgr->getUtilization(taskId);
   ASSERT_TRUE(utilization.has_value());
-  EXPECT_GE(*utilization, 0.0);
-  EXPECT_LE(*utilization, 1.0);
+  EXPECT_GT(*utilization, 0.0);
 
   auto overutilized = mgr->isOverutilized(taskId);
   ASSERT_TRUE(overutilized.has_value());
@@ -402,6 +408,16 @@ TEST_F(UcxOutputQueueManagerTest, lateTaskCreation) {
           std::vector<int64_t> remainingBytes) {
         promise.setValue(Response{std::move(data), std::move(remainingBytes)});
       });
+
+  // getData() above created a placeholder queue with no known capacity yet
+  // (maxSize_ == 0, since it is only set from the task's query config in
+  // initializeTask()). getUtilization() must report that honestly as
+  // nullopt rather than dividing by zero; isOverutilized() has no such
+  // guard but is still correctly false since queuedBytes_ is 0 here.
+  std::shared_ptr<exec::OutputBufferManager> mgr = queueManager_;
+  EXPECT_EQ(mgr->getUtilization(taskId), std::nullopt);
+  EXPECT_EQ(mgr->isOverutilized(taskId), false);
+
   // initialize task.
   auto task = initializeTask(taskId, numPartitions, 1, false);
   // enqueue some data.

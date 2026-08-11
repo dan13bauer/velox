@@ -555,7 +555,7 @@ void UcxOutputQueue::terminate() {
 std::string UcxOutputQueue::toString() {
   std::lock_guard<std::mutex> l(mutex_);
   std::stringstream out;
-  out << "[UcxOutputQueue: kind=" << static_cast<int>(kind_)
+  out << "[UcxOutputQueue: kind=" << kind_
       << ", numDestinations=" << queues_.size()
       << ", queuedBytes=" << queuedBytes_ << ", maxSize=" << maxSize_
       << ", noMoreQueues=" << noMoreQueues_ << ", atEnd=" << atEnd_
