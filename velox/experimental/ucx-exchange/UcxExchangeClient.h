@@ -15,6 +15,7 @@
  */
 #pragma once
 
+#include "velox/exec/ExchangeClient.h"
 #include "velox/experimental/ucx-exchange/UcxExchangeQueue.h"
 #include "velox/experimental/ucx-exchange/UcxExchangeSource.h"
 
@@ -23,7 +24,8 @@ namespace facebook::velox::ucx_exchange {
 // Handle for a set of producers. This may be shared by multiple UcxExchanges,
 // one per consumer thread.
 class UcxExchangeClient
-    : public std::enable_shared_from_this<UcxExchangeClient> {
+    : public exec::ExchangeClient,
+      public std::enable_shared_from_this<UcxExchangeClient> {
  public:
   // used for some primitive type of flow control, limits the size of elements
   // in the UcxExchangeQueue
@@ -50,17 +52,17 @@ class UcxExchangeClient
   // upstream task. If 'close' has been called already, creates an exchange
   // source and immediately closes it to notify the upstream task that data is
   // no longer needed. Repeated calls with the same 'taskId' are ignored.
-  void addRemoteTaskId(std::string_view remoteTaskId);
+  void addRemoteTaskId(const std::string& remoteTaskId) override;
 
-  void noMoreRemoteTasks();
+  void noMoreRemoteTasks() override;
 
   // Closes all exchange sources.
-  void close();
+  void close() override;
 
   // Returns runtime statistics aggregated across all of the exchange sources.
   // ExchangeClient is expected to report background CPU time by including a
   // runtime metric named Operator::kBackgroundCpuTimeNanos.
-  folly::F14FastMap<std::string, RuntimeMetric> stats() const;
+  folly::F14FastMap<std::string, RuntimeMetric> stats() override;
 
   const std::shared_ptr<UcxExchangeQueue>& queue() const {
     return queue_;
@@ -77,7 +79,7 @@ class UcxExchangeClient
 
   std::string toString() const;
 
-  folly::dynamic toJson() const;
+  folly::dynamic toJson() const override;
 
   std::chrono::seconds requestDataSizesMaxWaitSec() const {
     return kRequestDataSizesMaxWaitSec_;

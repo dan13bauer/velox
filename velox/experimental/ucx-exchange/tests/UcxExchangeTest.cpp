@@ -31,9 +31,11 @@
 #include <future>
 #include <memory>
 #include <sstream>
+#include <type_traits>
 #include <vector>
 #include "velox/common/memory/MemoryPool.h"
 #include "velox/core/QueryConfig.h"
+#include "velox/exec/ExchangeClient.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/experimental/cudf/CudfConfig.h"
 #include "velox/experimental/ucx-exchange/Communicator.h"
@@ -840,6 +842,26 @@ TEST_P(UcxExchangeTest, realPartitionedOutputDataIntegrityTest) {
   queueManager_->removeTask(srcTaskId);
 
   VLOG(3) << "- UcxExchangeTest::realPartitionedOutputDataIntegrityTest";
+}
+
+TEST_P(UcxExchangeTest, implementsAbstractExchangeClient) {
+  // A UcxExchangeClient held through the abstract control-plane interface must
+  // be constructible (i.e. every pure-virtual is overridden with a matching
+  // signature) and its control plane usable without a connected peer.
+  static_assert(
+      std::is_base_of_v<exec::ExchangeClient, UcxExchangeClient>,
+      "UcxExchangeClient must implement exec::ExchangeClient");
+  std::shared_ptr<exec::ExchangeClient> client =
+      std::make_shared<UcxExchangeClient>(
+          getUniqueTaskPrefix() + "task.0",
+          /*destination=*/0,
+          /*numberOfConsumers=*/1);
+  EXPECT_NO_THROW(client->noMoreRemoteTasks());
+  EXPECT_NO_THROW(client->toJson());
+  EXPECT_TRUE(client->stats().empty());
+  EXPECT_NO_THROW(client->close());
+  // close() is idempotent.
+  EXPECT_NO_THROW(client->close());
 }
 
 // Focused regression test for shared UcxExchangeClient ownership. This

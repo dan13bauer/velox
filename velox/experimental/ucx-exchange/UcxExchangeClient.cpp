@@ -20,7 +20,7 @@
 
 namespace facebook::velox::ucx_exchange {
 
-void UcxExchangeClient::addRemoteTaskId(std::string_view remoteTaskId) {
+void UcxExchangeClient::addRemoteTaskId(const std::string& remoteTaskId) {
   std::shared_ptr<UcxExchangeSource> toClose;
   {
     std::lock_guard<std::mutex> l(queue_->mutex());
@@ -75,7 +75,7 @@ void UcxExchangeClient::close() {
   queue_->close();
 }
 
-folly::F14FastMap<std::string, RuntimeMetric> UcxExchangeClient::stats() const {
+folly::F14FastMap<std::string, RuntimeMetric> UcxExchangeClient::stats() {
   // TODO: Implement stats collection.
   folly::F14FastMap<std::string, RuntimeMetric> stats;
   return stats;
