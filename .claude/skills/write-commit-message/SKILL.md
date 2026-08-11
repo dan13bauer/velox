@@ -24,7 +24,7 @@ Drafts a commit message that follows the rules in `CODING_STYLE.md` and `CLAUDE.
    - **Standard** (most fixes and features): title + 2-4 short paragraphs as below.
    - **Large**: if you find yourself wanting >4 body paragraphs, the change should probably be split — or the extra material belongs in separate documentation (design doc, issue, wiki page) that the summary links to, not inlined in the commit message.
 
-   **Title**: `[velox] type(scope): Description` or `[velox][PR] type(scope): Description` for GitHub-originated PRs — capital start, no trailing period, ≤67 chars. Type ∈ {feat, fix, refactor, test, docs}. Scope optional.
+   **Title**: `type(scope): Description` — capital start, no trailing period, ≤67 chars. Type ∈ {feat, fix, perf, build, test, docs, refactor, misc}. Scope optional; omit it when the change spans several components. Never prefix the title with `[velox]` (or any bracketed repo tag) — this repo follows the plain conventional-commit form from `CONTRIBUTING.md`.
 
    Body paragraphs (include only those that carry weight for this change):
    - **What + why**: lead with user-visible behavior change. Include one concrete example query, error message, or before/after fact. A reader without internals knowledge should get the gist.
@@ -66,7 +66,7 @@ Drafts a commit message that follows the rules in `CODING_STYLE.md` and `CLAUDE.
    - When in doubt, read the paragraph aloud. If you pause mid-sentence to decode it, split or simplify it.
 
 4. **Self-check before showing** — Walk every item; do not skip any.
-   - [ ] Title matches `[velox] type(scope): Description` or `[velox][PR] type(scope): Description`, capital, no period, ≤67 chars.
+   - [ ] Title matches `type(scope): Description`, capital, no period, ≤67 chars, with no `[velox]` or other bracketed prefix.
    - [ ] Para 1 leads with behavior, not internal symbol names.
    - [ ] Para 1 has a concrete anchor (example, error message, before/after).
    - [ ] Mechanism is one concept, not a diff retrace with sibling-function names.
