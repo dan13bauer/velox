@@ -21,7 +21,6 @@
 #include "velox/core/QueryConfig.h"
 #include "velox/exec/Exchange.h"
 #include "velox/exec/ExchangeTransportRegistry.h"
-#include "velox/exec/MergeSource.h"
 
 namespace facebook::velox::exec {
 
@@ -49,27 +48,13 @@ InMemoryExchangeClient::makeDefaultTransportEntry() {
          DriverCtx* ctx,
          const std::shared_ptr<const core::ExchangeNode>& node,
          std::shared_ptr<ExchangeClient> client) -> std::unique_ptr<Operator> {
-        auto inMemory = std::dynamic_pointer_cast<InMemoryExchangeClient>(
-            std::move(client));
+        auto inMemory =
+            std::dynamic_pointer_cast<InMemoryExchangeClient>(std::move(client));
         VELOX_CHECK_NOT_NULL(
             inMemory,
             "In-memory exchange transport requires an InMemoryExchangeClient");
         return std::make_unique<Exchange>(
             operatorId, ctx, node, std::move(inMemory));
-      },
-      // makeMergeSource: downcast to the concrete client and build the
-      // in-memory merge source.
-      [](MergeExchange* mergeExchange,
-         const std::string& taskId,
-         std::shared_ptr<ExchangeClient> client)
-          -> std::shared_ptr<MergeSource> {
-        auto inMemory = std::dynamic_pointer_cast<InMemoryExchangeClient>(
-            std::move(client));
-        VELOX_CHECK_NOT_NULL(
-            inMemory,
-            "In-memory exchange transport requires an InMemoryExchangeClient");
-        return MergeSource::createMergeExchangeSource(
-            mergeExchange, taskId, std::move(inMemory));
       }});
 }
 

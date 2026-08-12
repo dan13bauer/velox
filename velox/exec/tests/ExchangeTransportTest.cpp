@@ -16,10 +16,9 @@
 
 #include "velox/common/base/tests/GTestUtils.h"
 #include "velox/exec/Exchange.h"
-#include "velox/exec/ExchangeSource.h"
 #include "velox/exec/ExchangeTransportRegistry.h"
 #include "velox/exec/InMemoryExchangeClient.h"
-#include "velox/exec/MergeSource.h"
+#include "velox/exec/ExchangeSource.h"
 #include "velox/exec/Task.h"
 #include "velox/exec/tests/utils/LocalExchangeSource.h"
 #include "velox/exec/tests/utils/OperatorTestBase.h"
@@ -50,15 +49,13 @@ class ExchangeTransportTest : public OperatorTestBase {
     return exec::Split(std::make_shared<RemoteConnectorSplit>(taskId));
   }
 
-  // Registers 'transportKind' with an entry grouping an InMemoryExchangeClient
-  // factory with an Exchange operator factory and an in-memory merge source
-  // factory, each incrementing an invocation counter so tests can assert the
-  // registry entry was used.
+  // Registers 'transportKind' with an entry pairing an InMemoryExchangeClient
+  // factory with an Exchange operator factory, both incrementing an
+  // invocation counter so tests can assert the registry entry was used.
   void registerTestTransport(
       const std::string& transportKind,
       std::shared_ptr<std::atomic<int>> clientInvocations,
-      std::shared_ptr<std::atomic<int>> operatorInvocations,
-      std::shared_ptr<std::atomic<int>> mergeSourceInvocations) {
+      std::shared_ptr<std::atomic<int>> operatorInvocations) {
     ExchangeTransportRegistry::global().insert(
         transportKind,
         std::make_shared<ExchangeTransportEntry>(ExchangeTransportEntry{
@@ -89,18 +86,6 @@ class ExchangeTransportTest : public OperatorTestBase {
               VELOX_CHECK_NOT_NULL(inMemory);
               return std::make_unique<Exchange>(
                   operatorId, ctx, node, std::move(inMemory));
-            },
-            [mergeSourceInvocations](
-                MergeExchange* mergeExchange,
-                const std::string& taskId,
-                std::shared_ptr<ExchangeClient> client)
-                -> std::shared_ptr<MergeSource> {
-              ++*mergeSourceInvocations;
-              auto inMemory = std::dynamic_pointer_cast<InMemoryExchangeClient>(
-                  std::move(client));
-              VELOX_CHECK_NOT_NULL(inMemory);
-              return MergeSource::createMergeExchangeSource(
-                  mergeExchange, taskId, std::move(inMemory));
             }}));
   }
 
@@ -153,8 +138,7 @@ class ExchangeTransportTest : public OperatorTestBase {
 
   // Runs a leaf task producing sorted 'data' through a single-partition
   // PartitionedOutput, then a MergeExchange task consuming it via
-  // 'transportKind'. The MergeExchange resolves both its client and its merge
-  // source from the registry.
+  // 'transportKind'. The MergeExchange resolves its client from the registry.
   // Returns the cursor together with the merged rows; the caller must keep the
   // cursor alive while using the rows, which borrow its memory.
   std::pair<std::unique_ptr<TaskCursor>, std::vector<RowVectorPtr>>
@@ -179,16 +163,14 @@ class ExchangeTransportTest : public OperatorTestBase {
     CursorParameters params;
     params.planNode =
         PlanBuilder()
-            .mergeExchange(
-                asRowType(data->type()), {"c0"}, "Presto", transportKind)
+            .mergeExchange(asRowType(data->type()), {"c0"}, "Presto", transportKind)
             .capturePlanNodeId(mergeExchangeNodeId)
             .planNode();
     params.maxDrivers = 1;
     params.queryCtx = core::QueryCtx::create(driverExecutor_.get());
 
     auto result = readCursor(params, [&](TaskCursor* taskCursor) {
-      taskCursor->task()->addSplit(
-          mergeExchangeNodeId, remoteSplit(leafTaskId));
+      taskCursor->task()->addSplit(mergeExchangeNodeId, remoteSplit(leafTaskId));
       taskCursor->task()->noMoreSplits(mergeExchangeNodeId);
       taskCursor->setNoMoreSplits();
     });
@@ -205,16 +187,10 @@ TEST_F(ExchangeTransportTest, selectsOperatorByTransportKind) {
   const std::string transportKind{"test-exchange-transport"};
   auto clientInvocations = std::make_shared<std::atomic<int>>(0);
   auto operatorInvocations = std::make_shared<std::atomic<int>>(0);
-  auto mergeSourceInvocations = std::make_shared<std::atomic<int>>(0);
-  registerTestTransport(
-      transportKind,
-      clientInvocations,
-      operatorInvocations,
-      mergeSourceInvocations);
+  registerTestTransport(transportKind, clientInvocations, operatorInvocations);
 
-  auto data = makeRowVector(
-      {"c0"},
-      {makeFlatVector<int64_t>(100, [](vector_size_t row) { return row; })});
+  auto data = makeRowVector({"c0"}, {makeFlatVector<int64_t>(
+                     100, [](vector_size_t row) { return row; })});
   auto [cursor, results] =
       runExchange("local://selects-operator-leaf", data, transportKind);
 
@@ -227,31 +203,22 @@ TEST_F(ExchangeTransportTest, mergeExchangeUsesTransportKind) {
   const std::string transportKind{"test-merge-transport"};
   auto clientInvocations = std::make_shared<std::atomic<int>>(0);
   auto operatorInvocations = std::make_shared<std::atomic<int>>(0);
-  auto mergeSourceInvocations = std::make_shared<std::atomic<int>>(0);
-  registerTestTransport(
-      transportKind,
-      clientInvocations,
-      operatorInvocations,
-      mergeSourceInvocations);
+  registerTestTransport(transportKind, clientInvocations, operatorInvocations);
 
-  auto data = makeRowVector(
-      {"c0"},
-      {makeFlatVector<int64_t>(100, [](vector_size_t row) { return row; })});
+  auto data = makeRowVector({"c0"}, {makeFlatVector<int64_t>(
+                     100, [](vector_size_t row) { return row; })});
   auto [cursor, results] =
       runMergeExchange("local://merge-exchange-leaf", data, transportKind);
 
-  // The merge path resolved both its client and its merge source from the
-  // registry (the operator factory is unused on the merge path -- MergeExchange
-  // builds its own operator).
+  // The merge path resolved its client from the registry (operator factory is
+  // unused on the merge path -- MergeExchange builds its own operator).
   EXPECT_GT(clientInvocations->load(), 0);
-  EXPECT_GT(mergeSourceInvocations->load(), 0);
   EXPECT_TRUE(assertEqualResults({data}, results));
 }
 
 TEST_F(ExchangeTransportTest, usesInMemoryByDefault) {
-  auto data = makeRowVector(
-      {"c0"},
-      {makeFlatVector<int64_t>(100, [](vector_size_t row) { return row; })});
+  auto data = makeRowVector({"c0"}, {makeFlatVector<int64_t>(
+                     100, [](vector_size_t row) { return row; })});
   auto [cursor, results] = runExchange(
       "local://uses-in-memory-leaf",
       data,
@@ -285,9 +252,8 @@ TEST_F(ExchangeTransportTest, usesDefaultAfterRegistryClear) {
   // clear.
   ExchangeTransportRegistry::unregisterAll();
 
-  auto data = makeRowVector(
-      {"c0"},
-      {makeFlatVector<int64_t>(100, [](vector_size_t row) { return row; })});
+  auto data = makeRowVector({"c0"}, {makeFlatVector<int64_t>(
+                     100, [](vector_size_t row) { return row; })});
   auto [cursor, results] = runExchange(
       "local://uses-default-after-clear-leaf",
       data,

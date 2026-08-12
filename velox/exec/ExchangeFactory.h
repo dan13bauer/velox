@@ -37,8 +37,6 @@ namespace facebook::velox::exec {
 struct DriverCtx;
 class Operator;
 class ExchangeClient;
-class MergeExchange;
-class MergeSource;
 
 /// Task-supplied context for building a per-node exchange client. Transport
 /// implementations read only the fields they need. The caller sizes the
@@ -61,8 +59,8 @@ struct ExchangeClientContext {
 
 /// Builds the per-node exchange client. Task calls this once per ExchangeNode
 /// and owns the result (shared across drivers).
-using ExchangeClientFactory = std::function<std::shared_ptr<ExchangeClient>(
-    const ExchangeClientContext&)>;
+using ExchangeClientFactory =
+    std::function<std::shared_ptr<ExchangeClient>(const ExchangeClientContext&)>;
 
 /// Builds the exchange operator for a node, bound to the client Task created.
 /// The two are registered together in ExchangeTransportRegistry so they cannot
@@ -71,16 +69,6 @@ using ExchangeFactory = std::function<std::unique_ptr<Operator>(
     int32_t operatorId,
     DriverCtx* ctx,
     const std::shared_ptr<const core::ExchangeNode>& node,
-    std::shared_ptr<ExchangeClient> client)>;
-
-/// Builds the merge source that reads the output of the remote task 'taskId'
-/// for 'mergeExchange', bound to the client the merge path just created for
-/// that source. Registered next to the client factory so the two cannot
-/// diverge; the merge source downcasts 'client' to its concrete type. A
-/// transport that does not support merge exchange leaves this unset.
-using MergeSourceFactory = std::function<std::shared_ptr<MergeSource>(
-    MergeExchange* mergeExchange,
-    const std::string& taskId,
     std::shared_ptr<ExchangeClient> client)>;
 
 } // namespace facebook::velox::exec
