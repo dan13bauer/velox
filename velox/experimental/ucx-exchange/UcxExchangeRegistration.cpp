@@ -18,8 +18,11 @@
 
 #include "velox/core/PlanNode.h"
 #include "velox/exec/ExchangeTransportRegistry.h"
+#include "velox/exec/OutputTransportRegistry.h"
 #include "velox/experimental/ucx-exchange/UcxExchange.h"
 #include "velox/experimental/ucx-exchange/UcxExchangeClient.h"
+#include "velox/experimental/ucx-exchange/UcxOutputQueueManager.h"
+#include "velox/experimental/ucx-exchange/UcxPartitionedOutput.h"
 
 namespace facebook::velox::ucx_exchange {
 
@@ -36,7 +39,8 @@ void registerUcxExchange() {
          const std::shared_ptr<const core::ExchangeNode>& node,
          std::shared_ptr<exec::ExchangeClient> client)
       -> std::unique_ptr<exec::Operator> {
-    auto ucxClient = std::dynamic_pointer_cast<UcxExchangeClient>(client);
+    auto ucxClient =
+        std::dynamic_pointer_cast<UcxExchangeClient>(std::move(client));
     VELOX_CHECK_NOT_NULL(
         ucxClient,
         "UCX exchange requires a UcxExchangeClient for transport: {}",
@@ -50,6 +54,26 @@ void registerUcxExchange() {
   exec::ExchangeTransportRegistry::global().insert(
       std::string{core::TransportKind::kUcx},
       std::move(entry),
+      /*overwrite=*/true);
+
+  auto outputEntry = exec::OutputTransportEntry::make<UcxOutputQueueManager>(
+      UcxOutputQueueManager::getInstanceRef(),
+      [](int32_t operatorId,
+         exec::DriverCtx* ctx,
+         const std::shared_ptr<const core::PartitionedOutputNode>& node,
+         bool eagerFlush,
+         const std::shared_ptr<UcxOutputQueueManager>& /*manager*/)
+          -> std::unique_ptr<exec::Operator> {
+        // UcxPartitionedOutput fetches the manager itself via
+        // UcxOutputQueueManager::getInstanceRef() (a process-wide singleton),
+        // so the locked 'manager' handed in by OutputTransportEntry::make is
+        // provably the same object and does not need to be threaded through.
+        return std::make_unique<UcxPartitionedOutput>(
+            operatorId, ctx, node, eagerFlush);
+      });
+  exec::OutputTransportRegistry::global().insert(
+      std::string{core::TransportKind::kUcx},
+      std::move(outputEntry),
       /*overwrite=*/true);
 }
 

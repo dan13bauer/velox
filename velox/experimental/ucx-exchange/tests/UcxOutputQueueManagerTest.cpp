@@ -26,7 +26,11 @@
 #include <type_traits>
 #include <vector>
 #include "velox/common/memory/MemoryPool.h"
+#include "velox/core/PlanNode.h"
+#include "velox/exec/ExchangeTransportRegistry.h"
+#include "velox/exec/OutputTransportRegistry.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
+#include "velox/experimental/ucx-exchange/UcxExchangeRegistration.h"
 #include "velox/experimental/ucx-exchange/tests/UcxTestHelpers.h"
 
 using namespace facebook::velox::ucx_exchange;
@@ -274,6 +278,46 @@ TEST_F(UcxOutputQueueManagerTest, implementsOutputBufferManager) {
   EXPECT_FALSE(mgr->toString(taskId).empty());
 
   queueManager_->removeTask(taskId);
+}
+
+TEST_F(UcxOutputQueueManagerTest, registersUcxOutputTransport) {
+  // registerUcxExchange() seeds both the receive and output registries;
+  // start from a clean baseline so this case doesn't depend on registration
+  // state left behind by other suites in the binary.
+  exec::OutputTransportRegistry::unregisterAll();
+  EXPECT_EQ(
+      exec::OutputTransportRegistry::tryGet(
+          std::string{core::TransportKind::kUcx}),
+      nullptr);
+
+  registerUcxExchange();
+  auto entry = exec::OutputTransportRegistry::tryGet(
+      std::string{core::TransportKind::kUcx});
+  ASSERT_NE(entry, nullptr);
+  EXPECT_EQ(entry->manager, UcxOutputQueueManager::getInstanceRef());
+  EXPECT_TRUE(static_cast<bool>(entry->makeOutputOperator));
+
+  // registerUcxExchange() is idempotent: a second call replaces the entry
+  // rather than throwing on the duplicate key.
+  registerUcxExchange();
+  auto entryAfterSecondCall = exec::OutputTransportRegistry::tryGet(
+      std::string{core::TransportKind::kUcx});
+  ASSERT_NE(entryAfterSecondCall, nullptr);
+  EXPECT_EQ(
+      entryAfterSecondCall->manager, UcxOutputQueueManager::getInstanceRef());
+
+  // Restore both registries to the baseline this test found them in: the
+  // built-in in-memory default only.
+  exec::OutputTransportRegistry::unregisterAll();
+  exec::ExchangeTransportRegistry::unregisterAll();
+  EXPECT_EQ(
+      exec::OutputTransportRegistry::tryGet(
+          std::string{core::TransportKind::kUcx}),
+      nullptr);
+  EXPECT_NE(
+      exec::OutputTransportRegistry::tryGet(
+          std::string{core::TransportKind::kInMemory}),
+      nullptr);
 }
 
 TEST_F(UcxOutputQueueManagerTest, basicPartitioned) {

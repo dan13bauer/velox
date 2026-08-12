@@ -37,6 +37,7 @@
 #include "velox/core/QueryConfig.h"
 #include "velox/exec/ExchangeClient.h"
 #include "velox/exec/ExchangeTransportRegistry.h"
+#include "velox/exec/OutputTransportRegistry.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/experimental/cudf/CudfConfig.h"
 #include "velox/experimental/ucx-exchange/Communicator.h"
@@ -212,8 +213,10 @@ class UcxExchangeTest : public testing::TestWithParam<ExchangeTestParams> {
   void TearDown() override {
     // Restores the baseline (built-in in-memory default only) between test
     // cases; registerUcxExchange() re-seeds kUcx at the start of the next
-    // SetUp().
+    // SetUp(). registerUcxExchange() seeds both registries, so both must be
+    // cleared here.
     exec::ExchangeTransportRegistry::unregisterAll();
+    exec::OutputTransportRegistry::unregisterAll();
   }
 
   exec::Split remoteSplit(std::string_view taskId, int partitionId) {
