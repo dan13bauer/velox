@@ -39,6 +39,7 @@
 #include "velox/experimental/cudf/exec/Utilities.h"
 #include "velox/experimental/cudf/exec/Validation.h"
 #include "velox/experimental/cudf/expression/ExpressionEvaluator.h"
+#include "velox/experimental/ucx-exchange/UcxExchange.h"
 
 #include "velox/common/memory/Memory.h"
 #include "velox/connectors/ConnectorRegistry.h"
@@ -53,6 +54,7 @@
 #include "velox/exec/Limit.h"
 #include "velox/exec/LocalPartition.h"
 #include "velox/exec/MarkDistinct.h"
+#include "velox/exec/Merge.h"
 #include "velox/exec/NestedLoopJoinBuild.h"
 #include "velox/exec/NestedLoopJoinProbe.h"
 #include "velox/exec/OrderBy.h"
@@ -604,6 +606,64 @@ class OrderByAdapter : public OperatorAdapter {
   }
 };
 
+/// MergeExchangeAdapter - Replaces MergeExchange with UcxExchange + CudfOrderBy
+/// for the UCX transport. MergeExchange merges pre-sorted streams by comparing
+/// rows on the host, which cannot work on device-resident CudfVectors, so the
+/// UCX path receives everything and sorts once on the GPU instead.
+class MergeExchangeAdapter : public OperatorAdapter {
+ public:
+  MergeExchangeAdapter() : OperatorAdapter("MergeExchange") {}
+
+  bool canHandle(const exec::Operator* op) const override {
+    return dynamic_cast<const exec::MergeExchange*>(op) != nullptr;
+  }
+
+  bool canRunOnGPU(
+      const exec::Operator* /*op*/,
+      const core::PlanNodePtr& planNode,
+      exec::DriverCtx* /*ctx*/) const override {
+    if (!CudfConfig::getInstance().exchange) {
+      return false;
+    }
+    auto mergeExchangeNode =
+        std::dynamic_pointer_cast<const core::MergeExchangeNode>(planNode);
+    return mergeExchangeNode != nullptr &&
+        mergeExchangeNode->transportKind() == core::TransportKind::kUcx;
+  }
+
+  bool acceptsGpuInput() const override {
+    return false;
+  }
+
+  bool producesGpuOutput() const override {
+    return true;
+  }
+
+  std::vector<std::unique_ptr<exec::Operator>> createReplacements(
+      const exec::Operator* /*op*/,
+      const core::PlanNodePtr& planNode,
+      exec::DriverCtx* ctx,
+      int32_t operatorId) const override {
+    auto mergeExchangeNode =
+        std::dynamic_pointer_cast<const core::MergeExchangeNode>(planNode);
+    VELOX_CHECK_NOT_NULL(
+        mergeExchangeNode,
+        "MergeExchangeAdapter requires a MergeExchangeNode for plan node: {}",
+        planNode->id());
+
+    std::vector<std::unique_ptr<exec::Operator>> result;
+    // A null client makes UcxExchange create its own single-consumer client and
+    // process splits on driver 0 only, which serializes the receive the same
+    // way MergeExchange::addMergeSources does.
+    result.push_back(
+        std::make_unique<ucx_exchange::UcxExchange>(
+            operatorId, ctx, mergeExchangeNode, nullptr));
+    result.push_back(
+        std::make_unique<CudfOrderBy>(operatorId, ctx, mergeExchangeNode));
+    return result;
+  }
+};
+
 /// TopNAdapter - Replaces with CudfTopN
 class TopNAdapter : public OperatorAdapter {
  public:
@@ -1137,6 +1197,7 @@ void registerAllOperatorAdapters() {
   registry.registerAdapter(std::make_unique<NestedLoopJoinBuildAdapter>());
   registry.registerAdapter(std::make_unique<NestedLoopJoinProbeAdapter>());
   registry.registerAdapter(std::make_unique<OrderByAdapter>());
+  registry.registerAdapter(std::make_unique<MergeExchangeAdapter>());
   registry.registerAdapter(std::make_unique<TopNAdapter>());
   registry.registerAdapter(std::make_unique<TopNRowNumberAdapter>());
   registry.registerAdapter(std::make_unique<LimitAdapter>());

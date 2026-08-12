@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 #include "velox/experimental/cudf/CudfConfig.h"
+#include "velox/experimental/cudf/exec/OperatorAdapters.h"
 #include "velox/experimental/cudf/exec/ToCudf.h"
 #include "velox/experimental/cudf/tests/CudfFunctionBaseTest.h"
 
@@ -22,6 +23,7 @@
 #include "velox/exec/tests/utils/OperatorTestBase.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
+#include "velox/vector/VectorStream.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec;
@@ -32,10 +34,14 @@ class AdapterOperatorTest : public OperatorTestBase {
   void SetUp() override {
     OperatorTestBase::SetUp();
     cudf_velox::CudfConfig::getInstance().allowCpuFallback = false;
+    // Reset here as well as in TearDown so a case that leaves this set cannot
+    // change what a later case in the same binary sees.
+    cudf_velox::CudfConfig::getInstance().exchange = false;
     cudf_velox::registerCudf();
   }
 
   void TearDown() override {
+    cudf_velox::CudfConfig::getInstance().exchange = false;
     cudf_velox::unregisterCudf();
     OperatorTestBase::TearDown();
   }
@@ -59,4 +65,60 @@ TEST_F(AdapterOperatorTest, adapterStatsMergedIntoPlanNode) {
 
   EXPECT_TRUE(projStats.isMultiOperatorTypeNode());
   EXPECT_TRUE(projStats.operatorStats.count("CudfToVelox"));
+}
+
+namespace {
+// Returns the registered adapter with 'name', or nullptr.
+const cudf_velox::OperatorAdapter* findAdapterByName(const std::string& name) {
+  for (const auto& adapter :
+       cudf_velox::OperatorAdapterRegistry::getInstance().getAdapters()) {
+    if (adapter->name() == name) {
+      return adapter.get();
+    }
+  }
+  return nullptr;
+}
+} // namespace
+
+TEST_F(AdapterOperatorTest, mergeExchangeAdapterSelectsUcxOnly) {
+  auto rowType = ROW({"c0"}, {BIGINT()});
+
+  auto ucxNode =
+      PlanBuilder()
+          .mergeExchange(
+              rowType,
+              {"c0"},
+              std::string(
+                  VectorSerde::kindName(VectorSerde::Kind::kCompactRow)),
+              std::string{core::TransportKind::kUcx})
+          .planNode();
+  auto inMemoryNode =
+      PlanBuilder()
+          .mergeExchange(
+              rowType,
+              {"c0"},
+              std::string(
+                  VectorSerde::kindName(VectorSerde::Kind::kCompactRow)),
+              std::string{core::TransportKind::kInMemory})
+          .planNode();
+
+  const auto* adapter = findAdapterByName("MergeExchange");
+  ASSERT_NE(adapter, nullptr) << "MergeExchangeAdapter is not registered";
+
+  // The replacement pair is a GPU source: it takes no input, and its output is
+  // device-resident. producesGpuOutput is load-bearing -- the driver adapter
+  // appends a CudfToVelox off it, without which a host consumer downstream
+  // would receive CudfVectors.
+  EXPECT_FALSE(adapter->acceptsGpuInput());
+  EXPECT_TRUE(adapter->producesGpuOutput());
+
+  // canRunOnGPU ignores its operator and DriverCtx arguments, so this exercises
+  // the transport gate without building a Driver or moving any data.
+  cudf_velox::CudfConfig::getInstance().exchange = true;
+  EXPECT_TRUE(adapter->canRunOnGPU(nullptr, ucxNode, nullptr));
+  EXPECT_FALSE(adapter->canRunOnGPU(nullptr, inMemoryNode, nullptr));
+
+  // With cuDF exchange off, even a kUcx node keeps the CPU MergeExchange.
+  cudf_velox::CudfConfig::getInstance().exchange = false;
+  EXPECT_FALSE(adapter->canRunOnGPU(nullptr, ucxNode, nullptr));
 }
