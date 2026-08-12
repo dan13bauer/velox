@@ -37,21 +37,18 @@
 #include "velox/core/QueryConfig.h"
 #include "velox/exec/ExchangeClient.h"
 #include "velox/exec/ExchangeTransportRegistry.h"
-#include "velox/exec/Merge.h"
 #include "velox/exec/OutputTransportRegistry.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/experimental/cudf/CudfConfig.h"
 #include "velox/experimental/ucx-exchange/Communicator.h"
 #include "velox/experimental/ucx-exchange/UcxExchangeProtocol.h"
 #include "velox/experimental/ucx-exchange/UcxExchangeRegistration.h"
-#include "velox/experimental/ucx-exchange/UcxMergeSource.h"
 #include "velox/experimental/ucx-exchange/UcxOutputQueueManager.h"
 #include "velox/experimental/ucx-exchange/tests/SinkDriverMock.h"
 #include "velox/experimental/ucx-exchange/tests/SourceDriverMock.h"
 #include "velox/experimental/ucx-exchange/tests/UcxPartitionedOutputMock.h"
 #include "velox/experimental/ucx-exchange/tests/UcxTestData.h"
 #include "velox/experimental/ucx-exchange/tests/UcxTestHelpers.h"
-#include "velox/serializers/CompactRowSerializer.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec;
@@ -1004,135 +1001,6 @@ TEST_P(UcxExchangeTest, sharedClientSurvivesOneExchangeClose) {
   drainingExchange.close();
 
   EXPECT_EQ(rowsReceived, static_cast<uint64_t>(numChunks) * numRowsPerChunk);
-
-  queueManager_->removeTask(srcTaskId);
-}
-
-// Verifies that the kUcx transport entry supplies a merge source and that the
-// source turns data received over UCX into CudfVectors for a MergeExchange
-// operator, reporting the rows through that operator's stats. The merge source
-// is driven directly instead of running a full MergeExchange plan: the k-way
-// merge compares rows on the host, which a device-resident CudfVector does not
-// support, so an end-to-end ordered merge is out of scope here.
-TEST_P(UcxExchangeTest, mergeSourceOverUcx) {
-  // This test doesn't use parameters - run only for the first param set.
-  if (GetParam() != generateTestParams().front()) {
-    GTEST_SKIP() << "mergeSourceOverUcx: runs only once";
-  }
-
-  const std::string taskPrefix = getUniqueTaskPrefix();
-  const std::string srcTaskId = taskPrefix + "mergeSourceSrc";
-  const std::string mergeTaskId = taskPrefix + "mergeSourceSink";
-  const int numPartitions = 1;
-  const int partitionId = 0;
-  const int numSourceDrivers = 1;
-  const int numChunks = 5;
-  const int numRowsPerChunk = 1000;
-
-  auto rowType = UcxTestData::kTestRowType;
-  auto srcTask = createSourceTask(srcTaskId, pool_, rowType);
-  queueManager_->initializeTask(
-      srcTask,
-      core::PartitionedOutputNode::Kind::kPartitioned,
-      numPartitions,
-      numSourceDrivers);
-
-  auto sourceMock = std::make_shared<UcxPartitionedOutputMock>(
-      srcTaskId, numSourceDrivers, numPartitions, numChunks, numRowsPerChunk);
-  sourceMock->run();
-  sourceMock->joinThreads();
-
-  // MergeExchange resolves its serde by name in its constructor, and nothing
-  // else in this binary registers one.
-  serializer::CompactRowVectorSerde::tryRegisterNamedVectorSerde();
-  std::unordered_map<std::string, std::string> configSettings;
-  auto mergeTask = Task::create(
-      mergeTaskId,
-      exec::test::PlanBuilder()
-          .mergeExchange(
-              rowType,
-              {"c0"},
-              VectorSerde::kindName(VectorSerde::Kind::kCompactRow),
-              std::string{core::TransportKind::kUcx})
-          .planFragment(),
-      partitionId,
-      core::QueryCtx::create(
-          nullptr, core::QueryConfig(std::move(configSettings))),
-      Task::ExecutionMode::kParallel);
-  auto mergeExchangeNode =
-      std::dynamic_pointer_cast<const core::MergeExchangeNode>(
-          mergeTask->planFragment().planNode);
-  ASSERT_NE(mergeExchangeNode, nullptr);
-
-  auto driverCtx = std::make_shared<DriverCtx>(
-      mergeTask,
-      /*driverId=*/0,
-      /*pipelineId=*/0,
-      kUngroupedGroupId,
-      /*partitionId=*/0);
-  MergeExchange mergeExchange(0, driverCtx.get(), mergeExchangeNode);
-
-  auto entry = exec::ExchangeTransportRegistry::tryGet(
-      std::string{core::TransportKind::kUcx});
-  ASSERT_NE(entry, nullptr);
-  ASSERT_TRUE(static_cast<bool>(entry->makeMergeSource));
-
-  // Size the client the way MergeExchange::addMergeSources does: one consumer,
-  // per-source budget, deliver each table right away.
-  const auto& mergeQueryConfig = mergeTask->queryCtx()->queryConfig();
-  const exec::ExchangeClientContext context{
-      .taskId = mergeTask->taskId(),
-      .destination = mergeTask->destination(),
-      .numberOfConsumers = 1,
-      .maxExchangeBufferSize = exec::MergeSource::kMaxQueuedBytesUpperLimit,
-      .minExchangeOutputBatchBytes = 0,
-      .pool = mergeTask->pool(),
-      .executor = mergeTask->queryCtx()->executor(),
-      .queryConfig = mergeQueryConfig};
-
-  // The merge path hands the source the split's task id, which for UCX is the
-  // producer's result URL.
-  auto split = remoteSplit(srcTaskId, partitionId);
-  auto remoteConnectorSplit =
-      std::dynamic_pointer_cast<exec::RemoteConnectorSplit>(
-          split.connectorSplit);
-  ASSERT_NE(remoteConnectorSplit, nullptr);
-  auto mergeSource = entry->makeMergeSource(
-      &mergeExchange, remoteConnectorSplit->taskId, entry->makeClient(context));
-  ASSERT_NE(mergeSource, nullptr);
-  EXPECT_NE(std::dynamic_pointer_cast<UcxMergeSource>(mergeSource), nullptr);
-
-  uint64_t rowsReceived = 0;
-  while (true) {
-    ContinueFuture future = ContinueFuture::makeEmpty();
-    RowVectorPtr data;
-    bool drained = true;
-    auto reason = mergeSource->next(data, &future, drained);
-    EXPECT_FALSE(drained);
-    if (reason == BlockingReason::kWaitForProducer) {
-      ASSERT_EQ(data, nullptr);
-      ASSERT_TRUE(future.valid());
-      future.wait();
-      continue;
-    }
-    ASSERT_EQ(reason, BlockingReason::kNotBlocked);
-    if (data == nullptr) {
-      break;
-    }
-    auto cudfData = std::dynamic_pointer_cast<cudf_velox::CudfVector>(data);
-    ASSERT_NE(cudfData, nullptr);
-    EXPECT_EQ(*cudfData->type(), *rowType);
-    rowsReceived += cudfData->getTableView().num_rows();
-  }
-
-  EXPECT_EQ(rowsReceived, static_cast<uint64_t>(numChunks) * numRowsPerChunk);
-  // The source reports through the merge operator's stats, not its own.
-  EXPECT_EQ(mergeExchange.stats().rlock()->rawInputPositions, rowsReceived);
-
-  mergeSource->close();
-  // close() is idempotent - the destructor calls it too.
-  mergeSource->close();
-  mergeExchange.close();
 
   queueManager_->removeTask(srcTaskId);
 }
