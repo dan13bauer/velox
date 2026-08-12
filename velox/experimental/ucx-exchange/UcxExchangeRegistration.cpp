@@ -21,6 +21,7 @@
 #include "velox/exec/OutputTransportRegistry.h"
 #include "velox/experimental/ucx-exchange/UcxExchange.h"
 #include "velox/experimental/ucx-exchange/UcxExchangeClient.h"
+#include "velox/experimental/ucx-exchange/UcxMergeSource.h"
 #include "velox/experimental/ucx-exchange/UcxOutputQueueManager.h"
 #include "velox/experimental/ucx-exchange/UcxPartitionedOutput.h"
 
@@ -47,6 +48,19 @@ void registerUcxExchange() {
         core::TransportKind::kUcx);
     return std::make_unique<UcxExchange>(
         operatorId, ctx, node, std::move(ucxClient));
+  };
+  entry->makeMergeSource = [](exec::MergeExchange* mergeExchange,
+                              const std::string& taskId,
+                              std::shared_ptr<exec::ExchangeClient> client)
+      -> std::shared_ptr<exec::MergeSource> {
+    auto ucxClient =
+        std::dynamic_pointer_cast<UcxExchangeClient>(std::move(client));
+    VELOX_CHECK_NOT_NULL(
+        ucxClient,
+        "UCX merge exchange requires a UcxExchangeClient for transport: {}",
+        core::TransportKind::kUcx);
+    return std::make_shared<UcxMergeSource>(
+        mergeExchange, taskId, std::move(ucxClient));
   };
   // 'overwrite' makes this idempotent: a second call (e.g. cuDF
   // re-initializing) replaces the existing entry instead of throwing on the
