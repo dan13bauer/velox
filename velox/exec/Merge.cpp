@@ -19,7 +19,6 @@
 #include <exception>
 #include "velox/common/testutil/TestValue.h"
 #include "velox/exec/ExchangeTransportRegistry.h"
-#include "velox/exec/InMemoryExchangeClient.h"
 #include "velox/exec/OperatorType.h"
 #include "velox/exec/OperatorUtils.h"
 #include "velox/exec/Task.h"
@@ -834,11 +833,14 @@ BlockingReason MergeExchange::addMergeSources(ContinueFuture* future) {
               MergeSource::kMaxQueuedBytesLowerLimit),
           MergeSource::kMaxQueuedBytesUpperLimit);
       const auto& queryCtx = *operatorCtx_->task()->queryCtx();
-      auto entry =
-          ExchangeTransportRegistry::tryGet(queryCtx, transportKind_);
+      auto entry = ExchangeTransportRegistry::tryGet(queryCtx, transportKind_);
       VELOX_USER_CHECK_NOT_NULL(
           entry,
           "No exchange transport registered for transport: {}",
+          transportKind_);
+      VELOX_USER_CHECK_NOT_NULL(
+          entry->makeMergeSource,
+          "Merge exchange is not supported for transport: {}",
           transportKind_);
       for (uint32_t remoteSourceIndex = 0;
            remoteSourceIndex < remoteSourceTaskIds_.size();
@@ -857,17 +859,10 @@ BlockingReason MergeExchange::addMergeSources(ContinueFuture* future) {
             pool,
             operatorCtx_->task()->queryCtx()->executor(),
             operatorCtx_->driverCtx()->queryConfig()};
-        auto client = std::dynamic_pointer_cast<InMemoryExchangeClient>(
-            entry->makeClient(context));
-        VELOX_CHECK_NOT_NULL(
-            client,
-            "Merge exchange requires an InMemoryExchangeClient for transport: {}",
-            transportKind_);
-        sources_.emplace_back(
-            MergeSource::createMergeExchangeSource(
-                this,
-                remoteSourceTaskIds_[remoteSourceIndex],
-                std::move(client)));
+        sources_.emplace_back(entry->makeMergeSource(
+            this,
+            remoteSourceTaskIds_[remoteSourceIndex],
+            entry->makeClient(context)));
       }
     }
     // TODO Delay this call until all input data has been processed.

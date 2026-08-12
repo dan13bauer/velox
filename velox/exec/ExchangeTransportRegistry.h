@@ -32,21 +32,25 @@ class QueryCtx;
 
 namespace facebook::velox::exec {
 
-/// Registry value pairing the factory that builds a transport's exchange client
-/// with the factory that builds its matching exchange operator, keyed by
-/// transport id. Registering the two together keeps a transport's client and
-/// operator from diverging. Plain aggregate: unlike the output side there is no
-/// long-lived manager instance to hold -- the client is created per node by
-/// Task.
+/// Registry value grouping the factory that builds a transport's exchange
+/// client with the factories that build its matching exchange operator and
+/// merge source, keyed by transport id. Registering them together keeps a
+/// transport's client and its consumers from diverging. Plain aggregate: unlike
+/// the output side there is no long-lived manager instance to hold -- the
+/// client is created per node by Task.
 struct ExchangeTransportEntry {
   ExchangeClientFactory makeClient;
   ExchangeFactory makeOperator;
+  /// Builds the merge source a MergeExchange operator reads one remote task
+  /// through. Left unset by transports that support plain exchange only;
+  /// MergeExchange then fails the query.
+  MergeSourceFactory makeMergeSource;
 };
 
 /// Manages exchange-transport registration and lookup, keyed by transport id.
-/// Each entry pairs the factory that builds a transport's exchange client with
-/// the factory that builds its matching exchange operator. All methods are
-/// thread-safe.
+/// Each entry groups the factory that builds a transport's exchange client with
+/// the factories that build its matching exchange operator and merge source.
+/// All methods are thread-safe.
 ///
 /// Two groups of APIs:
 ///
