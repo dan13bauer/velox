@@ -38,4 +38,39 @@ TEST(ConfigTest, CudfConfig) {
   ASSERT_EQ(config.functionNamePrefix, "presto");
   ASSERT_EQ(config.allowCpuFallback, false);
 }
+
+TEST(ConfigTest, UcxExchangeKeys) {
+  std::unordered_map<std::string, std::string> options = {
+      {CudfConfig::kUcxExchange, "true"},
+      {CudfConfig::kUcxxErrorHandling, "false"},
+      {CudfConfig::kUcxIntraNodeExchange, "true"},
+      {CudfConfig::kUcxxBlockingPolling, "false"},
+      {CudfConfig::kUcxExchangeLogLevel, "3"},
+      {CudfConfig::kUcxPartitionedOutputBatchRows, "500"}};
+
+  CudfConfig config;
+  config.initialize(std::move(options));
+  ASSERT_EQ(config.exchange, true);
+  ASSERT_EQ(config.ucxxErrorHandling, false);
+  ASSERT_EQ(config.intraNodeExchange, true);
+  ASSERT_EQ(config.ucxxBlockingPolling, false);
+  ASSERT_EQ(config.exchangeLogLevel, 3);
+  ASSERT_EQ(config.partitionedOutputBatchRows, 500);
+}
+
+TEST(ConfigTest, UcxExchangeKeysAbsentKeepDefaults) {
+  // An unrelated key is present, but none of the six UCX keys are: every
+  // field must retain its CudfConfig default.
+  std::unordered_map<std::string, std::string> options = {
+      {CudfConfig::kCudfEnabled, "false"}};
+
+  CudfConfig config;
+  config.initialize(std::move(options));
+  ASSERT_EQ(config.exchange, false);
+  ASSERT_EQ(config.ucxxErrorHandling, true);
+  ASSERT_EQ(config.intraNodeExchange, false);
+  ASSERT_EQ(config.ucxxBlockingPolling, true);
+  ASSERT_EQ(config.exchangeLogLevel, 0);
+  ASSERT_EQ(config.partitionedOutputBatchRows, 10'000);
+}
 } // namespace facebook::velox::cudf_velox::test

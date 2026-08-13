@@ -30,6 +30,7 @@
 #include "velox/experimental/cudf/expression/AstExpression.h"
 #include "velox/experimental/cudf/expression/ExpressionEvaluator.h"
 #include "velox/experimental/cudf/expression/JitExpression.h"
+#include "velox/experimental/ucx-exchange/UcxExchangeRegistration.h"
 
 #include "folly/Conv.h"
 #include "velox/exec/Driver.h"
@@ -308,6 +309,10 @@ void registerCudf() {
   // Register operator adapters
   registerAllOperatorAdapters();
 
+  if (CudfConfig::getInstance().exchange) {
+    ucx_exchange::registerUcxExchange();
+  }
+
   auto prefix = CudfConfig::getInstance().functionNamePrefix;
   registerBuiltinFunctions(prefix);
   registerPrestoAggregateFunctions(prefix);
@@ -433,6 +438,25 @@ void CudfConfig::initialize(
       VELOX_FAIL(
           "Invalid timestamp unit: {}. Valid values are: s, ms, us, ns", unit);
     }
+  }
+  if (config.find(kUcxExchange) != config.end()) {
+    exchange = folly::to<bool>(config[kUcxExchange]);
+  }
+  if (config.find(kUcxxErrorHandling) != config.end()) {
+    ucxxErrorHandling = folly::to<bool>(config[kUcxxErrorHandling]);
+  }
+  if (config.find(kUcxIntraNodeExchange) != config.end()) {
+    intraNodeExchange = folly::to<bool>(config[kUcxIntraNodeExchange]);
+  }
+  if (config.find(kUcxxBlockingPolling) != config.end()) {
+    ucxxBlockingPolling = folly::to<bool>(config[kUcxxBlockingPolling]);
+  }
+  if (config.find(kUcxExchangeLogLevel) != config.end()) {
+    exchangeLogLevel = folly::to<int32_t>(config[kUcxExchangeLogLevel]);
+  }
+  if (config.find(kUcxPartitionedOutputBatchRows) != config.end()) {
+    partitionedOutputBatchRows =
+        folly::to<int64_t>(config[kUcxPartitionedOutputBatchRows]);
   }
 }
 

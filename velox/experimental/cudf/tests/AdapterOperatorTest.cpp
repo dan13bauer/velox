@@ -18,6 +18,8 @@
 #include "velox/experimental/cudf/exec/ToCudf.h"
 #include "velox/experimental/cudf/tests/CudfFunctionBaseTest.h"
 
+#include "velox/exec/ExchangeTransportRegistry.h"
+#include "velox/exec/OutputTransportRegistry.h"
 #include "velox/exec/PlanNodeStats.h"
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
 #include "velox/exec/tests/utils/OperatorTestBase.h"
@@ -43,6 +45,14 @@ class AdapterOperatorTest : public OperatorTestBase {
   void TearDown() override {
     cudf_velox::CudfConfig::getInstance().exchange = false;
     cudf_velox::unregisterCudf();
+    // unregisterCudf() does not touch either transport registry -- there is
+    // no unregisterUcxExchange() -- so erase the kUcx entries a test may
+    // have registered here, where teardown always runs even if the test body
+    // throws, rather than at the end of the test body.
+    ExchangeTransportRegistry::global().erase(
+        std::string{core::TransportKind::kUcx});
+    OutputTransportRegistry::global().erase(
+        std::string{core::TransportKind::kUcx});
     OperatorTestBase::TearDown();
   }
 };
@@ -121,4 +131,39 @@ TEST_F(AdapterOperatorTest, mergeExchangeAdapterSelectsUcxOnly) {
   // With cuDF exchange off, even a kUcx node keeps the CPU MergeExchange.
   cudf_velox::CudfConfig::getInstance().exchange = false;
   EXPECT_FALSE(adapter->canRunOnGPU(nullptr, ucxNode, nullptr));
+}
+
+TEST_F(AdapterOperatorTest, ucxTransportsNotRegisteredWhenExchangeDisabled) {
+  // SetUp() ran registerCudf() with exchange left at its default (false):
+  // no kUcx transport is registered, while the built-in in-memory transport
+  // still resolves -- this is the pure-HTTP default the gate must preserve.
+  EXPECT_EQ(
+      ExchangeTransportRegistry::tryGet(std::string{core::TransportKind::kUcx}),
+      nullptr);
+  EXPECT_EQ(
+      OutputTransportRegistry::tryGet(std::string{core::TransportKind::kUcx}),
+      nullptr);
+  EXPECT_NE(
+      ExchangeTransportRegistry::tryGet(
+          std::string{core::TransportKind::kInMemory}),
+      nullptr);
+}
+
+TEST_F(AdapterOperatorTest, ucxTransportsRegisteredWhenExchangeEnabled) {
+  // registerCudf() early-returns once already registered, so unregister
+  // first to force the registration body -- and the gated
+  // registerUcxExchange() call inside it -- to run again with exchange
+  // enabled. Going through initialize(), rather than assigning the exchange
+  // field directly, exercises the session-config-key-in to
+  // registered-transport-out path end to end.
+  cudf_velox::unregisterCudf();
+  cudf_velox::CudfConfig::getInstance().initialize(
+      {{cudf_velox::CudfConfig::kUcxExchange, "true"}});
+  cudf_velox::registerCudf();
+  EXPECT_NE(
+      ExchangeTransportRegistry::tryGet(std::string{core::TransportKind::kUcx}),
+      nullptr);
+  EXPECT_NE(
+      OutputTransportRegistry::tryGet(std::string{core::TransportKind::kUcx}),
+      nullptr);
 }
