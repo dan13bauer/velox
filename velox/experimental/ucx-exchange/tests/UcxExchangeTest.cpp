@@ -1950,21 +1950,42 @@ std::vector<RowVectorPtr> runTaskShuffle(
 // LocalPlanner, so the exchange operator is resolved through
 // ExchangeTransportRegistry and the output buffer through
 // OutputTransportRegistry, both keyed by the transportKind on the plan nodes.
+namespace {
+// Row shape shared by taskShuffleOverUcx and taskShuffleOverDefaultTransport.
+// The twin comparison only means anything if both cases send the same rows, so
+// they rest on one definition rather than two copies that have to agree.
+constexpr vector_size_t kTaskShuffleRowsPerBatch = 1'000;
+constexpr int kTaskShuffleNumBatches = 3;
+constexpr int64_t kTaskShuffleTotalRows =
+    static_cast<int64_t>(kTaskShuffleNumBatches) * kTaskShuffleRowsPerBatch;
+
+std::vector<RowVectorPtr> makeTaskShuffleBatches(memory::MemoryPool* pool) {
+  std::vector<RowVectorPtr> batches;
+  batches.reserve(kTaskShuffleNumBatches);
+  for (int i = 0; i < kTaskShuffleNumBatches; ++i) {
+    batches.push_back(makeTaskShuffleBatch(
+        pool,
+        /*firstValue=*/i * kTaskShuffleRowsPerBatch,
+        /*stride=*/1,
+        kTaskShuffleRowsPerBatch));
+  }
+  return batches;
+}
+} // namespace
+
 TEST_P(UcxExchangeTest, taskShuffleOverUcx) {
+  // This test doesn't use parameters - run only for the first param set.
+  if (GetParam() != generateTestParams().front()) {
+    GTEST_SKIP() << "taskShuffleOverUcx: runs only once";
+  }
+
   registerSerdes();
   const auto taskPrefix = getUniqueTaskPrefix();
 
-  constexpr vector_size_t kNumRowsPerBatch = 1'000;
-  constexpr int kNumBatches = 3;
-  std::vector<RowVectorPtr> expected;
+  const auto expected = makeTaskShuffleBatches(pool_.get());
   std::vector<RowVectorPtr> deviceBatches;
-  for (int i = 0; i < kNumBatches; ++i) {
-    auto batch = makeTaskShuffleBatch(
-        pool_.get(),
-        /*firstValue=*/i * kNumRowsPerBatch,
-        /*stride=*/1,
-        kNumRowsPerBatch);
-    expected.push_back(batch);
+  deviceBatches.reserve(expected.size());
+  for (const auto& batch : expected) {
     deviceBatches.push_back(toDevice(batch, pool_.get()));
   }
 
@@ -1986,7 +2007,7 @@ TEST_P(UcxExchangeTest, taskShuffleOverUcx) {
       [this](const std::string& taskId) { return remoteSplit(taskId, 0); },
       pool_.get());
 
-  EXPECT_EQ(totalRows(actual), kNumBatches * kNumRowsPerBatch);
+  EXPECT_EQ(totalRows(actual), kTaskShuffleTotalRows);
   EXPECT_TRUE(exec::test::assertEqualResults(expected, actual));
 }
 
@@ -1994,20 +2015,16 @@ TEST_P(UcxExchangeTest, taskShuffleOverUcx) {
 // same rows, no transportKind of its own. Asserts that routing UCX through the
 // two registries left the in-memory path producing identical results.
 TEST_P(UcxExchangeTest, taskShuffleOverDefaultTransport) {
+  // This test doesn't use parameters - run only for the first param set.
+  if (GetParam() != generateTestParams().front()) {
+    GTEST_SKIP() << "taskShuffleOverDefaultTransport: runs only once";
+  }
+
   registerSerdes();
   registerLocalExchangeSource();
   const auto taskPrefix = getUniqueTaskPrefix();
 
-  constexpr vector_size_t kNumRowsPerBatch = 1'000;
-  constexpr int kNumBatches = 3;
-  std::vector<RowVectorPtr> expected;
-  for (int i = 0; i < kNumBatches; ++i) {
-    expected.push_back(makeTaskShuffleBatch(
-        pool_.get(),
-        /*firstValue=*/i * kNumRowsPerBatch,
-        /*stride=*/1,
-        kNumRowsPerBatch));
-  }
+  const auto expected = makeTaskShuffleBatches(pool_.get());
 
   core::PlanNodeId exchangeNodeId;
   auto consumerPlan = exec::test::PlanBuilder()
@@ -2035,7 +2052,7 @@ TEST_P(UcxExchangeTest, taskShuffleOverDefaultTransport) {
   // next parameter instance starts from a clean source.
   exec::test::testingShutdownLocalExchangeSource();
 
-  EXPECT_EQ(totalRows(actual), kNumBatches * kNumRowsPerBatch);
+  EXPECT_EQ(totalRows(actual), kTaskShuffleTotalRows);
   EXPECT_TRUE(exec::test::assertEqualResults(expected, actual));
 }
 
@@ -2046,6 +2063,11 @@ TEST_P(UcxExchangeTest, taskShuffleOverDefaultTransport) {
 // ordering is the only property asserted: nothing about merge internals, batch
 // boundaries or per-source runs survives the substitution.
 TEST_P(UcxExchangeTest, mergeExchangeOverUcxIsGloballyOrdered) {
+  // This test doesn't use parameters - run only for the first param set.
+  if (GetParam() != generateTestParams().front()) {
+    GTEST_SKIP() << "mergeExchangeOverUcxIsGloballyOrdered: runs only once";
+  }
+
   registerSerdes();
   const auto taskPrefix = getUniqueTaskPrefix();
 
