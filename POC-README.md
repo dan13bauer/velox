@@ -19,13 +19,13 @@ a `(client factory, operator factory)` pair keyed by a transport-kind string;
 the built-in in-memory transport is a seeded default, and an unregistered
 transport fails fast.
 
-**Scope of this first step.** Exactly as **PR #16980 landed the output-side
+**Scope of the first step.** Exactly as **PR #16980 landed the output-side
 registry infrastructure *without* wiring in the cuDF partitioned-output
-adapter**, this PoC lands the receive-side registry infrastructure *without*
-wiring in any real (non-in-memory) transport. The in-memory transport is the
-only registered entry. Wiring the real **UCX** transport (client + operator)
-into the registry is the documented next step — see
-[Outlook](#outlook-integrating-the-ucx-exchange-components).
+adapter**, this PoC first landed the receive-side registry infrastructure
+*without* wiring in any real (non-in-memory) transport, leaving the in-memory
+transport as the only registered entry. The real **UCX** transport (client +
+operator, plus its output buffer manager) has since been wired in on top — see
+[Integrated](#integrated-the-ucx-exchange-components).
 
 The work is on branch `poc-exchange-transport-integration` (pushed to the
 `dan13bauer` fork), built on merged `main` (which already contains #16980).
@@ -163,59 +163,80 @@ migrated `customPlanNodeWithExchangeClient`).
 
 ---
 
-## Outlook: integrating the ucx-exchange components
+## Integrated: the ucx-exchange components
 
 The `velox/experimental/ucx-exchange/` module (a UCX/RDMA transport with GPU/cuDF
-integration) is the intended first *real* transport. Wiring it in is a separate
-step with a build-system prerequisite. The pieces, roughly in order:
+integration) was the intended first *real* transport, and it is now wired in.
+What each step turned out to be:
 
-### 0. Prerequisite — put the module in the build
-`velox/experimental/ucx-exchange/` is **not currently referenced by any
-`add_subdirectory`**, so `velox_ucx_exchange` and `ucx_exchange_test` are never
-built. First add `add_subdirectory(experimental/ucx-exchange)` under the
-`VELOX_ENABLE_CUDF` branch of `velox/CMakeLists.txt`, and confirm the module still
-compiles (it links `ucxx::ucxx`, `find_package(ucx REQUIRED)`, cuDF and CUDA —
-availability of these in the build image needs verifying, since the module has not
-been compiled in this configuration).
+### 0. The module is in the build
+`add_subdirectory(experimental/ucx-exchange)` sits under the `VELOX_ENABLE_CUDF`
+branch of `velox/CMakeLists.txt`, so `velox_ucx_exchange` and `ucx_exchange_test`
+build in the cuDF configuration. The module links `ucxx::ucxx`,
+`find_package(ucx REQUIRED)`, cuDF and CUDA, all of which the GPU build image
+provides.
 
 ### 1. `UcxExchangeClient` implements `exec::ExchangeClient`
-`UcxExchangeClient` already has all the needed methods; adapting it is mostly
-signature alignment:
-- add `: public exec::ExchangeClient` (keep `enable_shared_from_this` on the
-  concrete class);
-- `addRemoteTaskId(std::string_view)` → `addRemoteTaskId(const std::string&)`
-  (the body works unchanged);
-- drop `const` on `stats()` to match the interface, and add `override` to all
-  five control-plane methods (`toJson()` already matches);
-- keep the data plane (`next()` / `queue()`) concrete. The current `stats()` is a
-  stub — left as-is for the PoC (leave a `// TODO`).
+It derives from `exec::ExchangeClient` and keeps `enable_shared_from_this` on the
+concrete class. `addRemoteTaskId` takes a `const std::string&`, `stats()` dropped
+its `const`, and the five control-plane methods are `override`. The data plane
+(`next()` / `queue()`) stayed concrete, and `stats()` is still the PoC stub.
 
-### 2. Register the UCX transport entry
-Add a `registerUcxExchangeTransport()` free function (in a small registration TU
-in the module) that inserts a `kUcx` entry into
-`ExchangeTransportRegistry::global()`:
-- **`makeClient`** builds a `UcxExchangeClient` from the `ExchangeClientContext`
-  (capturing any process-wide UCX infrastructure it needs);
-- **`makeOperator`** downcasts the abstract client to `UcxExchangeClient` and
-  builds a `UcxExchange`. Note `UcxExchange`'s ctor takes a generic
-  `core::PlanNode` and a `shared_ptr<UcxExchangeClient>`, so the registry's
-  `ExchangeNode` (an is-a `PlanNode`) passes through directly after the downcast.
+### 2. The UCX transport entries are registered
+`registerUcxExchange()` (`UcxExchangeRegistration.cpp`) seeds **both** registries
+under `core::TransportKind::kUcx`, each insert passing `overwrite=true` so the
+call is idempotent:
+- `ExchangeTransportRegistry` gets `makeClient`, which builds a
+  `UcxExchangeClient` from the `ExchangeClientContext`, and `makeOperator`, which
+  downcasts the abstract client back to `UcxExchangeClient` and builds a
+  `UcxExchange`;
+- `OutputTransportRegistry` gets an entry pairing the `UcxOutputQueueManager`
+  singleton with a factory for `UcxPartitionedOutput`, so a `kUcx`
+  `PartitionedOutputNode` makes `Task` install that manager as its output buffer
+  manager.
 
-Call this registration where the UCX/cuDF module initializes.
+`registerCudf()` calls `registerUcxExchange()` whenever `CudfConfig::exchange` is
+true, so a worker configured with `cudf.exchange=true` gets both transports
+without a separate call.
 
-### 3. Route `ucx_exchange_test` through the registry
-The UCX test harness currently constructs `UcxExchangeClient` / `UcxExchange`
-directly (in `SinkDriverMock` and a couple of `UcxExchangeTest` cases). Change
-those sites to resolve via the registry (`tryGet` → `makeClient` / `makeOperator`)
-so the test exercises the real resolution path. Register the transport in the
-fixture `SetUp` and `unregisterAll()` in teardown. Build and run on GPU
-(`--gpus all`, `cudf.enabled=true`; the target is labeled `cuda_driver`).
+### 3. `ucx_exchange_test` runs through the registries
+`SinkDriverMock` and the `UcxExchangeTest` cases resolve their client and operator
+through `ExchangeTransportRegistry::tryGet` instead of constructing them; the
+fixture registers in `SetUp()` and clears both registries in `TearDown()`. Three
+cases go further and run real `Task`s end to end: a two-fragment
+`Values -> PartitionedOutput` / `Exchange -> consumer` plan on `kUcx`, the same
+plan on the default in-memory transport asserted against the same rows, and a
+`kUcx` `MergeExchange` asserted to be globally ordered.
 
-### Known follow-on: MergeExchange over a non-in-memory transport
-The merge path currently **downcasts the resolved client to
-`InMemoryExchangeClient`** because `MergeExchangeSource::next()` needs the concrete
-data plane (the abstract `ExchangeClient` has no `next()`). A UCX-backed
-`MergeExchange` would therefore need either a shared data-plane abstraction on the
-interface or a merge-source adapter for the UCX client. Plain (non-merge)
-`Exchange` over UCX has no such constraint — its operator is fully transport-owned
-via `makeOperator`.
+### MergeExchange over UCX: a device sort, not a merge
+The follow-on is handled, but not the way this section originally anticipated.
+`Merge.cpp` still downcasts the resolved client to `InMemoryExchangeClient` and
+nothing in `velox/exec/` learned about UCX. Instead a cuDF operator adapter
+(`MergeExchangeAdapter`) replaces the `exec::MergeExchange` of a `kUcx`
+`MergeExchangeNode` at driver-build time with `{UcxExchange, CudfOrderBy}`: the
+whole input arrives over UCX on one driver and is sorted once on the device. That
+is globally ordered output by a different algorithm, and it is the only option
+available — the host k-way merger caches raw pointers to its key columns, while
+the UCX receive path yields `CudfVector`s whose columns live on the device with
+no host children to point at. See
+`docs/superpowers/specs/2026-08-12-merge-exchange-over-ucx-design.md`.
+
+### Remaining limitations
+- **The UCX link into cuDF is ungated.** `velox_cudf_exec` links
+  `velox_ucx_exchange` unconditionally, so configuring cuDF without UCX fails.
+- **No true device-side k-way merge.** `cudf::merge` would need per-source
+  attribution of incoming batches. `PackedTableWithStream` carries only
+  `{packedTable, stream}` and the receive queue is a single FIFO across all
+  remote sources, so attribution would have to be added to the wire protocol.
+- **Nothing inserts GPU/host conversions around the UCX exchange operators.**
+  Neither `UcxExchange` nor `UcxPartitionedOutput` is a `CudfOperator`, and no
+  operator adapter claims `Exchange` or `PartitionedOutput` — they resolve through
+  the two registries instead — so `CompileState` treats both as CPU operators and
+  places no `CudfFromVelox` / `CudfToVelox` beside them. A GPU operator feeding a
+  `kUcx` `PartitionedOutput` therefore gets a `CudfToVelox` spliced in before it
+  and then trips that operator's `CudfVector` check, and a `kUcx` `Exchange`
+  feeding a GPU operator gets a `CudfFromVelox` that cannot read a
+  device-resident `CudfVector`. The end-to-end cases sidestep this by feeding
+  `Values` device-resident batches and converting the consumer's output in the
+  test. A substituted `MergeExchange` is unaffected, because `CudfOrderBy` is a
+  `CudfOperator` and gets its `CudfToVelox` in the normal way.
