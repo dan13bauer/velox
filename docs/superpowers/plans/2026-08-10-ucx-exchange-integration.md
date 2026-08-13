@@ -383,16 +383,19 @@ git commit -m "feat(ucx-exchange): Register kUcx output transport in OutputTrans
 
 > If decision (c) from "Design decisions" is chosen (merge stays in-memory-only), skip D1 and instead add a test asserting a `kUcx` `MergeExchangeNode` fails fast with the existing downcast message; document the limitation in `POC-README.md`.
 
-### Task D1: UCX merge-source adapter
+### Task D1: UCX merge-source adapter — SUPERSEDED
 
-**Files:**
-- Create: `velox/experimental/ucx-exchange/UcxMergeSource.h`
-- Create: `velox/experimental/ucx-exchange/UcxMergeSource.cpp`
-- Modify: `velox/exec/Merge.cpp` (`addMergeSources`, ~line 838-865) — resolve the source by transport instead of unconditionally downcasting to `InMemoryExchangeClient`.
+**Superseded on 2026-08-12** by
+`docs/superpowers/specs/2026-08-12-merge-exchange-over-ucx-design.md` and
+`docs/superpowers/plans/2026-08-12-merge-exchange-over-ucx.md`.
 
-**Interfaces:**
-- Consumes: `UcxExchangeClient::next(int consumerId, bool* atEnd, ContinueFuture*)`; the `MergeSource` interface that `MergeExchangeSource` implements (see `velox/exec/MergeSource.h`).
-- Produces: a merge source that reads UCX packed tables and yields `RowVectorPtr`, selected in `Merge.cpp` when `transportKind_ == kUcx`.
+The merge-source approach below was implemented (`13aa7dbbd`, `b40b01ab6`) and then
+reverted. It cannot work: `MergeExchange` compares rows host-side, and the UCX path
+yields `CudfVector`, which keeps its columns on the device and passes an empty
+children vector to its `RowVector` base — so `SourceStream::fetchMoreData` throws
+"Trying to access non-existing child in RowVector". The replacement receives over
+UCX and sorts on the GPU via a cuDF operator adapter. Do not implement the steps
+below.
 
 - [ ] **Step 1: Write the failing test.** Add a merge-over-UCX case to `UcxExchangeTest.cpp` (or the merge test harness) that builds a `MergeExchangeNode` with `transportKind = kUcx`, feeds two ordered UCX sources, and asserts the merged output is globally ordered. (Model it on the existing in-memory `mergeExchange` test.)
 
@@ -475,6 +478,12 @@ velox_add_cudf_test(
 - [ ] **Step 4: Full regression.** Rebuild and run the full `velox/exec` suite (`velox_exec_test_group0..group8`, `velox_exec_util_test_group0`, `velox_exec_infra_test`, `velox_exchange_transport_registry_test`) to prove the default path is unregressed. Expected: all PASS.
 
 - [ ] **Step 5: Update `POC-README.md`.** Replace the "Outlook" section's future-tense items that are now done with a short "Integrated" summary; keep any remaining limitations (e.g. merge-over-UCX if deferred).
+
+- [ ] **Assert merge-over-UCX ordering.** Build a plan with a `MergeExchangeNode`
+  whose `transportKind` is `kUcx`, fed by two or more UCX producer tasks, and
+  assert the result is globally ordered. This is the end-to-end proof for
+  `docs/superpowers/specs/2026-08-12-merge-exchange-over-ucx-design.md`, whose own
+  plan deliberately covers only adapter selection.
 
 - [ ] **Step 6: Commit.**
 

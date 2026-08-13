@@ -234,15 +234,23 @@ All non-UCX cases funnel through `canRunOnGPU` and leave the CPU operator intact
 
 ## Commit plan
 
-Four commits, split by directory per the project's commit-separation rule:
+Five commits, split by directory per the project's commit-separation rule. A
+fifth docs-reconciliation commit was added beyond the four originally planned
+here.
 
-1. Revert `13aa7dbbd` — `velox/exec/` only.
-2. Revert `b40b01ab6` — `velox/experimental/ucx-exchange/` only, deleting
-   `UcxMergeSource.{h,cpp}` and its `CMakeLists.txt` entry.
+1. Revert `b40b01ab6` — `velox/experimental/ucx-exchange/` only, deleting
+   `UcxMergeSource.{h,cpp}` and its `CMakeLists.txt` entry. This must come first:
+   it assigns `entry->makeMergeSource`, which only exists because of `13aa7dbbd`.
+   Landed as `6eb0ea70d`.
+2. Revert `13aa7dbbd` — `velox/exec/` only. Landed as `250502e08`.
 3. `velox/experimental/cudf/` — `CudfOrderBy`'s typed second constructor, the
    shared key-extraction helper, the dead `orderByNode_` member removed.
+   Landed as `d2ee13f91`.
 4. `velox/experimental/cudf/` — `MergeExchangeAdapter`, its registration, and the
-   selection test.
+   selection test. Landed as `d5e47c417` (amended once during review; the pre-amend
+   hash is superseded and intentionally omitted here).
+5. `docs/` — reconcile this design doc and the parent plan with the commits
+   actually landed above.
 
 Commits 3 and 4 stay separate so the `CudfOrderBy` refactor is reviewable alone.
 
