@@ -29,6 +29,7 @@
 #include <rmm/device_buffer.hpp>
 #include <chrono>
 #include <future>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <type_traits>
@@ -39,6 +40,7 @@
 #include "velox/exec/ExchangeTransportRegistry.h"
 #include "velox/exec/OutputTransportRegistry.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
+#include "velox/exec/tests/utils/PortUtil.h"
 #include "velox/experimental/cudf/CudfConfig.h"
 #include "velox/experimental/ucx-exchange/Communicator.h"
 #include "velox/experimental/ucx-exchange/UcxExchangeProtocol.h"
@@ -135,7 +137,18 @@ struct ExchangeTestParamsPrinter {
 
 class UcxExchangeTest : public testing::TestWithParam<ExchangeTestParams> {
  protected:
-  static constexpr uint16_t kCommunicatorPort = 21346;
+  // Chosen per process in SetUpTestCase() rather than hardcoded. The
+  // communicator opens a listener on this port without address reuse, so two
+  // runs of this binary in quick succession used to fail the second with
+  // "bind(0.0.0.0:21346) failed: Address already in use" while the first port
+  // was still in TIME_WAIT.
+  static uint16_t communicatorPort_;
+
+  // UcxExchangeSource computes the UCX port as the split URL's port + 3
+  // (UcxExchangeSource.cpp), so remoteSplit() advertises this much below the
+  // communicator's port for the round trip to land back on it.
+  static constexpr int kSplitUrlPortOffset = 3;
+
   static constexpr auto kUnusedCoordinatorUrl =
       std::string_view("http://localhost:12345/bla");
 
@@ -175,10 +188,18 @@ class UcxExchangeTest : public testing::TestWithParam<ExchangeTestParams> {
     // external config source.
     cudf_velox::CudfConfig::getInstance().exchange = true;
 
+    // UcxExchangeSource derives the UCX port as the split URL's port + 3, and
+    // remoteSplit() advertises communicatorPort_ - 3 to match, so the offset
+    // must stay below the chosen port.
+    const auto freePort = exec::test::getFreePort();
+    ASSERT_GT(freePort, kSplitUrlPortOffset);
+    ASSERT_LE(freePort, std::numeric_limits<uint16_t>::max());
+    communicatorPort_ = static_cast<uint16_t>(freePort);
+
     queueManager_ = UcxOutputQueueManager::getInstanceRef();
     ContinueFuture future;
     communicator_ = facebook::velox::ucx_exchange::Communicator::initAndGet(
-        kCommunicatorPort, std::string(kUnusedCoordinatorUrl), &future);
+        communicatorPort_, std::string(kUnusedCoordinatorUrl), &future);
     // Stop here rather than letting every test throw "Communicator not
     // initialized" on a null instance.
     ASSERT_NE(communicator_, nullptr) << "Communicator initialization failed";
@@ -222,7 +243,7 @@ class UcxExchangeTest : public testing::TestWithParam<ExchangeTestParams> {
   exec::Split remoteSplit(std::string_view taskId, int partitionId) {
     std::string remoteUrl = fmt::format(
         "http://127.0.0.1:{}/v1/task/{}/results/{}",
-        kCommunicatorPort - 3,
+        communicatorPort_ - kSplitUrlPortOffset,
         taskId,
         partitionId);
     return exec::Split(
@@ -1659,5 +1680,6 @@ std::shared_ptr<UcxOutputQueueManager> UcxExchangeTest::queueManager_;
 std::shared_ptr<std::thread> UcxExchangeTest::communicatorThread_;
 std::shared_ptr<Communicator> UcxExchangeTest::communicator_;
 std::atomic<uint32_t> UcxExchangeTest::testCounter_{0};
+uint16_t UcxExchangeTest::communicatorPort_{0};
 
 } // namespace facebook::velox::ucx_exchange
