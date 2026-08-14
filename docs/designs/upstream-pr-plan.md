@@ -72,6 +72,17 @@ that:
 Prestissimo overrides. That one is gated on a Prestissimo migration landing first;
 every other PR in this plan is additive or explicitly backward-compatible.
 
+The consumer in question is Prestissimo's **shuffle read**, which belongs to its
+batch execution path rather than interactive Presto. Interactive queries keep a
+producer's output in a buffer that the consumer fetches while both tasks are alive;
+batch queries instead write partitioned output to an external shuffle system and let
+the producer exit, so the consumer reads it back later. Shuffle read is the operator
+that does that reading, and batch mode substitutes it for the ordinary exchange
+operator on every partitioned edge. It matters here because it is built through the
+very extensibility hook this plan removes — and note that it is orthogonal to UCX:
+it is the ordinary in-memory exchange client reading from a different source, not a
+different transport, which is why the earlier UCX work never covered it.
+
 ---
 
 ## PR set
@@ -178,7 +189,10 @@ straight back to the concrete type would be indirection to nowhere.
 Deletes the pre-registry extensibility path — the client-taking operator translator, the
 node hook that requested a client, and the compatibility branches A3b kept. This is the
 only PR here that breaks a downstream consumer, and deletions cannot be aliased, so it
-merges only after Prestissimo has migrated to registering a transport instead.
+merges only after Prestissimo's shuffle read has stopped using that path — either by
+dropping its own node and operator in favour of a plain exchange node, or by registering
+an operator factory for them. See the open questions; that choice is unsettled and does
+not change this PR's diff.
 
 - `velox/exec/Operator.{h,cpp}`
 - `velox/core/PlanNode.h`
@@ -342,16 +356,44 @@ than A3b so the hole A2 opens closes immediately.
 ### On A5 and the Prestissimo migration
 
 1. **Who writes the Prestissimo side?** #28316 (A1's companion, ours, draft) sets the
-   precedent that we do. A5's is materially larger: re-parent the shuffle-read node onto
-   the exchange node type and register an operator factory for it.
-2. **Which transport id does shuffle-read register under?** The registry takes arbitrary
-   strings and there is in-tree precedent for a non-standard one, so Prestissimo can
-   define its own without touching the shared id list. Confirm that open namespace is
-   intended, then pick the string. Reusing the in-memory id does not work — the planner
-   would resolve the built-in entry and build a plain exchange operator.
-3. **Does re-parenting change the shuffle-read node's serialized form in a way that
-   needs a compatibility window?** It is both protocol-constructed and serde-registered,
-   and as an exchange node it would inherit two more serialized fields.
+   precedent that we do. A5's is larger in either of the two shapes below.
+
+2. **Delete shuffle read, or register it?** This is the substantive decision, and it
+   decides question 3 as well.
+
+   Shuffle read's operator already *is* the engine's exchange operator: it derives from
+   it and fabricates an exchange node internally with the compact-row serialization
+   format. Everything specific to the external shuffle lives one layer lower, in a
+   custom exchange source. The operator therefore differs from a plain exchange in only
+   two respects — an operator-type label used in stats and plan output, and an override
+   that returns its own compact-row serializer instance.
+
+   - **Delete (cheaper).** That override is redundant: the engine's exchange operator
+     already resolves the serializer from the node's format field through the named-serde
+     registry, and Prestissimo does register compact row there. So batch translation can
+     emit a plain exchange node with the compact-row format and the in-memory transport,
+     and the node type, the operator, and the translator all go away. No new transport
+     id, no registry entry, no re-parenting. The cost is the lost operator-type label —
+     confirm nothing consumes it before choosing this.
+   - **Register (preserves the label).** Keep the operator and give it a registry entry
+     pairing the in-memory client factory with its own operator factory. This needs an
+     id, and the id's only job is selecting the operator — it does not denote a
+     transport. The registry accepts arbitrary strings and there is in-tree precedent for
+     a non-standard one, so Prestissimo can define its own without touching the shared id
+     list; confirm that open namespace is intended, then pick the string. Reusing the
+     in-memory id does **not** work, because the planner would resolve the built-in entry
+     and build a plain exchange operator instead.
+
+3. **Serialized-form compatibility — likely a non-issue.** The coordinator sends the
+   worker protocol JSON, not an engine-serialized plan; batch translation constructs the
+   shuffle-read node locally from a remote-source node. The engine-level serde
+   registration for it therefore serves plan serialization for tracing, replay and
+   tests, not a coordinator-to-worker wire format, so gaining two serialized fields
+   crosses no version boundary between them. The only residual question is whether any
+   persisted engine-serialized plan is replayed across versions. Under the delete option
+   this disappears, though deregistering the node type is itself worth a thought if a
+   stored plan still names it.
+
 4. **Is A5 committed work or an open follow-up?** What it removes costs roughly ten lines
    plus one virtual. If the Prestissimo migration is expensive, A5 can sit indefinitely
    without blocking anything else — but that changes how A3b's compatibility paths should
