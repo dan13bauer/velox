@@ -306,10 +306,9 @@ TEST_F(UcxOutputQueueManagerTest, registersUcxOutputTransport) {
   EXPECT_EQ(
       entryAfterSecondCall->manager, UcxOutputQueueManager::getInstanceRef());
 
-  // Restore both registries to the baseline this test found them in: the
-  // built-in in-memory default only.
-  exec::OutputTransportRegistry::unregisterAll();
-  exec::ExchangeTransportRegistry::unregisterAll();
+  // Restore the baseline this test found them in, dropping only this module's
+  // entries rather than every registered transport.
+  unregisterUcxExchange();
   EXPECT_EQ(
       exec::OutputTransportRegistry::tryGet(
           std::string{core::TransportKind::kUcx}),

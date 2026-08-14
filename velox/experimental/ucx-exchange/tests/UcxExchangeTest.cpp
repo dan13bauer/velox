@@ -236,6 +236,9 @@ class UcxExchangeTest : public testing::TestWithParam<ExchangeTestParams> {
       communicatorThread_.reset();
     }
     communicator_.reset();
+    // SetUpTestCase() turned this on process-wide. UcxOutputQueueManagerTest
+    // shares this binary, so restore it rather than leaking it across suites.
+    cudf_velox::CudfConfig::getInstance().exchange = false;
   }
 
   void SetUp() override {
@@ -246,12 +249,10 @@ class UcxExchangeTest : public testing::TestWithParam<ExchangeTestParams> {
   }
 
   void TearDown() override {
-    // Restores the baseline (built-in in-memory default only) between test
-    // cases; registerUcxExchange() re-seeds kUcx at the start of the next
-    // SetUp(). registerUcxExchange() seeds both registries, so both must be
-    // cleared here.
-    exec::ExchangeTransportRegistry::unregisterAll();
-    exec::OutputTransportRegistry::unregisterAll();
+    // Drops just this module's entries, leaving other transports and the
+    // built-in in-memory default alone; SetUp() re-seeds kUcx for the next
+    // case.
+    unregisterUcxExchange();
   }
 
   exec::Split remoteSplit(std::string_view taskId, int partitionId) {
@@ -275,6 +276,11 @@ INSTANTIATE_TEST_SUITE_P(
     ExchangeTestParamsPrinter());
 
 TEST_P(UcxExchangeTest, registersUcxReceiveTransport) {
+  // This test doesn't use parameters - run only for the first param set.
+  if (GetParam() != generateTestParams().front()) {
+    GTEST_SKIP() << "registersUcxReceiveTransport: runs only once";
+  }
+
   exec::ExchangeTransportRegistry::unregisterAll();
   EXPECT_EQ(
       exec::ExchangeTransportRegistry::tryGet(
@@ -1867,6 +1873,24 @@ class CudfRegistration {
   CudfRegistration& operator=(const CudfRegistration&) = delete;
 };
 
+// Pairs registerLocalExchangeSource() with its shutdown, so the source
+// callbacks do not survive into the next case when the body throws.
+class LocalExchangeSourceRegistration {
+ public:
+  LocalExchangeSourceRegistration() {
+    registerLocalExchangeSource();
+  }
+
+  ~LocalExchangeSourceRegistration() {
+    exec::test::testingShutdownLocalExchangeSource();
+  }
+
+  LocalExchangeSourceRegistration(const LocalExchangeSourceRegistration&) =
+      delete;
+  LocalExchangeSourceRegistration& operator=(
+      const LocalExchangeSourceRegistration&) = delete;
+};
+
 // A producer task id paired with the batches its Values node emits.
 using TaskShuffleProducer = std::pair<std::string, std::vector<RowVectorPtr>>;
 
@@ -2011,9 +2035,10 @@ TEST_P(UcxExchangeTest, taskShuffleOverUcx) {
   EXPECT_TRUE(exec::test::assertEqualResults(expected, actual));
 }
 
-// The twin of taskShuffleOverUcx on the default transport: same plan shape,
-// same rows, no transportKind of its own. Asserts that routing UCX through the
-// two registries left the in-memory path producing identical results.
+// The twin of taskShuffleOverUcx on the default transport: same plan shape and
+// the same rows, with kInMemory passed explicitly rather than relied on as the
+// default. Asserts that routing UCX through the two registries left the
+// in-memory path producing identical results.
 TEST_P(UcxExchangeTest, taskShuffleOverDefaultTransport) {
   // This test doesn't use parameters - run only for the first param set.
   if (GetParam() != generateTestParams().front()) {
@@ -2021,7 +2046,7 @@ TEST_P(UcxExchangeTest, taskShuffleOverDefaultTransport) {
   }
 
   registerSerdes();
-  registerLocalExchangeSource();
+  LocalExchangeSourceRegistration localExchangeSource;
   const auto taskPrefix = getUniqueTaskPrefix();
 
   const auto expected = makeTaskShuffleBatches(pool_.get());
@@ -2047,10 +2072,6 @@ TEST_P(UcxExchangeTest, taskShuffleOverDefaultTransport) {
             std::make_shared<exec::RemoteConnectorSplit>(taskId));
       },
       pool_.get());
-
-  // Drops the ExchangeSource callbacks this case's sources left behind, so the
-  // next parameter instance starts from a clean source.
-  exec::test::testingShutdownLocalExchangeSource();
 
   EXPECT_EQ(totalRows(actual), kTaskShuffleTotalRows);
   EXPECT_TRUE(exec::test::assertEqualResults(expected, actual));

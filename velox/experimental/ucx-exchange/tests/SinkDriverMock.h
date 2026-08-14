@@ -25,7 +25,7 @@ namespace facebook::velox::ucx_exchange {
 
 using exec::DriverCtx;
 
-/// @class SinkTaskMock
+/// @class SinkDriverMock
 /// @brief A mock class that receives data through an exchange from one or more
 /// upstream remote tasks. This class mocks the setup and execution of a plan
 /// fragment with a single exchange operator, resolved via

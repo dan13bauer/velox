@@ -77,4 +77,13 @@ void registerUcxExchange() {
       /*overwrite=*/true);
 }
 
+void unregisterUcxExchange() {
+  // erase() is a no-op when the key is absent, so this is safe to call whether
+  // or not registerUcxExchange() ran. Deliberately not unregisterAll(), which
+  // would also drop transports this module never registered.
+  const auto ucx = std::string{core::TransportKind::kUcx};
+  exec::ExchangeTransportRegistry::global().erase(ucx);
+  exec::OutputTransportRegistry::global().erase(ucx);
+}
+
 } // namespace facebook::velox::ucx_exchange

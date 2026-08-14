@@ -22,4 +22,9 @@ namespace facebook::velox::ucx_exchange {
 /// core::TransportKind::kUcx. Idempotent.
 void registerUcxExchange();
 
+/// Removes both kUcx entries, undoing registerUcxExchange(). Idempotent, and a
+/// no-op when they were never registered. Leaves other transports alone,
+/// including the built-in in-memory default.
+void unregisterUcxExchange();
+
 } // namespace facebook::velox::ucx_exchange
