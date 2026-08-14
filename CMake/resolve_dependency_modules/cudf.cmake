@@ -63,29 +63,31 @@ set(
 set(VELOX_cudf_SOURCE_URL "https://github.com/rapidsai/cudf/archive/${VELOX_cudf_COMMIT}.tar.gz")
 velox_resolve_dependency_url(cudf)
 
-# Probe for a system UCX install. The variables are used only to gate ucxx
-# fetching below; nothing in Velox links against UCX directly yet.
+# Require a system UCX install. The cuDF exchange operators link
+# velox_ucx_exchange, which links ucx::ucp and needs the ucxx headers, so a
+# cuDF build without UCX cannot succeed -- fail here with a remedy rather than
+# part-way through compiling velox_cudf_exec.
 find_library(UCX_LIBRARY NAMES ucp)
 find_path(UCX_INCLUDE_DIR NAMES ucp/api/ucp.h)
-if(UCX_LIBRARY AND UCX_INCLUDE_DIR)
-  set(UCX_FOUND TRUE)
-else()
-  set(UCX_FOUND FALSE)
-endif()
-if(UCX_FOUND)
-  message(STATUS "Found UCX: ${UCX_LIBRARY} (headers: ${UCX_INCLUDE_DIR}) -- ucxx will be fetched")
-  # ucxx commit b7faed1 from 2026-07-23 (release/0.51 branch)
-  set(VELOX_ucxx_VERSION 0.51)
-  set(VELOX_ucxx_COMMIT b7faed1a2e8038f63676183cdb056c3b69daa15d)
-  set(
-    VELOX_ucxx_BUILD_SHA256_CHECKSUM
-    3eb5ff5459dde31edf344f24f0b3086550be70961038b69229b05973b6f37524
+if(NOT (UCX_LIBRARY AND UCX_INCLUDE_DIR))
+  message(
+    FATAL_ERROR
+    "VELOX_ENABLE_CUDF requires a system UCX install (ucp headers and library): "
+    "the cuDF exchange operators link velox_ucx_exchange. "
+    "Install it with scripts/setup-centos-adapters.sh install_ucx (UCX 1.20.1), "
+    "or configure with -DVELOX_ENABLE_CUDF=OFF."
   )
-  set(VELOX_ucxx_SOURCE_URL "https://github.com/rapidsai/ucxx/archive/${VELOX_ucxx_COMMIT}.tar.gz")
-  velox_resolve_dependency_url(ucxx)
-else()
-  message(STATUS "UCX not found -- ucxx will not be fetched")
 endif()
+message(STATUS "Found UCX: ${UCX_LIBRARY} (headers: ${UCX_INCLUDE_DIR})")
+# ucxx commit b7faed1 from 2026-07-23 (release/0.51 branch)
+set(VELOX_ucxx_VERSION 0.51)
+set(VELOX_ucxx_COMMIT b7faed1a2e8038f63676183cdb056c3b69daa15d)
+set(
+  VELOX_ucxx_BUILD_SHA256_CHECKSUM
+  3eb5ff5459dde31edf344f24f0b3086550be70961038b69229b05973b6f37524
+)
+set(VELOX_ucxx_SOURCE_URL "https://github.com/rapidsai/ucxx/archive/${VELOX_ucxx_COMMIT}.tar.gz")
+velox_resolve_dependency_url(ucxx)
 
 # Use block so we don't leak variables
 block(SCOPE_FOR VARIABLES)
@@ -139,22 +141,18 @@ block(SCOPE_FOR VARIABLES)
     UPDATE_DISCONNECTED 1
   )
 
-  if(UCX_FOUND)
-    FetchContent_Declare(
-      ucxx
-      URL ${VELOX_ucxx_SOURCE_URL}
-      URL_HASH ${VELOX_ucxx_BUILD_SHA256_CHECKSUM}
-      SOURCE_SUBDIR
-      cpp
-      UPDATE_DISCONNECTED 1
-    )
-  endif()
+  FetchContent_Declare(
+    ucxx
+    URL ${VELOX_ucxx_SOURCE_URL}
+    URL_HASH ${VELOX_ucxx_BUILD_SHA256_CHECKSUM}
+    SOURCE_SUBDIR
+    cpp
+    UPDATE_DISCONNECTED 1
+  )
 
   FetchContent_MakeAvailable(cudf)
 
-  if(UCX_FOUND)
-    FetchContent_MakeAvailable(ucxx)
-  endif()
+  FetchContent_MakeAvailable(ucxx)
 
   # cudf sets all warnings as errors, and therefore fails to compile with velox
   # expanded set of warnings. We selectively disable problematic warnings just for

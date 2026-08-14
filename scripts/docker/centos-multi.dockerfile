@@ -184,6 +184,15 @@ ENV CUDA_VERSION=${CUDA_VERSION:-12.9}
 RUN bash /setup-centos-adapters.sh install_cuda && \
       dnf clean all
 
+# Required, not optional: this image builds with VELOX_ENABLE_CUDF=ON
+# (.github/scripts/cmake-flags.sh), and resolving the cuDF dependency requires
+# a system UCX because the cuDF exchange operators link velox_ucx_exchange.
+ARG UCX_VERSION
+ENV UCX_VERSION=${UCX_VERSION:-1.20.1}
+
+RUN bash /setup-centos-adapters.sh install_ucx && \
+      dnf clean all
+
 RUN bash /setup-centos-adapters.sh install_adapters_deps_from_dnf && \
       dnf clean all
 
