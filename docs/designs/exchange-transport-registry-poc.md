@@ -88,14 +88,26 @@ verified against the fetched tree, still hold on the merged base:
 
 ## Output-side template (mirror source, all in the 16980 tree)
 
+The receive side is a deliberate, near-line-for-line mirror. The one structural
+difference is the entry shape, for the reason spelled out after the table.
+
 | Concern | Send side (#16980) | Receive side (this PoC) |
 |---|---|---|
-| Plan-node field | `PartitionedOutputNode.transportKind` | `ExchangeNode.transportKind` |
-| Registry | `OutputTransportRegistry` | `ExchangeTransportRegistry` |
-| Entry | `{ OutputBufferManager, PartitionedOutputFactory }` | `{ ExchangeClientFactory, ExchangeFactory }` |
+| Plan-node field | `transportKind` on `core::PartitionedOutputNode` | `transportKind` on `core::ExchangeNode` **and** `core::MergeExchangeNode` |
+| Transport-kind constants | `core::TransportKind` (`kInMemory` default, `kUcx`) | same constants, reused |
+| Registry class | `OutputTransportRegistry` (`velox/exec/OutputTransportRegistry.{h,cpp}`) | `ExchangeTransportRegistry` (`velox/exec/ExchangeTransportRegistry.{h,cpp}`) |
+| Backing store | `ScopedRegistry<std::string, OutputTransportEntry>` (query-scoped over global) | `ScopedRegistry<std::string, ExchangeTransportEntry>` (query-scoped over global) |
+| Registry key | `kRegistryKey = "outputTransports"` | `kRegistryKey = "exchangeTransports"` |
+| Lookup / lifecycle API | `global()` / `create()` / `tryGet()` ×2 / `getAll()` ×2 / `unregisterAll()` ×2 | identical set |
+| Factory typedefs header | `PartitionedOutputFactory.h` | `ExchangeFactory.h` |
+| **Entry shape** | `OutputTransportEntry { manager; makeOutputOperator }` + a `make()` weak-capture helper binding one long-lived manager to its operator | `ExchangeTransportEntry { makeClient; makeOperator }` — plain aggregate, **no `make()` helper**, since the client is per-node and Task-owned |
+| Interface / concrete | abstract `OutputBufferManager` / `DefaultOutputBufferManager` | abstract `ExchangeClient` (control plane: `addRemoteTaskId` / `noMoreRemoteTasks` / `close` / `stats` / `toJson`) / `InMemoryExchangeClient` |
 | Operator ctor | `PartitionedOutput(id, ctx, node, eagerFlush, manager)` | `Exchange(id, ctx, node, client)` |
-| Interface / concrete | abstract `OutputBufferManager` / `DefaultOutputBufferManager` | abstract `ExchangeClient` / `InMemoryExchangeClient` |
+| Built-in default (seeded, restored by `unregisterAll()`) | in-memory output buffer manager | `InMemoryExchangeClient` |
+| Fail-fast on unknown transport | yes | yes — `VELOX_USER_CHECK_NOT_NULL`, "No exchange transport registered for transport: …" |
 | UCX impl | `UcxOutputQueueManager` + `UcxPartitionedOutput` | `UcxExchangeClient` + `UcxExchange` |
+| Standalone registry unit test | `OutputTransportRegistryTest.cpp` | `ExchangeTransportRegistryTest.cpp` |
+| End-to-end resolution test | `OutputTransportTest.cpp` | `ExchangeTransportTest.cpp` |
 
 Reference files to mirror: `OutputTransportRegistry.{h,cpp}`,
 `OutputBufferManager.h` (abstract), `DefaultOutputBufferManager.h`,
