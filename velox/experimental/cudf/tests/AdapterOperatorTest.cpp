@@ -45,14 +45,6 @@ class AdapterOperatorTest : public OperatorTestBase {
   void TearDown() override {
     cudf_velox::CudfConfig::getInstance().exchange = false;
     cudf_velox::unregisterCudf();
-    // unregisterCudf() does not touch either transport registry -- there is
-    // no unregisterUcxExchange() -- so erase the kUcx entries a test may
-    // have registered here, where teardown always runs even if the test body
-    // throws, rather than at the end of the test body.
-    ExchangeTransportRegistry::global().erase(
-        std::string{core::TransportKind::kUcx});
-    OutputTransportRegistry::global().erase(
-        std::string{core::TransportKind::kUcx});
     OperatorTestBase::TearDown();
   }
 };

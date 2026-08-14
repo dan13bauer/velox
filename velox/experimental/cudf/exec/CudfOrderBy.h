@@ -28,6 +28,8 @@ namespace facebook::velox::cudf_velox {
 
 class CudfOrderBy : public CudfOperatorBase {
  public:
+  /// Constructs from an OrderByNode, the ordinary case: this operator replaces
+  /// exec::OrderBy for the same plan node.
   CudfOrderBy(
       int32_t operatorId,
       exec::DriverCtx* driverCtx,

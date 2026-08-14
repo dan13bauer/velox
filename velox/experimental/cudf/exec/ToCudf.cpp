@@ -354,6 +354,11 @@ void registerCudf() {
 }
 
 void unregisterCudf() {
+  // registerCudf() seeds the kUcx transport entries when cudf.exchange is on,
+  // and the output entry holds a strong reference to the UcxOutputQueueManager
+  // singleton, so drop them here rather than leaving them behind. Unconditional
+  // because it is a no-op when they were never registered.
+  ucx_exchange::unregisterUcxExchange();
   output_mr_.reset();
   mr_.reset();
   exec::DriverFactory::adapters.erase(
