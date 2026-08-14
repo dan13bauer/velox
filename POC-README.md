@@ -240,3 +240,14 @@ no host children to point at. See
   `Values` device-resident batches and converting the consumer's output in the
   test. A substituted `MergeExchange` is unaffected, because `CudfOrderBy` is a
   `CudfOperator` and gets its `CudfToVelox` in the normal way.
+
+---
+
+## Landing this upstream
+
+The branch is not meant to land as one change. `docs/designs/upstream-pr-plan.md`
+breaks it into a sequence of upstream pull requests, grouped by what each one
+depends on and what it can break rather than by directory, and ordered so that
+every merge leaves a tree that both builds and runs. It also records the one PR
+that cannot land without a Prestissimo migration ahead of it, and which of the
+open upstream ucx-exchange PRs this work supersedes.
