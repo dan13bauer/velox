@@ -1,19 +1,28 @@
-# Exchange Transport Registry — Receive-Side PoC
+# Exchange Transport Integration — PoC
 
-Pluggable, per-node transport selection for the **exchange (receive) side** of Velox
-query execution, with a real UCX/RDMA transport wired through it on both ends of a
-shuffle. The receive side mirrors the already-merged output-side transport registry
-(upstream **PR #16980**).
+Velox already chooses its **output** transport per plan node through a registry
+(upstream **PR #16980**). This branch supplies the missing **receive**-side half of
+that mechanism, then wires a complete UCX/RDMA stack through both halves. A plan can
+name UCX on the producing side, the consuming side, or both, and get GPU-to-GPU
+transfers end to end.
 
-Before this work, exchange was hard-wired to a single in-memory `ExchangeClient`,
-`LocalPlanner` built the `Exchange` / `MergeExchange` operators directly, and an
-alternative transport needed the ad-hoc `Operator::toOperator(..., exchangeClient)`
-hook. Now an exchange plan node carries a **`transportKind`**, and the engine
-resolves *both* the client and the operator for that node from a query-scoped
-**`ExchangeTransportRegistry`**. A transport contributes a `(client factory,
-operator factory)` pair keyed by a transport-kind string. The in-memory transport is
-a seeded default; a plan naming a transport with no registered entry fails the query
-rather than falling back.
+**The receive-side foundation.** Exchange was hard-wired to a single in-memory
+`ExchangeClient`, `LocalPlanner` built the `Exchange` / `MergeExchange` operators
+directly, and an alternative transport needed the ad-hoc
+`Operator::toOperator(..., exchangeClient)` hook. Now an exchange plan node carries a
+**`transportKind`**, and the engine resolves *both* the client and the operator for
+that node from a query-scoped **`ExchangeTransportRegistry`**, mirroring the
+output-side registry. A transport contributes a `(client factory, operator factory)`
+pair keyed by a transport-kind string. The in-memory transport is a seeded default; a
+plan naming a transport with no registered entry fails the query rather than falling
+back to it.
+
+**The UCX stack on top.** The `velox/experimental/ucx-exchange` module is registered
+into both registries: its client and exchange operator on the receive side, its output
+queue manager and partitioned-output operator on the send side. Registration is gated
+on a session configuration key, the module is compiled as part of a cuDF build for the
+first time, and a `kUcx` merge exchange is served by a device sort instead of a host
+k-way merge.
 
 Branch: `poc-exchange-transport-integration`, on `oss-velox/main` (which contains
 #16980), pushed to the `dan13bauer` fork.
@@ -43,25 +52,26 @@ Further reading referenced from those: the merge-over-UCX design in
 
 ## Reading the code
 
+Links point at this branch on the `dan13bauer` fork.
+
 | Concern | Entry point |
 |---|---|
-| Abstract client interface | `velox/exec/ExchangeClient.h` |
-| Context and factory typedefs | `velox/exec/ExchangeFactory.h` |
-| The registry | `velox/exec/ExchangeTransportRegistry.{h,cpp}` |
-| Built-in in-memory transport | `velox/exec/InMemoryExchangeClient.{h,cpp}` |
-| Client resolution (per exchange node, Task-owned) | `Task::createExchangeClientLocked` |
-| Operator resolution | `LocalPlanner::createDriver` |
-| Merge path | `Merge.cpp` — `MergeExchange::addMergeSources` |
-| UCX client | `velox/experimental/ucx-exchange/UcxExchangeClient.{h,cpp}` |
-| UCX registration, both registries | `velox/experimental/ucx-exchange/UcxExchangeRegistration.cpp` |
-| UCX output buffering | `velox/experimental/ucx-exchange/UcxOutputQueueManager.{h,cpp}` |
-| Merge over UCX (operator substitution) | `velox/experimental/cudf/exec/OperatorAdapters.cpp` — `MergeExchangeAdapter` |
-| Configuration | `velox/experimental/cudf/CudfConfig.h` — `cudf.exchange` gates registration |
-
-Tests: `velox_exchange_transport_registry_test` and `ExchangeTransportTest` on the
-CPU path; `ucx_exchange_test` (GPU) for the UCX transport, including task-level
-cases that run a two-fragment plan over UCX and the same plan over the default
-transport asserted against identical rows.
+| Abstract client interface | [`velox/exec/ExchangeClient.h`](https://github.com/dan13bauer/velox/blob/poc-exchange-transport-integration/velox/exec/ExchangeClient.h) |
+| Context and factory typedefs | [`velox/exec/ExchangeFactory.h`](https://github.com/dan13bauer/velox/blob/poc-exchange-transport-integration/velox/exec/ExchangeFactory.h) |
+| The receive-side registry | [`velox/exec/ExchangeTransportRegistry.h`](https://github.com/dan13bauer/velox/blob/poc-exchange-transport-integration/velox/exec/ExchangeTransportRegistry.h)<br>[`velox/exec/ExchangeTransportRegistry.cpp`](https://github.com/dan13bauer/velox/blob/poc-exchange-transport-integration/velox/exec/ExchangeTransportRegistry.cpp) |
+| Built-in in-memory transport | [`velox/exec/InMemoryExchangeClient.h`](https://github.com/dan13bauer/velox/blob/poc-exchange-transport-integration/velox/exec/InMemoryExchangeClient.h)<br>[`velox/exec/InMemoryExchangeClient.cpp`](https://github.com/dan13bauer/velox/blob/poc-exchange-transport-integration/velox/exec/InMemoryExchangeClient.cpp) |
+| Client resolution — `Task::createExchangeClientLocked` | [`velox/exec/Task.cpp`](https://github.com/dan13bauer/velox/blob/poc-exchange-transport-integration/velox/exec/Task.cpp) |
+| Operator resolution — `LocalPlanner::createDriver` | [`velox/exec/LocalPlanner.cpp`](https://github.com/dan13bauer/velox/blob/poc-exchange-transport-integration/velox/exec/LocalPlanner.cpp) |
+| Merge path — `MergeExchange::addMergeSources` | [`velox/exec/Merge.cpp`](https://github.com/dan13bauer/velox/blob/poc-exchange-transport-integration/velox/exec/Merge.cpp) |
+| UCX client | [`velox/experimental/ucx-exchange/UcxExchangeClient.h`](https://github.com/dan13bauer/velox/blob/poc-exchange-transport-integration/velox/experimental/ucx-exchange/UcxExchangeClient.h)<br>[`velox/experimental/ucx-exchange/UcxExchangeClient.cpp`](https://github.com/dan13bauer/velox/blob/poc-exchange-transport-integration/velox/experimental/ucx-exchange/UcxExchangeClient.cpp) |
+| UCX registration, both registries | [`velox/experimental/ucx-exchange/UcxExchangeRegistration.cpp`](https://github.com/dan13bauer/velox/blob/poc-exchange-transport-integration/velox/experimental/ucx-exchange/UcxExchangeRegistration.cpp) |
+| UCX output buffering (send side) | [`velox/experimental/ucx-exchange/UcxOutputQueueManager.h`](https://github.com/dan13bauer/velox/blob/poc-exchange-transport-integration/velox/experimental/ucx-exchange/UcxOutputQueueManager.h)<br>[`velox/experimental/ucx-exchange/UcxOutputQueueManager.cpp`](https://github.com/dan13bauer/velox/blob/poc-exchange-transport-integration/velox/experimental/ucx-exchange/UcxOutputQueueManager.cpp) |
+| UCX partitioned output operator | [`velox/experimental/ucx-exchange/UcxPartitionedOutput.cpp`](https://github.com/dan13bauer/velox/blob/poc-exchange-transport-integration/velox/experimental/ucx-exchange/UcxPartitionedOutput.cpp) |
+| Merge over UCX — `MergeExchangeAdapter` | [`velox/experimental/cudf/exec/OperatorAdapters.cpp`](https://github.com/dan13bauer/velox/blob/poc-exchange-transport-integration/velox/experimental/cudf/exec/OperatorAdapters.cpp) |
+| Configuration — `cudf.exchange` gates registration | [`velox/experimental/cudf/CudfConfig.h`](https://github.com/dan13bauer/velox/blob/poc-exchange-transport-integration/velox/experimental/cudf/CudfConfig.h) |
+| Registry unit test | [`velox/exec/tests/ExchangeTransportRegistryTest.cpp`](https://github.com/dan13bauer/velox/blob/poc-exchange-transport-integration/velox/exec/tests/ExchangeTransportRegistryTest.cpp) |
+| Resolution test | [`velox/exec/tests/ExchangeTransportTest.cpp`](https://github.com/dan13bauer/velox/blob/poc-exchange-transport-integration/velox/exec/tests/ExchangeTransportTest.cpp) |
+| UCX tests (GPU), incl. task-level cases | [`velox/experimental/ucx-exchange/tests/UcxExchangeTest.cpp`](https://github.com/dan13bauer/velox/blob/poc-exchange-transport-integration/velox/experimental/ucx-exchange/tests/UcxExchangeTest.cpp) |
 
 ---
 
