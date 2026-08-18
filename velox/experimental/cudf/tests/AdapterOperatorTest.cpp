@@ -125,6 +125,99 @@ TEST_F(AdapterOperatorTest, mergeExchangeAdapterSelectsUcxOnly) {
   EXPECT_FALSE(adapter->canRunOnGPU(nullptr, ucxNode, nullptr));
 }
 
+// The three tests below cover transportOperatorProperties(), which classifies
+// the operators the transport registry builds -- UcxExchange and
+// UcxPartitionedOutput. Those have no OperatorAdapter: Task and LocalPlanner
+// construct them from the node's transport, so the driver adapter never sees an
+// adapter for them and has only the plan node to go on.
+TEST_F(AdapterOperatorTest, ucxExchangeNodeIsAGpuSource) {
+  auto rowType = ROW({"c0"}, {BIGINT()});
+  const std::string serde{
+      VectorSerde::kindName(VectorSerde::Kind::kCompactRow)};
+
+  auto ucxNode =
+      PlanBuilder()
+          .exchange(rowType, serde, std::string{core::TransportKind::kUcx})
+          .planNode();
+
+  auto properties = cudf_velox::transportOperatorProperties(ucxNode);
+  ASSERT_TRUE(properties.has_value());
+  EXPECT_TRUE(properties->canRunOnGPU);
+  // A source consumes no input, and hands the next operator device-resident
+  // data. producesGpuOutput is what stops the driver adapter inserting a
+  // CudfFromVelox behind UcxExchange, which would convert a CudfVector as
+  // though it were host data.
+  EXPECT_FALSE(properties->acceptsGpuInput);
+  EXPECT_TRUE(properties->producesGpuOutput);
+
+  auto inMemoryNode =
+      PlanBuilder()
+          .exchange(rowType, serde, std::string{core::TransportKind::kInMemory})
+          .planNode();
+  EXPECT_FALSE(
+      cudf_velox::transportOperatorProperties(inMemoryNode).has_value());
+}
+
+TEST_F(AdapterOperatorTest, ucxPartitionedOutputNodeIsAGpuSink) {
+  auto data = makeRowVector({"c0"}, {makeFlatVector<int64_t>({1, 2, 3})});
+
+  // outputLayout is spelled with an explicit vector: a braced {} would also
+  // match the bool replicateNullsAndAny overload, which would bind the
+  // transport argument to serdeKind and silently leave the node in-memory.
+  auto ucxNode = PlanBuilder()
+                     .values({data})
+                     .partitionedOutput(
+                         {},
+                         1,
+                         std::vector<std::string>{},
+                         "Presto",
+                         std::string{core::TransportKind::kUcx})
+                     .planNode();
+
+  auto properties = cudf_velox::transportOperatorProperties(ucxNode);
+  ASSERT_TRUE(properties.has_value());
+  EXPECT_TRUE(properties->canRunOnGPU);
+  // A sink produces nothing downstream, so producesGpuOutput must stay false --
+  // true would make the driver adapter append a CudfToVelox after the last
+  // operator of the task. acceptsGpuInput is what stops it inserting a
+  // CudfToVelox *before* UcxPartitionedOutput, which is what makes the operator
+  // fail its CudfVector check on a GPU pipeline.
+  EXPECT_TRUE(properties->acceptsGpuInput);
+  EXPECT_FALSE(properties->producesGpuOutput);
+
+  auto inMemoryNode = PlanBuilder()
+                          .values({data})
+                          .partitionedOutput(
+                              {},
+                              1,
+                              std::vector<std::string>{},
+                              "Presto",
+                              std::string{core::TransportKind::kInMemory})
+                          .planNode();
+  EXPECT_FALSE(
+      cudf_velox::transportOperatorProperties(inMemoryNode).has_value());
+}
+
+TEST_F(AdapterOperatorTest, mergeExchangeNodeIsLeftToItsAdapter) {
+  // MergeExchangeNode derives from ExchangeNode, so a plain "is this an
+  // ExchangeNode named kUcx" test would claim it. It must not: LocalPlanner
+  // builds a CPU exec::MergeExchange for this node, and MergeExchangeAdapter
+  // replaces it with UcxExchange + CudfOrderBy. Reporting the CPU operator as a
+  // GPU source would misplace the conversions in the one exchange pipeline that
+  // works today.
+  auto ucxNode =
+      PlanBuilder()
+          .mergeExchange(
+              ROW({"c0"}, {BIGINT()}),
+              {"c0"},
+              std::string(
+                  VectorSerde::kindName(VectorSerde::Kind::kCompactRow)),
+              std::string{core::TransportKind::kUcx})
+          .planNode();
+
+  EXPECT_FALSE(cudf_velox::transportOperatorProperties(ucxNode).has_value());
+}
+
 TEST_F(AdapterOperatorTest, ucxTransportsNotRegisteredWhenExchangeDisabled) {
   // SetUp() ran registerCudf() with exchange left at its default (false):
   // no kUcx transport is registered, while the built-in in-memory transport

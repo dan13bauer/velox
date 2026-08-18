@@ -21,6 +21,7 @@
 #include "velox/exec/Operator.h"
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -127,6 +128,20 @@ class OperatorAdapterRegistry {
   OperatorAdapterRegistry() = default;
   std::vector<std::unique_ptr<OperatorAdapter>> adapters_;
 };
+
+/// Returns the GPU data-transfer properties of the operator the exchange
+/// transport registry builds for 'planNode', or nullopt when the node's
+/// operator is not one of them.
+///
+/// Task and LocalPlanner construct a node's exchange operator from
+/// core::PlanNode::transportKind(), so those operators have no OperatorAdapter
+/// and the driver adapter cannot learn from one whether they exchange
+/// device-resident data. This tells it, from the same transport the registry
+/// keyed on. Nodes whose operator an adapter does build -- MergeExchangeNode,
+/// which derives from ExchangeNode -- return nullopt so the adapter stays
+/// authoritative.
+std::optional<OperatorAdapter::Properties> transportOperatorProperties(
+    const core::PlanNodePtr& planNode);
 
 /// Register all operator adapters.
 ///

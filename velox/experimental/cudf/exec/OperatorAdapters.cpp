@@ -1181,6 +1181,55 @@ class GroupIdAdapter : public OperatorAdapter {
   }
 };
 
+std::optional<OperatorAdapter::Properties> transportOperatorProperties(
+    const core::PlanNodePtr& planNode) {
+  if (planNode == nullptr) {
+    return std::nullopt;
+  }
+
+  if (const auto partitionedOutputNode =
+          std::dynamic_pointer_cast<const core::PartitionedOutputNode>(
+              planNode)) {
+    if (partitionedOutputNode->transportKind() != core::TransportKind::kUcx) {
+      return std::nullopt;
+    }
+    // A sink: it consumes device-resident data and hands nothing downstream.
+    // producesGpuOutput must stay false, or the driver adapter appends a
+    // CudfToVelox after the last operator of the task.
+    return OperatorAdapter::Properties{
+        .canRunOnGPU = true,
+        .acceptsGpuInput = true,
+        .producesGpuOutput = false,
+    };
+  }
+
+  // MergeExchangeNode derives from ExchangeNode, but LocalPlanner builds a CPU
+  // exec::MergeExchange for it and MergeExchangeAdapter replaces that with
+  // UcxExchange + CudfOrderBy. Claiming it here would report the CPU operator
+  // as a GPU source. Checked before the ExchangeNode branch below, which would
+  // otherwise match it.
+  if (std::dynamic_pointer_cast<const core::MergeExchangeNode>(planNode) !=
+      nullptr) {
+    return std::nullopt;
+  }
+
+  if (const auto exchangeNode =
+          std::dynamic_pointer_cast<const core::ExchangeNode>(planNode)) {
+    if (exchangeNode->transportKind() != core::TransportKind::kUcx) {
+      return std::nullopt;
+    }
+    // A source: it consumes no input and hands the next operator
+    // device-resident data.
+    return OperatorAdapter::Properties{
+        .canRunOnGPU = true,
+        .acceptsGpuInput = false,
+        .producesGpuOutput = true,
+    };
+  }
+
+  return std::nullopt;
+}
+
 /// Registration Function
 void registerAllOperatorAdapters() {
   auto& registry = OperatorAdapterRegistry::getInstance();

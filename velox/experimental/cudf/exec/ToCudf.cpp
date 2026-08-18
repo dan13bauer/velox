@@ -98,6 +98,11 @@ bool CompileState::compile(bool allowCpuFallback) {
   // Cached operator properties including adapter pointer.
   struct OperatorProperties : OperatorAdapter::Properties {
     const OperatorAdapter* adapter = nullptr;
+    // Whether the operator was built from the node's transport by the exchange
+    // transport registry rather than by an adapter. Such an operator exchanges
+    // device-resident data despite having no adapter, so it is not a CPU
+    // fallback.
+    bool transportOperator = false;
   };
 
   auto getOperatorProperties =
@@ -108,6 +113,16 @@ bool CompileState::compile(bool allowCpuFallback) {
         if (adapter && isValidPlanNodeId(op->planNodeId())) {
           static_cast<OperatorAdapter::Properties&>(props) =
               adapter->properties(op, getPlanNode(op->planNodeId()), ctx);
+        } else if (!adapter && isValidPlanNodeId(op->planNodeId())) {
+          // No adapter: the operator may still be one the exchange transport
+          // registry built for this node, in which case the node's transport
+          // says whether it exchanges device-resident data. An adapter, when
+          // present, stays authoritative.
+          if (auto transportProps =
+                  transportOperatorProperties(getPlanNode(op->planNodeId()))) {
+            static_cast<OperatorAdapter::Properties&>(props) = *transportProps;
+            props.transportOperator = true;
+          }
         }
         if (isAnyOf<CudfOperator>(op)) {
           // CudfOperator is always fully GPU compatible
@@ -197,8 +212,10 @@ bool CompileState::compile(bool allowCpuFallback) {
         isPureCpuOperator = false;
       }
     } else {
-      // special case for CudfOperator
-      if (isAnyOf<CudfOperator>(oper)) {
+      // special case for CudfOperator, and for the operators the exchange
+      // transport registry builds -- both move device-resident data without an
+      // adapter, so neither is a CPU fallback.
+      if (isAnyOf<CudfOperator>(oper) or thisOpProps.transportOperator) {
         isPureCpuOperator = false;
       } else {
         // CPU operator without adapter
