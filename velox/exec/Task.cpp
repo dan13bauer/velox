@@ -1329,7 +1329,10 @@ void Task::initializePartitionOutput() {
     VELOX_CHECK_GT(numOutputDrivers, 0);
     const auto& transport = partitionedOutputNode->transportKind();
     auto entry = OutputTransportRegistry::tryGet(*queryCtx_, transport);
-    VELOX_CHECK_NOT_NULL(
+    // A user error, not an internal one: the transport is named by the plan, so
+    // an unregistered one means the plan asked this worker for a transport it
+    // does not have. Matches how the exchange side reports the same mistake.
+    VELOX_USER_CHECK_NOT_NULL(
         entry,
         "No output buffer manager registered for transport '{}'",
         transport);

@@ -16,9 +16,9 @@
 
 #include "velox/common/base/tests/GTestUtils.h"
 #include "velox/exec/Exchange.h"
+#include "velox/exec/ExchangeSource.h"
 #include "velox/exec/ExchangeTransportRegistry.h"
 #include "velox/exec/InMemoryExchangeClient.h"
-#include "velox/exec/ExchangeSource.h"
 #include "velox/exec/Task.h"
 #include "velox/exec/tests/utils/LocalExchangeSource.h"
 #include "velox/exec/tests/utils/OperatorTestBase.h"
@@ -163,14 +163,16 @@ class ExchangeTransportTest : public OperatorTestBase {
     CursorParameters params;
     params.planNode =
         PlanBuilder()
-            .mergeExchange(asRowType(data->type()), {"c0"}, "Presto", transportKind)
+            .mergeExchange(
+                asRowType(data->type()), {"c0"}, "Presto", transportKind)
             .capturePlanNodeId(mergeExchangeNodeId)
             .planNode();
     params.maxDrivers = 1;
     params.queryCtx = core::QueryCtx::create(driverExecutor_.get());
 
     auto result = readCursor(params, [&](TaskCursor* taskCursor) {
-      taskCursor->task()->addSplit(mergeExchangeNodeId, remoteSplit(leafTaskId));
+      taskCursor->task()->addSplit(
+          mergeExchangeNodeId, remoteSplit(leafTaskId));
       taskCursor->task()->noMoreSplits(mergeExchangeNodeId);
       taskCursor->setNoMoreSplits();
     });
@@ -189,8 +191,9 @@ TEST_F(ExchangeTransportTest, selectsOperatorByTransportKind) {
   auto operatorInvocations = std::make_shared<std::atomic<int>>(0);
   registerTestTransport(transportKind, clientInvocations, operatorInvocations);
 
-  auto data = makeRowVector({"c0"}, {makeFlatVector<int64_t>(
-                     100, [](vector_size_t row) { return row; })});
+  auto data = makeRowVector(
+      {"c0"},
+      {makeFlatVector<int64_t>(100, [](vector_size_t row) { return row; })});
   auto [cursor, results] =
       runExchange("local://selects-operator-leaf", data, transportKind);
 
@@ -205,8 +208,9 @@ TEST_F(ExchangeTransportTest, mergeExchangeUsesTransportKind) {
   auto operatorInvocations = std::make_shared<std::atomic<int>>(0);
   registerTestTransport(transportKind, clientInvocations, operatorInvocations);
 
-  auto data = makeRowVector({"c0"}, {makeFlatVector<int64_t>(
-                     100, [](vector_size_t row) { return row; })});
+  auto data = makeRowVector(
+      {"c0"},
+      {makeFlatVector<int64_t>(100, [](vector_size_t row) { return row; })});
   auto [cursor, results] =
       runMergeExchange("local://merge-exchange-leaf", data, transportKind);
 
@@ -217,8 +221,9 @@ TEST_F(ExchangeTransportTest, mergeExchangeUsesTransportKind) {
 }
 
 TEST_F(ExchangeTransportTest, usesInMemoryByDefault) {
-  auto data = makeRowVector({"c0"}, {makeFlatVector<int64_t>(
-                     100, [](vector_size_t row) { return row; })});
+  auto data = makeRowVector(
+      {"c0"},
+      {makeFlatVector<int64_t>(100, [](vector_size_t row) { return row; })});
   auto [cursor, results] = runExchange(
       "local://uses-in-memory-leaf",
       data,
@@ -242,7 +247,7 @@ TEST_F(ExchangeTransportTest, errorsOnUnregisteredTransport) {
       queryCtx,
       Task::ExecutionMode::kParallel,
       exec::Consumer{});
-  VELOX_ASSERT_THROW(
+  VELOX_ASSERT_USER_THROW(
       task->start(1, 1), "No exchange transport registered for transport");
 }
 
@@ -252,8 +257,9 @@ TEST_F(ExchangeTransportTest, usesDefaultAfterRegistryClear) {
   // clear.
   ExchangeTransportRegistry::unregisterAll();
 
-  auto data = makeRowVector({"c0"}, {makeFlatVector<int64_t>(
-                     100, [](vector_size_t row) { return row; })});
+  auto data = makeRowVector(
+      {"c0"},
+      {makeFlatVector<int64_t>(100, [](vector_size_t row) { return row; })});
   auto [cursor, results] = runExchange(
       "local://uses-default-after-clear-leaf",
       data,

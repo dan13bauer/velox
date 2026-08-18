@@ -72,6 +72,10 @@ TEST_F(OutputTransportTest, usesDefaultAfterRegistryClear) {
 TEST_F(OutputTransportTest, errorsOnUnregisteredTransport) {
   // A node naming a transport with no registered manager is a misconfiguration:
   // resolution fails fast rather than silently running over another transport.
+  // It is a user error, not an internal one -- the transport is named by the
+  // plan, so an unregistered one means the plan asked this worker for something
+  // it does not have. The exchange side of the same edge reports it the same
+  // way; see ExchangeTransportTest.errorsOnUnregisteredTransport.
   const std::string transportType{"ucx-unregistered"};
   auto plan = PlanBuilder()
                   .tableScan(ROW({"c0"}, {BIGINT()}))
@@ -89,7 +93,7 @@ TEST_F(OutputTransportTest, errorsOnUnregisteredTransport) {
       queryCtx,
       Task::ExecutionMode::kParallel,
       exec::Consumer{});
-  VELOX_ASSERT_THROW(
+  VELOX_ASSERT_USER_THROW(
       task->start(1, 1), "No output buffer manager registered for transport");
 }
 
