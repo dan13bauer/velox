@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 #include "velox/exec/LocalPlanner.h"
+#include <glog/logging.h>
 #include "velox/core/PlanFragment.h"
 #include "velox/exec/ArrowStream.h"
 #include "velox/exec/AssignUniqueId.h"
@@ -575,7 +576,8 @@ std::shared_ptr<Driver> DriverFactory::createDriver(
     } else if (
         auto exchangeNode =
             std::dynamic_pointer_cast<const core::ExchangeNode>(planNode)) {
-      // The exchange client is Task-owned and shared across this node's drivers.
+      // The exchange client is Task-owned and shared across this node's
+      // drivers.
       VELOX_CHECK_NOT_NULL(exchangeClient);
       auto entry = ExchangeTransportRegistry::tryGet(
           *ctx->task->queryCtx(), exchangeNode->transportKind());
@@ -585,12 +587,23 @@ std::shared_ptr<Driver> DriverFactory::createDriver(
           exchangeNode->transportKind());
       operators.push_back(entry->makeOperator(
           id, ctx.get(), exchangeNode, std::move(exchangeClient)));
+      // TODO: Temporary diagnostic for the UCX transport investigation --
+      // records which operator class the registry actually built for a node's
+      // transport, before any DriverAdapter rewrites the pipeline. Fires once
+      // per driver. Remove once the root cause is fixed.
+      LOG(INFO) << "[TRANSPORT] node " << exchangeNode->id() << " transport '"
+                << exchangeNode->transportKind() << "' built operator "
+                << operators.back()->operatorType();
     } else if (
         auto partitionedOutputNode =
             std::dynamic_pointer_cast<const core::PartitionedOutputNode>(
                 planNode)) {
       operators.push_back(outputOperatorFactory(
           id, ctx.get(), partitionedOutputNode, eagerFlush(*planNode)));
+      // TODO: Temporary diagnostic, see the note on the ExchangeNode branch.
+      LOG(INFO) << "[TRANSPORT] node " << partitionedOutputNode->id()
+                << " transport '" << partitionedOutputNode->transportKind()
+                << "' built operator " << operators.back()->operatorType();
     } else if (
         auto joinNode =
             std::dynamic_pointer_cast<const core::HashJoinNode>(planNode)) {

@@ -1333,6 +1333,13 @@ void Task::initializePartitionOutput() {
         entry,
         "No output buffer manager registered for transport '{}'",
         transport);
+    // TODO: Temporary diagnostic for the UCX transport investigation. Fires
+    // once per task, so LOG(INFO) rather than VLOG to keep it independent of
+    // the worker's verbosity setting. Remove once the root cause is fixed.
+    LOG(INFO) << "[TRANSPORT] task " << taskId_ << " output node "
+              << partitionedOutputNode->id() << " transport '" << transport
+              << "' numPartitions " << partitionedOutputNode->numPartitions()
+              << " numOutputDrivers " << numOutputDrivers;
     auto manager = entry->manager;
     {
       std::lock_guard<std::timed_mutex> l(mutex_);
@@ -3779,6 +3786,10 @@ void Task::createExchangeClientLocked(
       entry,
       "No exchange transport registered for transport: {}",
       transportKind);
+  // TODO: Temporary diagnostic, see the note in initializePartitionOutput().
+  LOG(INFO) << "[TRANSPORT] task " << taskId_ << " exchange node " << planNodeId
+            << " pipeline " << pipelineId << " transport '" << transportKind
+            << "' numberOfConsumers " << numberOfConsumers;
   const ExchangeClientContext context{
       taskId_,
       destination_,
