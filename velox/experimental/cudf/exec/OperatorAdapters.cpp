@@ -45,6 +45,7 @@
 #include "velox/exec/AssignUniqueId.h"
 #include "velox/exec/CallbackSink.h"
 #include "velox/exec/EnforceSingleRow.h"
+#include "velox/exec/Exchange.h"
 #include "velox/exec/FilterProject.h"
 #include "velox/exec/GroupId.h"
 #include "velox/exec/HashAggregation.h"
@@ -56,6 +57,7 @@
 #include "velox/exec/NestedLoopJoinBuild.h"
 #include "velox/exec/NestedLoopJoinProbe.h"
 #include "velox/exec/OrderBy.h"
+#include "velox/exec/PartitionedOutput.h"
 #include "velox/exec/StreamingAggregation.h"
 #include "velox/exec/TableScan.h"
 #include "velox/exec/Task.h"
@@ -988,6 +990,111 @@ class EnforceSingleRowAdapter : public OperatorAdapter {
   }
 };
 
+/// PartitionedOutputAdapter - Keeps original operator.
+///
+/// PartitionedOutput is the task's outward boundary: it serialises the driver's
+/// output and hands it to the exchange that feeds the next stage or the
+/// coordinator. There is no computation in it to move to the GPU, and no cuDF
+/// operator could replace it -- so counting it as a "CPU operator" made
+/// cudf.allow_cpu_fallback=false reject EVERY plan, since every plan ends in
+/// one. `SELECT 1` failed with "!isPureCpuOperator Replacement with cuDF
+/// operator failed", which says nothing about GPU expression coverage and made
+/// strict mode useless as a coverage probe.
+///
+/// keepOperator() == true is the existing mechanism for exactly this (see
+/// LocalExchangeAdapter and CallbackSinkAdapter): ToCudf's strict check treats a
+/// kept operator as GPU-compatible. canRunOnGPU() returns true without logging a
+/// fallback, because no fallback happens -- the operator was never a candidate
+/// for replacement. Contrast CallbackSinkAdapter, which is also exempt via
+/// keepOperator() but still LOG_FALLBACKs, so its log lines look like real
+/// fallbacks and are not.
+class PartitionedOutputAdapter : public OperatorAdapter {
+ public:
+  PartitionedOutputAdapter() : OperatorAdapter("PartitionedOutput") {}
+
+  bool canHandle(const exec::Operator* op) const override {
+    return dynamic_cast<const exec::PartitionedOutput*>(op) != nullptr;
+  }
+
+  bool canRunOnGPU(
+      const exec::Operator* /*op*/,
+      const core::PlanNodePtr& /*planNode*/,
+      exec::DriverCtx* /*ctx*/) const override {
+    return true;
+  }
+
+  /// Takes CPU vectors; ToCudf inserts CudfToVelox ahead of it when the
+  /// preceding operator is on the GPU.
+  bool acceptsGpuInput() const override {
+    return false;
+  }
+
+  /// A sink: nothing downstream consumes its output inside this driver.
+  bool producesGpuOutput() const override {
+    return false;
+  }
+
+  std::vector<std::unique_ptr<exec::Operator>> createReplacements(
+      const exec::Operator* /*op*/,
+      const core::PlanNodePtr& /*planNode*/,
+      exec::DriverCtx* /*ctx*/,
+      int32_t /*operatorId*/) const override {
+    return {}; // Keep original operator
+  }
+
+  bool keepOperator() const override {
+    return true;
+  }
+};
+
+/// ExchangeAdapter - Keeps original operator.
+///
+/// The receive side of the same boundary PartitionedOutputAdapter covers: it
+/// pulls serialised pages from an upstream stage and produces CPU vectors. Pure
+/// transport, no computation, so it is exempt for the same reason.
+///
+/// Deliberately NOT extended to MergeExchange: that operator performs a k-way
+/// merge, which is real computation a cuDF operator could implement, so
+/// exempting it would let strict mode hide a genuinely missing GPU
+/// implementation. Same reasoning keeps LocalMerge unexempt.
+class ExchangeAdapter : public OperatorAdapter {
+ public:
+  ExchangeAdapter() : OperatorAdapter("Exchange") {}
+
+  bool canHandle(const exec::Operator* op) const override {
+    return dynamic_cast<const exec::Exchange*>(op) != nullptr;
+  }
+
+  bool canRunOnGPU(
+      const exec::Operator* /*op*/,
+      const core::PlanNodePtr& /*planNode*/,
+      exec::DriverCtx* /*ctx*/) const override {
+    return true;
+  }
+
+  bool acceptsGpuInput() const override {
+    return false;
+  }
+
+  /// Produces CPU vectors; ToCudf inserts CudfFromVelox after it when the
+  /// following operator is on the GPU.
+  bool producesGpuOutput() const override {
+    return false;
+  }
+
+  std::vector<std::unique_ptr<exec::Operator>> createReplacements(
+      const exec::Operator* /*op*/,
+      const core::PlanNodePtr& /*planNode*/,
+      exec::DriverCtx* /*ctx*/,
+      int32_t /*operatorId*/) const override {
+    return {}; // Keep original operator
+  }
+
+  bool keepOperator() const override {
+    return true;
+  }
+};
+
 /// CallbackSinkAdapter - Keeps original operator
 class CallbackSinkAdapter : public OperatorAdapter {
  public:
@@ -997,14 +1104,19 @@ class CallbackSinkAdapter : public OperatorAdapter {
     return dynamic_cast<const exec::CallbackSink*>(op) != nullptr;
   }
 
+  /// Was: LOG_FALLBACK(...) + return false. Behaviour did not change -- this
+  /// adapter's keepOperator() == true already made ToCudf treat the operator as
+  /// GPU-compatible, so canRunOnGPU() was never consulted for the strict check
+  /// and no fallback ever occurred here. But the log line claimed one did, in a
+  /// message reading "Falling back to CPU execution", and it fired on every
+  /// task: a fallback analysis of a real run attributed 58 fallbacks to
+  /// CallbackSink that never happened. A sink has nothing to move to the GPU, so
+  /// report it the way LocalExchangeAdapter does and keep the log honest.
   bool canRunOnGPU(
       const exec::Operator* /*op*/,
-      const core::PlanNodePtr& planNode,
+      const core::PlanNodePtr& /*planNode*/,
       exec::DriverCtx* /*ctx*/) const override {
-    LOG_FALLBACK(
-        "CallbackSink operator not supported on cuDF, PlanNode id: {}",
-        planNode->id());
-    return false;
+    return true;
   }
 
   bool acceptsGpuInput() const override {
@@ -1147,6 +1259,8 @@ void registerAllOperatorAdapters() {
   registry.registerAdapter(std::make_unique<EnforceSingleRowAdapter>());
   registry.registerAdapter(std::make_unique<GroupIdAdapter>());
   registry.registerAdapter(std::make_unique<ValuesAdapter>());
+  registry.registerAdapter(std::make_unique<PartitionedOutputAdapter>());
+  registry.registerAdapter(std::make_unique<ExchangeAdapter>());
   registry.registerAdapter(std::make_unique<CallbackSinkAdapter>());
   registry.registerAdapter(std::make_unique<WindowAdapter>());
 }
