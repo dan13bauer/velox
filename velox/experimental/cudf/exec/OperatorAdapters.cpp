@@ -1002,12 +1002,12 @@ class EnforceSingleRowAdapter : public OperatorAdapter {
 /// strict mode useless as a coverage probe.
 ///
 /// keepOperator() == true is the existing mechanism for exactly this (see
-/// LocalExchangeAdapter and CallbackSinkAdapter): ToCudf's strict check treats a
-/// kept operator as GPU-compatible. canRunOnGPU() returns true without logging a
-/// fallback, because no fallback happens -- the operator was never a candidate
-/// for replacement. Contrast CallbackSinkAdapter, which is also exempt via
-/// keepOperator() but still LOG_FALLBACKs, so its log lines look like real
-/// fallbacks and are not.
+/// LocalExchangeAdapter and CallbackSinkAdapter): ToCudf's strict check treats
+/// a kept operator as GPU-compatible. canRunOnGPU() returns true without
+/// logging a fallback, because no fallback happens -- the operator was never a
+/// candidate for replacement. Contrast CallbackSinkAdapter, which is also
+/// exempt via keepOperator() but still LOG_FALLBACKs, so its log lines look
+/// like real fallbacks and are not.
 class PartitionedOutputAdapter : public OperatorAdapter {
  public:
   PartitionedOutputAdapter() : OperatorAdapter("PartitionedOutput") {}
@@ -1110,8 +1110,8 @@ class CallbackSinkAdapter : public OperatorAdapter {
   /// and no fallback ever occurred here. But the log line claimed one did, in a
   /// message reading "Falling back to CPU execution", and it fired on every
   /// task: a fallback analysis of a real run attributed 58 fallbacks to
-  /// CallbackSink that never happened. A sink has nothing to move to the GPU, so
-  /// report it the way LocalExchangeAdapter does and keep the log honest.
+  /// CallbackSink that never happened. A sink has nothing to move to the GPU,
+  /// so report it the way LocalExchangeAdapter does and keep the log honest.
   bool canRunOnGPU(
       const exec::Operator* /*op*/,
       const core::PlanNodePtr& /*planNode*/,
