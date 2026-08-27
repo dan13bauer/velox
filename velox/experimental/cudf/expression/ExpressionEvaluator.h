@@ -94,9 +94,6 @@ struct CudfDateTimeContext {
   /// Whether timezone-less timestamp conversions honor the session timezone
   /// (QueryConfig::adjustTimestampToTimezone).
   bool adjustTimestampToTimezone{false};
-  /// Session start time in milliseconds since epoch
-  /// (QueryConfig::sessionStartTimeMs); used by now()/current_timestamp.
-  int64_t sessionStartTimeMs{0};
 
   /// Returns true when extraction functions must convert the instant to the
   /// session-local wall clock before reading a calendar field.

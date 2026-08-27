@@ -31,7 +31,7 @@ cudf::ast::expression const& createAstTree(
     const RowTypePtr& inputRowSchema,
     std::vector<PrecomputeInstruction>& precomputeInstructions,
     memory::MemoryPool* pool,
-    const CudfDateTimeContext& context = {});
+    const CudfDateTimeContext& context);
 
 cudf::ast::expression const& createAstTree(
     const core::TypedExprPtr& expr,
@@ -42,7 +42,7 @@ cudf::ast::expression const& createAstTree(
     std::vector<PrecomputeInstruction>& leftPrecomputeInstructions,
     std::vector<PrecomputeInstruction>& rightPrecomputeInstructions,
     memory::MemoryPool* pool,
-    const CudfDateTimeContext& context = {});
+    const CudfDateTimeContext& context);
 
 /// Evaluates an expression tree using cudf AST.
 class ASTExpression : public CudfExpression {
@@ -55,7 +55,7 @@ class ASTExpression : public CudfExpression {
       const core::TypedExprPtr& expr,
       const RowTypePtr& inputRowSchema,
       memory::MemoryPool* pool,
-      const CudfDateTimeContext& context = {});
+      const CudfDateTimeContext& context);
 
   ColumnOrView eval(
       std::vector<cudf::column_view> inputColumnViews,

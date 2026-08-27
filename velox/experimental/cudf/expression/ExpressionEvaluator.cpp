@@ -21,6 +21,7 @@
 #include "velox/experimental/cudf/expression/ExpressionEvaluator.h"
 #include "velox/experimental/cudf/expression/ExpressionEvaluatorRegistry.h"
 #include "velox/experimental/cudf/expression/NullMask.h"
+#include "velox/experimental/cudf/expression/TimestampWithTimeZoneColumn.h"
 #include "velox/experimental/cudf/expression/TimezoneConversion.h"
 #include "velox/experimental/cudf/expression/prestosql/TimezoneFunctions.h"
 
@@ -32,9 +33,12 @@
 #include "velox/expression/ExprOptimizer.h"
 #include "velox/expression/FunctionSignature.h"
 #include "velox/expression/SignatureBinder.h"
+#include "velox/functions/prestosql/types/TimestampWithTimeZoneRegistration.h"
+#include "velox/functions/prestosql/types/TimestampWithTimeZoneType.h"
 #include "velox/type/DecimalUtil.h"
 #include "velox/type/Time.h"
 #include "velox/type/Type.h"
+#include "velox/type/tz/TimeZoneMap.h"
 #include "velox/vector/BaseVector.h"
 #include "velox/vector/ComplexVector.h"
 #include "velox/vector/ConstantVector.h"
@@ -213,18 +217,6 @@ getCudfFunctionRegistry() {
   return registry;
 }
 
-} // namespace
-
-CudfDateTimeContext contextFromConfig(const core::QueryConfig& config) {
-  return CudfDateTimeContext{
-      config.sessionTimezone(),
-      config.adjustTimestampToTimezone(),
-      config.sessionStartTimeMs(),
-  };
-}
-
-namespace {
-
 static bool matchCallAgainstSignatures(
     const core::TypedExprPtr& call,
     const std::vector<exec::FunctionSignaturePtr>& sigs) {
@@ -317,8 +309,7 @@ const CudfExpressionEvaluatorEntry* findBestEvaluator(
 }
 
 // Recursive, context-free check that some cuDF evaluator supports every node in
-// the expression tree. canExprRunOnGpu wraps this with expression optimization
-// and the timezone fallback.
+// the expression tree. canExprRunOnGpu wraps this with expression optimization.
 bool canBeEvaluatedByCudf(const core::TypedExprPtr& expr) {
   ensureBuiltinExpressionEvaluatorsRegistered();
 
@@ -371,6 +362,13 @@ void checkAllTrue(
       result->is_valid(stream) && result->value(stream), "{}", userMessage);
 }
 
+CudfDateTimeContext contextFromConfig(const core::QueryConfig& config) {
+  return CudfDateTimeContext{
+      config.sessionTimezone(),
+      config.adjustTimestampToTimezone(),
+  };
+}
+
 class SplitFunction : public CudfFunction {
  public:
   SplitFunction(const core::TypedExprPtr& expr, memory::MemoryPool* pool) {
@@ -404,19 +402,58 @@ class SplitFunction : public CudfFunction {
   cudf::size_type maxSplitCount_;
 };
 
+// Defined below, next to the datetime field-extraction functions that are its
+// other caller. Declared here because CastFunction needs it for the
+// TIMESTAMP -> VARCHAR rendering and precedes it in this file.
+std::unique_ptr<cudf::column> maybeConvertToSessionLocal(
+    const cudf::column_view& timestamps,
+    const CudfDateTimeContext& context,
+    rmm::cuda_stream_view stream,
+    rmm::device_async_resource_ref mr);
+
 class CastFunction : public CudfFunction {
  public:
+  // Selects how eval interprets the cast. Only two modes exist on this branch:
+  // the default fixed-width cudf::cast, and the TIMESTAMP -> TIMESTAMP WITH
+  // TIME ZONE pack. The commit this was ported from (perfleap/velox 536467860)
+  // also carried kStringToTimestamp/kDateToString/kIntToString, which belong to
+  // velox#17942 and are deliberately NOT brought over: this base does not
+  // implement those conversions, and declaring them evaluable would make the
+  // AST builder precompute a cast eval() cannot perform.
+  enum class CastMode {
+    kFixedWidth,
+    kTimestampToTimestampWithTimeZone,
+    kTimestampToString,
+  };
+
   CastFunction(const core::TypedExprPtr& expr) {
     VELOX_CHECK_EQ(expr->inputs().size(), 1, "cast expects exactly 1 input");
 
     targetCudfType_ = cudf_velox::veloxToCudfDataType(expr->type());
-    auto sourceType =
-        cudf_velox::veloxToCudfDataType(expr->inputs()[0]->type());
-    VELOX_CHECK(
-        cudf::is_supported_cast(sourceType, targetCudfType_),
-        "Cast from {} to {} is not supported",
-        expr->inputs()[0]->type()->toString(),
-        expr->type()->toString());
+    const auto& srcVeloxType = expr->inputs()[0]->type();
+    const auto& dstVeloxType = expr->type();
+
+    if (srcVeloxType->kind() == TypeKind::TIMESTAMP &&
+        dstVeloxType->kind() == TypeKind::VARCHAR) {
+      // cudf::is_supported_cast has no timestamp->string path, so this needs
+      // cudf::strings::from_timestamps rather than cudf::cast.
+      castMode_ = CastMode::kTimestampToString;
+    } else if (
+        srcVeloxType->kind() == TypeKind::TIMESTAMP &&
+        isTimestampWithTimeZoneType(dstVeloxType)) {
+      // eval packs UTC millis with the session zone key; the session timezone
+      // and adjust flag live in context_, which is set after construction, so
+      // resolve them there rather than here.
+      castMode_ = CastMode::kTimestampToTimestampWithTimeZone;
+    } else {
+      castMode_ = CastMode::kFixedWidth;
+      auto sourceType = cudf_velox::veloxToCudfDataType(srcVeloxType);
+      VELOX_CHECK(
+          cudf::is_supported_cast(sourceType, targetCudfType_),
+          "Cast from {} to {} is not supported",
+          srcVeloxType->toString(),
+          dstVeloxType->toString());
+    }
   }
 
   ColumnOrView eval(
@@ -424,12 +461,107 @@ class CastFunction : public CudfFunction {
       [[maybe_unused]] cudf::size_type numRows,
       rmm::cuda_stream_view stream,
       rmm::device_async_resource_ref mr) const override {
+    // A cast reads a column, and FunctionExpression::create drops constant
+    // children from this vector, so a constant operand leaves it empty.
+    // canEvaluate declines that shape, which is what keeps such a cast off the
+    // GPU; this check is what turns a future regression into an error instead
+    // of a read past the end of the vector, which segfaults.
+    VELOX_CHECK_EQ(
+        inputColumns.size(), 1, "cast expects exactly 1 input column");
     auto inputCol = asView(inputColumns[0]);
-    return cudf::cast(inputCol, targetCudfType_, stream, mr);
+    switch (castMode_) {
+      case CastMode::kTimestampToTimestampWithTimeZone: {
+        // Mirror CPU castFromTimestamp. The session zone is the configured
+        // session timezone, or GMT (key 0) when unset. With
+        // adjust_timestamp_to_session_timezone off (the default), the TIMESTAMP
+        // is wall time in that zone, so shift it to UTC before reading millis
+        // (toGMT); with the flag on, the TIMESTAMP is already the UTC instant.
+        const bool gmtZone = context_.sessionTimezone.empty();
+        const int16_t zoneId =
+            gmtZone ? 0 : tz::getTimeZoneID(context_.sessionTimezone);
+        // toGMT(GMT) is a no-op, so only shift for a real (non-GMT) zone.
+        std::unique_ptr<cudf::column> shifted;
+        cudf::column_view utcTs = inputCol;
+        if (!context_.adjustTimestampToTimezone && !gmtZone) {
+          shifted =
+              toUtcTimestamp(inputCol, context_.sessionTimezone, stream, mr);
+          utcTs = shifted->view();
+        }
+        // Reduce to UTC milliseconds independent of the configured timestamp
+        // resolution, then reinterpret the millis timestamp as its int64
+        // payload without copying.
+        auto millisTs = cudf::cast(
+            utcTs,
+            cudf::data_type{cudf::type_id::TIMESTAMP_MILLISECONDS},
+            stream,
+            mr);
+        auto millisView = millisTs->view();
+        cudf::column_view millisInt{
+            cudf::data_type{cudf::type_id::INT64},
+            millisView.size(),
+            millisView.head<int64_t>(),
+            millisView.null_mask(),
+            millisView.null_count(),
+            millisView.offset()};
+        // pack(millis, zone) = (millis << kMillisShift) | (zone &
+        // kTimezoneMask).
+        cudf::numeric_scalar<int64_t> shiftScalar(
+            kMillisShift, true, stream, mr);
+        auto packedMillis = cudf::binary_operation(
+            millisInt,
+            shiftScalar,
+            cudf::binary_operator::SHIFT_LEFT,
+            cudf::data_type{cudf::type_id::INT64},
+            stream,
+            mr);
+        cudf::numeric_scalar<int64_t> zoneScalar(
+            zoneId & kTimezoneMask, true, stream, mr);
+        return cudf::binary_operation(
+            packedMillis->view(),
+            zoneScalar,
+            cudf::binary_operator::BITWISE_OR,
+            cudf::data_type{cudf::type_id::INT64},
+            stream,
+            mr);
+      }
+      case CastMode::kTimestampToString: {
+        // Presto renders a TIMESTAMP as "YYYY-MM-DD HH:MM:SS.mmm" -- space
+        // separator, exactly three fractional digits, no zone suffix -- and
+        // does so independently of the session timezone. Measured on CPU across
+        // the fixture's full range (1883 to 2262, including sub-millisecond
+        // rows) under four session zones before writing this.
+        //
+        // Reduce to milliseconds first: the fractional field is fixed at three
+        // digits, so rendering a microsecond- or nanosecond-resolution column
+        // directly would silently drop precision rather than round it the way
+        // the reader does. With adjust_timestamp_to_session_timezone ON, CPU
+        // renders the instant IN the session zone: 2021-06-15 17:30:00.000
+        // under Asia/Kolkata where the adjust-off answer is 12:00:00.000.
+        // Unlike to_iso8601 there is no offset suffix, so only the wall clock
+        // shifts. Missed until a unit test ran with that config; the parity
+        // clusters run with it off.
+        auto local = maybeConvertToSessionLocal(inputCol, context_, stream, mr);
+        auto millisTs = cudf::cast(
+            local ? local->view() : inputCol,
+            cudf::data_type{cudf::type_id::TIMESTAMP_MILLISECONDS},
+            stream,
+            mr);
+        return cudf::strings::from_timestamps(
+            millisTs->view(),
+            "%Y-%m-%d %H:%M:%S.%3f",
+            cudf::strings_column_view{},
+            stream,
+            mr);
+      }
+      case CastMode::kFixedWidth:
+      default:
+        return cudf::cast(inputCol, targetCudfType_, stream, mr);
+    }
   }
 
  private:
   cudf::data_type targetCudfType_;
+  CastMode castMode_{CastMode::kFixedWidth};
 };
 
 class CardinalityFunction : public CudfFunction {
@@ -1356,12 +1488,29 @@ std::unique_ptr<cudf::column> maybeConvertToSessionLocal(
   return toLocalTimestamp(input, context.sessionTimezone, stream, mr);
 }
 
+// The local wall clock to read a datetime field from, for either input type: a
+// packed TIMESTAMP WITH TIME ZONE is shifted by each row's OWN zone key, while
+// a plain TIMESTAMP is shifted by the one session zone. Returns nullptr when no
+// shift is needed (the caller then uses the input column as-is).
+std::unique_ptr<cudf::column> localForFieldExtraction(
+    const cudf::column_view& input,
+    bool inputIsTswtz,
+    const CudfDateTimeContext& context,
+    rmm::cuda_stream_view stream,
+    rmm::device_async_resource_ref mr) {
+  if (inputIsTswtz) {
+    return tswtzLocalWallClock(input, stream, mr);
+  }
+  return maybeConvertToSessionLocal(input, context, stream, mr);
+}
+
 class ExtractComponentFunction : public CudfFunction {
  public:
   ExtractComponentFunction(
       const core::TypedExprPtr& expr,
       cudf::datetime::datetime_component component)
-      : component_(component) {
+      : component_(component),
+        inputIsTswtz_(isTimestampWithTimeZoneType(expr->inputs()[0]->type())) {
     VELOX_CHECK_EQ(
         expr->inputs().size(), 1, "extract expects exactly 1 input column");
   }
@@ -1372,12 +1521,22 @@ class ExtractComponentFunction : public CudfFunction {
       rmm::cuda_stream_view stream,
       rmm::device_async_resource_ref mr) const override {
     auto inputCol = asView(inputColumns[0]);
-    // second and millisecond are sub-minute fields: every timezone offset is a
-    // whole number of minutes, so they are unaffected by the session timezone.
-    // The CPU path extracts them without applying the timezone, so skip the
-    // conversion here to match.
     std::unique_ptr<cudf::column> local;
-    if (component_ != cudf::datetime::datetime_component::SECOND &&
+    if (inputIsTswtz_) {
+      // A packed TIMESTAMP WITH TIME ZONE carries its own zone key per row, so
+      // the session zone is irrelevant and the instant must be unpacked before
+      // any field can be read. Unlike the TIMESTAMP path below there is no
+      // sub-minute shortcut: the shift is applied even for SECOND/MILLISECOND,
+      // because historical LMT offsets are not always a whole number of minutes
+      // (this fixture reaches 1883 and 1919), so skipping it could shift a
+      // second.
+      local = tswtzLocalWallClock(inputCol, stream, mr);
+    } else if (
+        // second and millisecond are sub-minute fields: every *modern* timezone
+        // offset is a whole number of minutes, so they are unaffected by the
+        // session timezone. The CPU path extracts them without applying the
+        // timezone, so skip the conversion here to match.
+        component_ != cudf::datetime::datetime_component::SECOND &&
         component_ != cudf::datetime::datetime_component::MILLISECOND) {
       local = maybeConvertToSessionLocal(inputCol, context_, stream, mr);
     }
@@ -1387,6 +1546,7 @@ class ExtractComponentFunction : public CudfFunction {
 
  private:
   cudf::datetime::datetime_component component_;
+  bool inputIsTswtz_{false};
 };
 
 // Builds an ExtractComponentFunction for a fixed datetime component, avoiding a
@@ -1404,7 +1564,8 @@ struct ExtractComponentFactory {
 
 class QuarterFunction : public CudfFunction {
  public:
-  explicit QuarterFunction(const core::TypedExprPtr& expr) {
+  explicit QuarterFunction(const core::TypedExprPtr& expr)
+      : inputIsTswtz_(isTimestampWithTimeZoneType(expr->inputs()[0]->type())) {
     VELOX_CHECK_EQ(
         expr->inputs().size(), 1, "quarter expects exactly 1 input column");
   }
@@ -1415,15 +1576,20 @@ class QuarterFunction : public CudfFunction {
       rmm::cuda_stream_view stream,
       rmm::device_async_resource_ref mr) const override {
     auto inputCol = asView(inputColumns[0]);
-    auto local = maybeConvertToSessionLocal(inputCol, context_, stream, mr);
+    auto local =
+        localForFieldExtraction(inputCol, inputIsTswtz_, context_, stream, mr);
     return cudf::datetime::extract_quarter(
         local ? local->view() : inputCol, stream, mr);
   }
+
+ private:
+  bool inputIsTswtz_{false};
 };
 
 class DayOfYearFunction : public CudfFunction {
  public:
-  explicit DayOfYearFunction(const core::TypedExprPtr& expr) {
+  explicit DayOfYearFunction(const core::TypedExprPtr& expr)
+      : inputIsTswtz_(isTimestampWithTimeZoneType(expr->inputs()[0]->type())) {
     VELOX_CHECK_EQ(
         expr->inputs().size(), 1, "day_of_year expects exactly 1 input column");
   }
@@ -1434,15 +1600,20 @@ class DayOfYearFunction : public CudfFunction {
       rmm::cuda_stream_view stream,
       rmm::device_async_resource_ref mr) const override {
     auto inputCol = asView(inputColumns[0]);
-    auto local = maybeConvertToSessionLocal(inputCol, context_, stream, mr);
+    auto local =
+        localForFieldExtraction(inputCol, inputIsTswtz_, context_, stream, mr);
     return cudf::datetime::day_of_year(
         local ? local->view() : inputCol, stream, mr);
   }
+
+ private:
+  bool inputIsTswtz_{false};
 };
 
 class WeekFunction : public CudfFunction {
  public:
-  explicit WeekFunction(const core::TypedExprPtr& expr) {
+  explicit WeekFunction(const core::TypedExprPtr& expr)
+      : inputIsTswtz_(isTimestampWithTimeZoneType(expr->inputs()[0]->type())) {
     VELOX_CHECK_EQ(
         expr->inputs().size(), 1, "week expects exactly 1 input column");
   }
@@ -1453,7 +1624,8 @@ class WeekFunction : public CudfFunction {
       rmm::cuda_stream_view stream,
       rmm::device_async_resource_ref mr) const override {
     auto inputCol = asView(inputColumns[0]);
-    auto local = maybeConvertToSessionLocal(inputCol, context_, stream, mr);
+    auto local =
+        localForFieldExtraction(inputCol, inputIsTswtz_, context_, stream, mr);
     auto weekStrings = cudf::strings::from_timestamps(
         local ? local->view() : inputCol,
         "%V",
@@ -1466,11 +1638,15 @@ class WeekFunction : public CudfFunction {
         stream,
         mr);
   }
+
+ private:
+  bool inputIsTswtz_{false};
 };
 
 class YearOfWeekFunction : public CudfFunction {
  public:
-  explicit YearOfWeekFunction(const core::TypedExprPtr& expr) {
+  explicit YearOfWeekFunction(const core::TypedExprPtr& expr)
+      : inputIsTswtz_(isTimestampWithTimeZoneType(expr->inputs()[0]->type())) {
     VELOX_CHECK_EQ(
         expr->inputs().size(),
         1,
@@ -1483,7 +1659,8 @@ class YearOfWeekFunction : public CudfFunction {
       rmm::cuda_stream_view stream,
       rmm::device_async_resource_ref mr) const override {
     auto inputCol = asView(inputColumns[0]);
-    auto local = maybeConvertToSessionLocal(inputCol, context_, stream, mr);
+    auto local =
+        localForFieldExtraction(inputCol, inputIsTswtz_, context_, stream, mr);
     auto yearStrings = cudf::strings::from_timestamps(
         local ? local->view() : inputCol,
         "%G",
@@ -1496,6 +1673,9 @@ class YearOfWeekFunction : public CudfFunction {
         stream,
         mr);
   }
+
+ private:
+  bool inputIsTswtz_{false};
 };
 
 class LengthFunction : public CudfFunction {
@@ -2197,6 +2377,16 @@ std::shared_ptr<CudfFunction> createCudfFunction(
 bool registerBuiltinFunctions(const std::string& prefix) {
   using exec::FunctionSignatureBuilder;
 
+  // Must precede any FunctionSignatureBuilder that names "timestamp with time
+  // zone": build() resolves the type by name and throws
+  // "Type doesn't exist: 'TIMESTAMP WITH TIME ZONE'" if it is not registered
+  // yet. registerTimezoneFunctions() below also calls this, but it runs at the
+  // END of this function -- so the extract family's TSWTZ signature, registered
+  // several hundred lines earlier, aborted the worker at startup before this
+  // line existed. registerCustomType is idempotent, so calling it twice is
+  // fine.
+  registerTimestampWithTimeZoneType();
+
   registerCudfFunction(
       prefix + "split",
       [](const std::string&,
@@ -2389,6 +2579,10 @@ bool registerBuiltinFunctions(const std::string& prefix) {
            .constantArgumentType("integer")
            .build()});
 
+  // The TSWTZ entry was missing, so the whole extract family declined on a
+  // TIMESTAMP WITH TIME ZONE argument -- the exact inverse of to_unixtime and
+  // to_iso8601, which were TSWTZ-only. ExtractComponentFunction now unpacks a
+  // packed input via tswtzLocalWallClock.
   const std::vector<exec::FunctionSignaturePtr> timestampDateIntegerSignatures{
       FunctionSignatureBuilder()
           .returnType("integer")
@@ -2397,6 +2591,10 @@ bool registerBuiltinFunctions(const std::string& prefix) {
       FunctionSignatureBuilder()
           .returnType("integer")
           .argumentType("date")
+          .build(),
+      FunctionSignatureBuilder()
+          .returnType("integer")
+          .argumentType("timestamp with time zone")
           .build()};
 
   registerCudfFunction(
@@ -2635,7 +2833,27 @@ bool registerBuiltinFunctions(const std::string& prefix) {
              .argumentType("double")
              .argumentType("double")
              .build(),
-         decimalBinarySignature()});
+         decimalBinarySignature()},
+        /*overwrite=*/true,
+        // Never arithmetic over a packed TIMESTAMP WITH TIME ZONE. The AST gate
+        // in isAstExprSupported declines this shape too, and this is the second
+        // half of the same guard rather than a duplicate: signature matching
+        // runs through SignatureBinder with TypeCoercer::defaults(), so it
+        // cannot be assumed to reject a BIGINT-backed custom type against a
+        // `double` argument. If it bound, BinaryFunction would difference the
+        // packed values in floating point
+        // -- a different wrong answer from the one the AST gate removes, and
+        // just as silent. Declining here sends the expression to CPU, which is
+        // correct.
+        [](const core::TypedExprPtr& expr) {
+          for (const auto& input : expr->inputs()) {
+            if (input != nullptr && input->type() != nullptr &&
+                isTimestampWithTimeZoneType(input->type())) {
+              return false;
+            }
+          }
+          return true;
+        });
   };
 
   registerBinaryOp(
@@ -2835,7 +3053,7 @@ bool registerBuiltinFunctions(const std::string& prefix) {
 
   // TIMESTAMP WITH TIME ZONE function family (from_unixtime, to_unixtime,
   // at_timezone, timezone_hour/minute, to_iso8601, format_datetime,
-  // parse_datetime, from_iso8601_timestamp, now/current_timestamp).
+  // parse_datetime, from_iso8601_timestamp).
   registerTimezoneFunctions(prefix);
 
   // Note: Spark and Presto functions are now registered separately via
@@ -3006,11 +3224,11 @@ ColumnOrView FunctionExpression::eval(
       subexprResults.push_back(subexpr->eval(inputColumnViews, stream, mr));
     }
 
-    // The batch row count, threaded to eval so a zero-argument function (e.g.
-    // now()) can size its constant output. Every argument and input column
-    // carries it; the GPU path always has at least one input column
-    // (zero-column projections fall back to CPU and empty batches short-circuit
-    // upstream).
+    // The batch row count, threaded into eval so a function with no input
+    // column to borrow a length from can still size its output. Taken from the
+    // first subexpression result, or from the input when there are no
+    // subexpressions (zero-column projections fall back to CPU and empty
+    // batches short-circuit upstream).
     const auto numRows = !subexprResults.empty()
         ? asView(subexprResults.front()).size()
         : (inputColumnViews.empty() ? 0 : inputColumnViews.front().size());
@@ -3059,8 +3277,61 @@ bool FunctionExpression::canEvaluate(const core::TypedExprPtr& expr) {
     if (srcType == nullptr || dstType == nullptr) {
       return false;
     }
+    // TIMESTAMP -> VARCHAR is handled by CastFunction via
+    // cudf::strings::from_timestamps; cudf::cast cannot express it, so
+    // is_supported_cast below would decline it.
+    if (srcType->kind() == TypeKind::TIMESTAMP &&
+        dstType->kind() == TypeKind::VARCHAR) {
+      return true;
+    }
+    // TIMESTAMP -> TIMESTAMP WITH TIME ZONE is handled by CastFunction, which
+    // shifts the wall-clock instant to UTC per the session timezone and packs
+    // the millis with the zone key into the BIGINT-backed physical value.
+    // cudf::cast cannot express it, so report it evaluable here to let the AST
+    // builder precompute the cast instead of failing on it.
+    if (srcType->kind() == TypeKind::TIMESTAMP &&
+        isTimestampWithTimeZoneType(dstType)) {
+      return true;
+    }
+    // A cast FROM TIMESTAMP WITH TIME ZONE would fall through to CastFunction's
+    // kFixedWidth mode, i.e. cudf::cast over the packed
+    // (millis << kMillisShift) | zone_key physical value -- which is not the
+    // logical value, so no destination type makes that meaningful. None of
+    // these conversions is implemented, and is_supported_cast cannot be the
+    // gate: it reports true for INT64 -> TIMESTAMP_DAYS, which is how
+    // cast(TSWTZ AS DATE) reached eval and aborted inside CudfFilterProject at
+    // cast_ops.cu "Timestamps cannot be converted to numeric". That abort is a
+    // RUNTIME failure, past the point where cudf.allow_cpu_fallback can rescue
+    // the query, so GPU-permissive failed too -- which is what makes declining
+    // here the fix rather than a tidy-up. The reverse direction is allowed just
+    // above.
+    if (isTimestampWithTimeZoneType(srcType)) {
+      return false;
+    }
+    // Everything past this point is evaluated by cudf::cast, which reads a
+    // column. FunctionExpression::create omits constant children from eval's
+    // argument vector -- a function taking a constant argument reads it out of
+    // the expression tree at construction time instead -- so a cast whose
+    // operand is a constant would reach eval with nothing to cast.
+    // expression::optimize normally folds such a cast into a constant before it
+    // gets here, but it leaves the subtree alone when folding throws, so
+    // decline rather than depend on that.
+    if (expr->inputs()[0]->isConstantKind()) {
+      return false;
+    }
     auto src = cudf_velox::veloxToCudfDataType(srcType);
     auto dst = cudf_velox::veloxToCudfDataType(dstType);
+    // cudf::cast is defined only over fixed-width types, but
+    // is_supported_cast(STRING, INT64) reports true, so it cannot be the only
+    // gate: it would admit the cast that a TIMESTAMP WITH TIME ZONE constant
+    // serializes to (Expr::toSql renders one as
+    // '<raw packed int64>'::TIMESTAMP WITH TIME ZONE, which reparses as
+    // cast(VARCHAR as TIMESTAMP WITH TIME ZONE)) and CastFunction has no such
+    // conversion. Require both sides fixed-width; the two conversions
+    // cudf::cast cannot express are already returned above.
+    if (!cudf::is_fixed_width(src) || !cudf::is_fixed_width(dst)) {
+      return false;
+    }
     return cudf::is_supported_cast(src, dst);
   }
 
