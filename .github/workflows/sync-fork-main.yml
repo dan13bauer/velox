@@ -1,0 +1,35 @@
+name: Sync fork main from upstream
+
+# Keeps dan13bauer/velox's main fast-forwarded to
+# facebookincubator/velox's main every 15 minutes. main on this fork is
+# expected to never carry unique commits (feature work happens on separate
+# branches), so this only ever fast-forwards. If main has diverged, the
+# merge step fails the run instead of force-pushing over it.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    if: github.repository == 'dan13bauer/velox'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Fetch upstream main
+        run: git fetch https://github.com/facebookincubator/velox.git main:refs/remotes/upstream/main
+
+      - name: Fast-forward main to upstream/main
+        run: |
+          git merge --ff-only upstream/main
+          git push origin main
