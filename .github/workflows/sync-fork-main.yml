@@ -29,6 +29,13 @@ jobs:
       - name: Fetch upstream main
         run: git fetch https://github.com/facebookincubator/velox.git main:refs/remotes/upstream/main
 
+      - name: Verify main has not diverged from upstream
+        run: |
+          if ! git merge-base --is-ancestor HEAD upstream/main; then
+            echo "::error::main has commit(s) that upstream/main does not. Someone pushed directly to main instead of a feature branch. Refusing to sync until this is resolved manually." >&2
+            exit 1
+          fi
+
       - name: Fast-forward main to upstream/main
         run: |
           git merge --ff-only upstream/main
