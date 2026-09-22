@@ -3,8 +3,16 @@ name: Sync fork main from upstream
 # Keeps dan13bauer/velox's main fast-forwarded to
 # facebookincubator/velox's main every 15 minutes. main on this fork is
 # expected to never carry unique commits (feature work happens on separate
-# branches), so this only ever fast-forwards. If main has diverged, the
-# merge step fails the run instead of force-pushing over it.
+# branches), so this only ever fast-forwards. If main has diverged, the verify
+# step fails the run instead of merging or force-pushing over it.
+#
+# The fast-forward goes through the merge-upstream REST endpoint rather than
+# `git push`. GITHUB_TOKEN is a GitHub App installation token, and app tokens
+# may only write under .github/workflows with a Workflows:write permission that
+# the workflow `permissions:` block does not expose, so pushing any upstream
+# range that touches a workflow file is rejected outright. The endpoint moves
+# the ref onto objects that already exist upstream and is not subject to that
+# guard.
 
 on:
   schedule:
@@ -24,7 +32,7 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-          persist-credentials: true
+          persist-credentials: false
 
       - name: Fetch upstream main
         run: git fetch https://github.com/facebookincubator/velox.git main:refs/remotes/upstream/main
@@ -37,6 +45,16 @@ jobs:
           fi
 
       - name: Fast-forward main to upstream/main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git merge --ff-only upstream/main
-          git push origin main
+          merge_type=$(gh api --method POST "repos/${{ github.repository }}/merge-upstream" \
+            -f branch=main --jq '.merge_type')
+          echo "merge_type=${merge_type}"
+          # The verify step rules out divergence, so anything but a
+          # fast-forward, or a no-op when main is already current, means the
+          # ref moved between that check and this call.
+          if [ "${merge_type}" != "fast-forward" ] && [ "${merge_type}" != "none" ]; then
+            echo "::error::Expected a fast-forward but the endpoint reported: ${merge_type}" >&2
+            exit 1
+          fi
