@@ -37,7 +37,7 @@
 #include <future>
 #include <limits>
 #include <memory>
-#include <sstream>
+#include <string_view>
 #include <utility>
 #include <vector>
 #include "velox/common/memory/MemoryPool.h"
@@ -68,6 +68,7 @@ using namespace facebook::velox::core;
 namespace facebook::velox::ucx_exchange {
 
 struct ExchangeTestParams {
+  std::string_view name;
   int numSrcDrivers;
   int numDstDrivers;
   int numPartitions;
@@ -79,68 +80,37 @@ struct ExchangeTestParams {
   bool operator==(const ExchangeTestParams&) const = default;
 };
 
-// Helper function to generate test parameters with different numUpstreamTasks
 static std::vector<ExchangeTestParams> generateTestParams() {
-  std::vector<ExchangeTestParams> params;
-
-  // Base configurations
-  struct BaseConfig {
-    const char* description;
-    int numSrcDrivers;
-    int numDstDrivers;
-    int numPartitions;
-    int numChunks;
-    int numRowsPerChunk;
-    TableType tableType;
+  // Keep the dimensions independent so that increasing one does not multiply
+  // the cost of every other case. The original extrema remain covered, but
+  // only one case pays for each: 100 chunks, 10 drivers, 4 partitions, 10
+  // upstream tasks, a 1M-row narrow payload and a 10M-row wide payload.
+  return {
+      {"ManyChunks", 1, 1, 1, 100, 1'000, 1, TableType::NARROW},
+      {"LargePayload", 1, 1, 1, 1, 1'000'000, 1, TableType::NARROW},
+      {"SourceDrivers", 10, 1, 1, 10, 1'000, 1, TableType::NARROW},
+      {"SourceSinkDrivers", 10, 10, 1, 10, 1'000, 1, TableType::NARROW},
+      {"MultiPartition", 1, 1, 4, 100, 1'000, 1, TableType::NARROW},
+      {"MultiPartitionDrivers", 4, 4, 4, 25, 1'000, 1, TableType::NARROW},
+      {"MultiUpstream", 1, 1, 1, 10, 1'000, 10, TableType::NARROW},
+      {"MultiUpstreamPartitioned", 4, 4, 4, 2, 1'000, 10, TableType::NARROW},
+      {"WideTableSingle", 1, 1, 1, 100, 1'000, 1, TableType::WIDE},
+      {"WideTableMultiLargePayload",
+       1,
+       1,
+       4,
+       2,
+       10'000'000,
+       1,
+       TableType::WIDE},
   };
-
-  std::vector<BaseConfig> baseConfigs = {
-      // Test to check end-2-end connectivity
-      {"Simple", 1, 1, 1, 100, 1000 * 1000, TableType::NARROW},
-      // Test to check parallelism at source
-      {"SourceDrivers", 10, 1, 1, 10, 1000 * 1000, TableType::NARROW},
-      // Test to check parallelism at source and sink
-      {"SourceSinkDrivers", 10, 10, 1, 10, 1000, TableType::NARROW},
-      // Test with multiple partitions (hash partitioning)
-      {"MultiPartition", 1, 1, 4, 100, 1000, TableType::NARROW},
-      // Test with multiple partitions and multiple drivers
-      {"MultiPartitionDrivers", 4, 4, 4, 25, 1000, TableType::NARROW},
-      // Wide table tests with all data types including STRUCT
-      // Single partition wide table (no hash partitioning)
-      {"WideTableSingle", 1, 1, 1, 100, 1000, TableType::WIDE},
-      // Multi-partition wide table (uses hash partitioning)
-      {"WideTableMulti", 1, 1, 4, 10, 1000 * 10000, TableType::WIDE}};
-
-  // Generate variants with different number of upstream tasks.
-  std::vector<int> upstreamTaskCounts = {1, 10};
-
-  for (const auto& base : baseConfigs) {
-    for (int numUpstream : upstreamTaskCounts) {
-      params.push_back(
-          {.numSrcDrivers = base.numSrcDrivers,
-           .numDstDrivers = base.numDstDrivers,
-           .numPartitions = base.numPartitions,
-           .numChunks = base.numChunks,
-           .numRowsPerChunk = base.numRowsPerChunk,
-           .numUpstreamTasks = numUpstream,
-           .tableType = base.tableType});
-    }
-  }
-
-  return params;
 }
 
 // Custom parameter name generator for readable test names
 struct ExchangeTestParamsPrinter {
   std::string operator()(
       const ::testing::TestParamInfo<ExchangeTestParams>& info) const {
-    const auto& p = info.param;
-    std::ostringstream oss;
-    oss << "Src" << p.numSrcDrivers << "_Dst" << p.numDstDrivers << "_Part"
-        << p.numPartitions << "_Chunks" << p.numChunks << "_RowsPer"
-        << p.numRowsPerChunk << "_Upstream" << p.numUpstreamTasks << "_"
-        << (p.tableType == TableType::WIDE ? "Wide" : "Narrow");
-    return oss.str();
+    return std::string(info.param.name);
   }
 };
 
@@ -651,10 +621,6 @@ TEST_P(UcxExchangeTest, realPartitionedOutputTest) {
   // Use unique task prefix to avoid collisions between parametrized tests
   const std::string taskPrefix = getUniqueTaskPrefix();
 
-  // For this test, we use a single upstream task to keep it simple
-  const int numUpstreamTasks = 1;
-  const std::string srcTaskId = taskPrefix + "sourceTask0";
-
   // Get the row type based on the table type
   auto rowType = getRowType(p.tableType);
 
@@ -665,17 +631,6 @@ TEST_P(UcxExchangeTest, realPartitionedOutputTest) {
     partitionKeys = {p.tableType == TableType::WIDE ? "int32_col" : "c0"};
   }
 
-  // Create source task with PartitionedOutput plan node
-  auto srcTask = createPartitionedOutputTask(
-      srcTaskId, pool_, rowType, p.numPartitions, partitionKeys);
-
-  // Tell the queue manager that a new source task exists
-  queueManager_->initializeTask(
-      srcTask,
-      core::PartitionedOutputNode::Kind::kPartitioned,
-      p.numPartitions,
-      p.numSrcDrivers);
-
   // Create table generator for wide tables, nullptr for narrow tables
   std::shared_ptr<BaseTableGenerator> tableGenerator;
   if (p.tableType == TableType::WIDE) {
@@ -684,9 +639,27 @@ TEST_P(UcxExchangeTest, realPartitionedOutputTest) {
     tableGenerator = wideTable;
   }
 
-  // Create SourceDriverMock to drive real UcxPartitionedOutput operators
-  auto sourceDriver = std::make_shared<SourceDriverMock>(
-      srcTask, p.numSrcDrivers, p.numChunks, p.numRowsPerChunk, tableGenerator);
+  std::vector<std::string> srcTaskIds;
+  std::vector<std::shared_ptr<SourceDriverMock>> sourceDrivers;
+  for (int i = 0; i < p.numUpstreamTasks; ++i) {
+    const std::string srcTaskId = taskPrefix + "sourceTask" + std::to_string(i);
+    srcTaskIds.push_back(srcTaskId);
+
+    auto srcTask = createPartitionedOutputTask(
+        srcTaskId, pool_, rowType, p.numPartitions, partitionKeys);
+    queueManager_->initializeTask(
+        srcTask,
+        core::PartitionedOutputNode::Kind::kPartitioned,
+        p.numPartitions,
+        p.numSrcDrivers);
+    sourceDrivers.emplace_back(
+        std::make_shared<SourceDriverMock>(
+            srcTask,
+            p.numSrcDrivers,
+            p.numChunks,
+            p.numRowsPerChunk,
+            tableGenerator));
+  }
 
   // Create one sink task per partition to receive data from each partition
   std::vector<std::shared_ptr<SinkDriverMock>> sinkDrivers;
@@ -700,25 +673,30 @@ TEST_P(UcxExchangeTest, realPartitionedOutputTest) {
     auto sinkDriver =
         std::make_shared<SinkDriverMock>(sinkTask, p.numDstDrivers);
 
-    // Add remote split for this partition
     std::vector<facebook::velox::exec::Split> splits;
-    splits.emplace_back(remoteSplit(srcTaskId, partitionId));
+    for (const auto& srcTaskId : srcTaskIds) {
+      splits.emplace_back(remoteSplit(srcTaskId, partitionId));
+    }
     sinkDriver->addSplits(splits);
 
     sinkDrivers.push_back(sinkDriver);
   }
 
   // Start the drivers
-  VLOG(3) << "Starting source task with real UcxPartitionedOutput";
-  sourceDriver->run();
+  VLOG(3) << "Starting source tasks with real UcxPartitionedOutput";
+  for (auto& sourceDriver : sourceDrivers) {
+    sourceDriver->run();
+  }
 
   VLOG(3) << "Starting " << p.numPartitions << " sink tasks";
   for (auto& sinkDriver : sinkDrivers) {
     sinkDriver->run();
   }
 
-  sourceDriver->joinThreads();
-  VLOG(3) << "Source task done.";
+  for (auto& sourceDriver : sourceDrivers) {
+    sourceDriver->joinThreads();
+  }
+  VLOG(3) << "Source tasks done.";
 
   for (auto& sinkDriver : sinkDrivers) {
     sinkDriver->joinThreads();
@@ -726,7 +704,8 @@ TEST_P(UcxExchangeTest, realPartitionedOutputTest) {
   VLOG(3) << "All sink tasks done.";
 
   // Total rows received across all partitions should equal total rows sent
-  size_t expectedRows = p.numChunks * p.numRowsPerChunk * p.numSrcDrivers;
+  const size_t expectedRows = static_cast<size_t>(p.numChunks) *
+      p.numRowsPerChunk * p.numSrcDrivers * p.numUpstreamTasks;
   size_t totalReceivedRows = 0;
   for (auto& sinkDriver : sinkDrivers) {
     totalReceivedRows += sinkDriver->numRows();
@@ -737,7 +716,9 @@ TEST_P(UcxExchangeTest, realPartitionedOutputTest) {
   GTEST_ASSERT_EQ(expectedRows, totalReceivedRows);
 
   // Cleanup
-  queueManager_->removeTask(srcTaskId);
+  for (const auto& srcTaskId : srcTaskIds) {
+    queueManager_->removeTask(srcTaskId);
+  }
 
   VLOG(3) << "- UcxExchangeTest::realPartitionedOutputTest";
 }
@@ -764,12 +745,6 @@ TEST_P(UcxExchangeTest, realPartitionedOutputDataIntegrityTest) {
 
   // Use unique task prefix to avoid collisions between parametrized tests
   const std::string taskPrefix = getUniqueTaskPrefix();
-
-  // For this test, use a single upstream task and single driver for simplicity
-  // This allows deterministic data verification
-  const int numUpstreamTasks = 1;
-  const int numSrcDrivers = 1;
-  const std::string srcTaskId = taskPrefix + "sourceTask0";
 
   // Get the row type based on the table type
   auto rowType = getRowType(p.tableType);
@@ -829,20 +804,27 @@ TEST_P(UcxExchangeTest, realPartitionedOutputDataIntegrityTest) {
     partitionedDataToVerify[0] = tableGenerator;
   }
 
-  // Create source task with PartitionedOutput plan node
-  auto srcTask = createPartitionedOutputTask(
-      srcTaskId, pool_, rowType, p.numPartitions, partitionKeys);
+  std::vector<std::string> srcTaskIds;
+  std::vector<std::shared_ptr<SourceDriverMock>> sourceDrivers;
+  for (int i = 0; i < p.numUpstreamTasks; ++i) {
+    const std::string srcTaskId = taskPrefix + "sourceTask" + std::to_string(i);
+    srcTaskIds.push_back(srcTaskId);
 
-  // Tell the queue manager that a new source task exists
-  queueManager_->initializeTask(
-      srcTask,
-      core::PartitionedOutputNode::Kind::kPartitioned,
-      p.numPartitions,
-      numSrcDrivers);
-
-  // Create SourceDriverMock with the tableGenerator
-  auto sourceDriver = std::make_shared<SourceDriverMock>(
-      srcTask, numSrcDrivers, p.numChunks, p.numRowsPerChunk, tableGenerator);
+    auto srcTask = createPartitionedOutputTask(
+        srcTaskId, pool_, rowType, p.numPartitions, partitionKeys);
+    queueManager_->initializeTask(
+        srcTask,
+        core::PartitionedOutputNode::Kind::kPartitioned,
+        p.numPartitions,
+        p.numSrcDrivers);
+    sourceDrivers.emplace_back(
+        std::make_shared<SourceDriverMock>(
+            srcTask,
+            p.numSrcDrivers,
+            p.numChunks,
+            p.numRowsPerChunk,
+            tableGenerator));
+  }
 
   // Create one SinkDriverMock per partition, each with its partition's
   // expected data for row-by-row verification (if available)
@@ -863,23 +845,29 @@ TEST_P(UcxExchangeTest, realPartitionedOutputDataIntegrityTest) {
                                : nullptr);
 
     std::vector<facebook::velox::exec::Split> splits;
-    splits.emplace_back(remoteSplit(srcTaskId, partitionId));
+    for (const auto& srcTaskId : srcTaskIds) {
+      splits.emplace_back(remoteSplit(srcTaskId, partitionId));
+    }
     sinkDriver->addSplits(splits);
 
     sinkDrivers.push_back(sinkDriver);
   }
 
   // Start the drivers
-  VLOG(3) << "Starting source task with real UcxPartitionedOutput";
-  sourceDriver->run();
+  VLOG(3) << "Starting source tasks with real UcxPartitionedOutput";
+  for (auto& sourceDriver : sourceDrivers) {
+    sourceDriver->run();
+  }
 
   VLOG(3) << "Starting " << p.numPartitions << " sink tasks";
   for (auto& sinkDriver : sinkDrivers) {
     sinkDriver->run();
   }
 
-  sourceDriver->joinThreads();
-  VLOG(3) << "Source task done.";
+  for (auto& sourceDriver : sourceDrivers) {
+    sourceDriver->joinThreads();
+  }
+  VLOG(3) << "Source tasks done.";
 
   for (auto& sinkDriver : sinkDrivers) {
     sinkDriver->joinThreads();
@@ -887,7 +875,8 @@ TEST_P(UcxExchangeTest, realPartitionedOutputDataIntegrityTest) {
   VLOG(3) << "All sink tasks done.";
 
   // Verify total row count
-  size_t expectedTotalRows = p.numChunks * p.numRowsPerChunk * numSrcDrivers;
+  const size_t expectedTotalRows = static_cast<size_t>(p.numChunks) *
+      p.numRowsPerChunk * p.numSrcDrivers * p.numUpstreamTasks;
   size_t totalReceivedRows = 0;
   for (auto& sinkDriver : sinkDrivers) {
     totalReceivedRows += sinkDriver->numRows();
@@ -914,7 +903,9 @@ TEST_P(UcxExchangeTest, realPartitionedOutputDataIntegrityTest) {
   }
 
   // Cleanup
-  queueManager_->removeTask(srcTaskId);
+  for (const auto& srcTaskId : srcTaskIds) {
+    queueManager_->removeTask(srcTaskId);
+  }
 
   VLOG(3) << "- UcxExchangeTest::realPartitionedOutputDataIntegrityTest";
 }
