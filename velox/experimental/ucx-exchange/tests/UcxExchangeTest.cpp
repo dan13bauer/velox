@@ -2052,6 +2052,51 @@ TEST_P(UcxExchangeTest, terminalMetadataCallbackStaysWithOriginalTask) {
           newTask.get(), TaskState::kAborted, 3'000'000));
 }
 
+TEST_P(UcxExchangeTest, closeBeforeRemoteTaskAddedRetiresOutput) {
+  if (!shouldRunTerminalMetadataTest()) {
+    GTEST_SKIP() << "Runs only once";
+  }
+
+  const auto producerTaskId =
+      getUniqueTaskPrefix() + "closeBeforeRemoteTaskAdded";
+  auto producerTask =
+      createSourceTask(producerTaskId, pool_, UcxTestData::kTestRowType);
+  queueManager_->initializeTask(
+      producerTask,
+      core::PartitionedOutputNode::Kind::kPartitioned,
+      /*numDestinations=*/1,
+      /*numDrivers=*/1);
+  queueManager_->noMoreData(producerTaskId);
+  SCOPE_EXIT {
+    if (producerTask->isRunning()) {
+      producerTask->requestAbort();
+      exec::test::waitForTaskStateChange(
+          producerTask.get(), TaskState::kAborted, 3'000'000);
+    }
+    queueManager_->removeTask(producerTaskId);
+  };
+
+  auto split = remoteSplit(producerTaskId, /*partitionId=*/0);
+  auto remote = std::dynamic_pointer_cast<exec::RemoteConnectorSplit>(
+      split.connectorSplit);
+  ASSERT_NE(remote, nullptr);
+
+  auto sourceClosed = std::make_shared<std::promise<void>>();
+  auto sourceClosedFuture = sourceClosed->get_future();
+  runOnCommunicator([remote, sourceClosed] {
+    auto client = std::make_shared<UcxExchangeClient>(
+        "closed-consumer", /*destination=*/0, /*numberOfConsumers=*/1);
+    client->close();
+    client->addRemoteTaskId(remote->taskId);
+    sourceClosed->set_value();
+  });
+  ASSERT_EQ(
+      sourceClosedFuture.wait_for(std::chrono::seconds(3)),
+      std::future_status::ready);
+
+  EXPECT_TRUE(waitForOutputFinished(producerTaskId));
+}
+
 std::shared_ptr<UcxOutputQueueManager> UcxExchangeTest::queueManager_;
 std::shared_ptr<std::thread> UcxExchangeTest::communicatorThread_;
 std::shared_ptr<Communicator> UcxExchangeTest::communicator_;
