@@ -256,7 +256,8 @@ class UcxExchangeTest : public testing::TestWithParam<ExchangeTestParams> {
 
   std::shared_ptr<TerminalMetadataSession> startTerminalMetadataSend(
       std::string taskId,
-      bool initializeTask) {
+      bool initializeTask,
+      bool removeTaskBeforeServer = false) {
     auto session = std::make_shared<TerminalMetadataSession>();
     session->taskId = std::move(taskId);
     session->task =
@@ -269,8 +270,11 @@ class UcxExchangeTest : public testing::TestWithParam<ExchangeTestParams> {
           /*numDrivers=*/1);
       queueManager_->noMoreData(session->taskId);
     }
+    if (removeTaskBeforeServer) {
+      queueManager_->removeTask(session->taskId);
+    }
 
-    auto submitted = std::make_shared<std::promise<bool>>();
+    auto submitted = std::make_shared<std::promise<void>>();
     auto submittedFuture = submitted->get_future();
     runOnCommunicator([=] {
       session->owner = std::make_shared<TestEndpointOwner>(communicator_);
@@ -287,15 +291,14 @@ class UcxExchangeTest : public testing::TestWithParam<ExchangeTestParams> {
       session->server->process();
       session->server->process();
       session->server->process();
-      submitted->set_value(queueManager_->isFinished(session->taskId));
+      submitted->set_value();
     });
 
     EXPECT_EQ(
         submittedFuture.wait_for(std::chrono::seconds(3)),
         std::future_status::ready);
-    if (submittedFuture.wait_for(std::chrono::seconds(0)) ==
-        std::future_status::ready) {
-      EXPECT_FALSE(submittedFuture.get())
+    if (!removeTaskBeforeServer) {
+      EXPECT_FALSE(queueManager_->isFinished(session->taskId))
           << "An unmatched terminal send must keep its output alive";
     }
     return session;
@@ -2153,6 +2156,63 @@ TEST_P(UcxExchangeTest, terminalMetadataCancellationBeforeTaskInit) {
           session->task.get(), TaskState::kFinished, 3'000'000));
 }
 
+// A consumer handshake can race with removal of the producer task. If task
+// removal wins before the Acceptor constructs UcxExchangeServer, the server has
+// no output queue. It must nevertheless receive destination cancellation: the
+// consumer may have closed while its handshake was in flight, and cancellation
+// is then the signal that allows the late-created server to stop waiting for
+// terminal metadata delivery.
+//
+// Reproduce this ordering by removing the producer task before constructing the
+// server, then send cancellation from the peer endpoint. The TestValue callback
+// observes the actual receive completion, proving that the server posted and
+// matched the cancellation receive even without an output queue.
+TEST_P(UcxExchangeTest, terminalMetadataCancellationAfterTaskRemoval) {
+  if (!shouldRunTerminalMetadataTest()) {
+    GTEST_SKIP() << "Runs only once";
+  }
+#ifdef NDEBUG
+  GTEST_SKIP() << "Requires Debug TestValue support";
+#endif
+  const auto* rendezvousThreshold = std::getenv("UCX_RNDV_THRESH");
+  if (!rendezvousThreshold || std::string_view(rendezvousThreshold) != "0") {
+    GTEST_SKIP() << "Requires UCX_RNDV_THRESH=0";
+  }
+
+  const bool testValuesWereEnabled = common::testutil::TestValue::enabled();
+  common::testutil::TestValue::enable();
+  SCOPE_EXIT {
+    if (!testValuesWereEnabled) {
+      common::testutil::TestValue::disable();
+    }
+  };
+  auto cancellationReceived = std::make_shared<std::promise<void>>();
+  auto cancellationReceivedFuture = cancellationReceived->get_future();
+  auto completionRecorded = std::make_shared<std::atomic_bool>(false);
+  common::testutil::ScopedTestValue cancellationComplete(
+      "facebook::velox::ucx_exchange::UcxExchangeServer::"
+      "destinationCancellationComplete",
+      std::function<void(ucs_status_t*)>(
+          [cancellationReceived, completionRecorded](ucs_status_t* status) {
+            if (*status == UCS_OK && !completionRecorded->exchange(true)) {
+              cancellationReceived->set_value();
+            }
+          }));
+
+  auto session = startTerminalMetadataSend(
+      getUniqueTaskPrefix() + "terminalMetadataRemovedTask",
+      /*initializeTask=*/true,
+      /*removeTaskBeforeServer=*/true);
+  SCOPE_EXIT {
+    cleanUpTerminalMetadataSession(session);
+  };
+
+  sendDestinationCancellation(session);
+  EXPECT_EQ(
+      cancellationReceivedFuture.wait_for(std::chrono::seconds(3)),
+      std::future_status::ready);
+}
+
 TEST_P(UcxExchangeTest, terminalMetadataCallbackStaysWithOriginalTask) {
   if (!shouldRunTerminalMetadataTest()) {
     GTEST_SKIP() << "Runs only once";
@@ -2234,6 +2294,81 @@ TEST_P(UcxExchangeTest, terminalMetadataCloseBeforeRemoteTaskAdded) {
       sourceClosedFuture.wait_for(std::chrono::seconds(3)),
       std::future_status::ready);
 
+  EXPECT_TRUE(waitForOutputFinished(producerTaskId));
+}
+
+// An early-closed consumer completes the handshake before sending cancellation
+// so that a server exists on the producer to receive it. If the tagged
+// handshake response never arrives, the source can otherwise remain
+// indefinitely in WaitingForHandshakeResponse and never send cancellation,
+// retaining both the source and the producer output. This can occur when a
+// producer task or UCX endpoint shuts down after accepting the handshake but
+// before delivering its response.
+//
+// Suppress the response at the Acceptor with TestValue, then add the remote
+// task to an already-closed client. Observing the handshake proves that the
+// producer accepted it; requiring the producer output to finish verifies that
+// consumer close does not depend indefinitely on receiving the response.
+TEST_P(UcxExchangeTest, terminalMetadataCloseWithoutHandshakeResponse) {
+  if (!shouldRunTerminalMetadataTest()) {
+    GTEST_SKIP() << "Runs only once";
+  }
+#ifdef NDEBUG
+  GTEST_SKIP() << "Requires Debug TestValue support";
+#endif
+
+  const bool testValuesWereEnabled = common::testutil::TestValue::enabled();
+  common::testutil::TestValue::enable();
+  SCOPE_EXIT {
+    if (!testValuesWereEnabled) {
+      common::testutil::TestValue::disable();
+    }
+  };
+  auto responseSuppressed = std::make_shared<std::promise<void>>();
+  auto responseSuppressedFuture = responseSuppressed->get_future();
+  auto suppressionRecorded = std::make_shared<std::atomic_bool>(false);
+  common::testutil::ScopedTestValue suppressHandshakeResponse(
+      "facebook::velox::ucx_exchange::Acceptor::sendHandshakeResponse",
+      std::function<void(bool*)>(
+          [responseSuppressed, suppressionRecorded](bool* sendResponse) {
+            *sendResponse = false;
+            if (!suppressionRecorded->exchange(true)) {
+              responseSuppressed->set_value();
+            }
+          }));
+
+  const auto producerTaskId =
+      getUniqueTaskPrefix() + "closeWithoutHandshakeResponse";
+  auto producerTask =
+      createSourceTask(producerTaskId, pool_, UcxTestData::kTestRowType);
+  queueManager_->initializeTask(
+      producerTask,
+      core::PartitionedOutputNode::Kind::kPartitioned,
+      /*numDestinations=*/1,
+      /*numDrivers=*/1);
+  queueManager_->noMoreData(producerTaskId);
+  SCOPE_EXIT {
+    if (producerTask->isRunning()) {
+      producerTask->requestAbort();
+      exec::test::waitForTaskStateChange(
+          producerTask.get(), TaskState::kAborted, 3'000'000);
+    }
+    queueManager_->removeTask(producerTaskId);
+  };
+
+  auto split = remoteSplit(producerTaskId, /*partitionId=*/0);
+  auto remote = std::dynamic_pointer_cast<exec::RemoteConnectorSplit>(
+      split.connectorSplit);
+  ASSERT_NE(remote, nullptr);
+
+  auto client = std::make_shared<UcxExchangeClient>(
+      "closed-consumer", /*destination=*/0, /*numberOfConsumers=*/1);
+  client->close();
+  client->addRemoteTaskId(remote->taskId);
+
+  ASSERT_EQ(
+      responseSuppressedFuture.wait_for(std::chrono::seconds(3)),
+      std::future_status::ready);
   EXPECT_TRUE(waitForOutputFinished(producerTaskId));
 }
 

@@ -511,6 +511,10 @@ void UcxExchangeServer::receiveDestinationCancellation() {
 }
 
 void UcxExchangeServer::destinationCancellationComplete(ucs_status_t status) {
+  common::testutil::TestValue::adjust(
+      "facebook::velox::ucx_exchange::UcxExchangeServer::"
+      "destinationCancellationComplete",
+      &status);
   if (closed_.load(std::memory_order_acquire) || status != UCS_OK) {
     return;
   }
