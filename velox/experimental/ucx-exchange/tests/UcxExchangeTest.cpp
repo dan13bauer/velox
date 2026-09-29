@@ -312,24 +312,30 @@ class UcxExchangeTest : public testing::TestWithParam<ExchangeTestParams> {
       session->metadataBuffer =
           std::make_shared<std::vector<uint8_t>>(kMaxMetaBufSize);
       std::weak_ptr<TerminalMetadataSession> weakSession = session;
-      session->peerRequest = session->endpoint->endpoint_->tagRecv(
-          session->metadataBuffer->data(),
-          session->metadataBuffer->size(),
-          ucxx::Tag{getMetadataTag(
-              fnv1a_32(PartitionKey{session->taskId, 0}.toString()), 0)},
-          ucxx::TagMaskFull,
-          false,
-          [weakSession](ucs_status_t status, std::shared_ptr<void> argument) {
-            if (auto locked = weakSession.lock()) {
-              auto buffer =
-                  std::static_pointer_cast<std::vector<uint8_t>>(argument);
-              locked->receiveResult = status == UCS_OK &&
-                      MetadataMsg::deserializeMetadataMsg(buffer->data()).atEnd
-                  ? 1
-                  : 0;
-            }
-          },
-          session->metadataBuffer);
+      session->peerRequest =
+          session->endpoint->endpoint_
+              ->tagRecvBuilder(
+                  session->metadataBuffer->data(),
+                  session->metadataBuffer->size(),
+                  ucxx::Tag{getMetadataTag(
+                      fnv1a_32(PartitionKey{session->taskId, 0}.toString()),
+                      0)},
+                  ucxx::TagMaskFull)
+              .callbackFunction([weakSession](
+                                    ucs_status_t status,
+                                    std::shared_ptr<void> argument) {
+                if (auto locked = weakSession.lock()) {
+                  auto buffer =
+                      std::static_pointer_cast<std::vector<uint8_t>>(argument);
+                  locked->receiveResult = status == UCS_OK &&
+                          MetadataMsg::deserializeMetadataMsg(buffer->data())
+                              .atEnd
+                      ? 1
+                      : 0;
+                }
+              })
+              .callbackData(session->metadataBuffer)
+              .build();
       receiveReady->set_value();
     });
     EXPECT_EQ(
@@ -343,14 +349,17 @@ class UcxExchangeTest : public testing::TestWithParam<ExchangeTestParams> {
     auto cancellationReadyFuture = cancellationReady->get_future();
     runOnCommunicator([=] {
       auto cancellation = std::make_shared<uint8_t>(0);
-      session->peerRequest = session->endpoint->endpoint_->tagSend(
-          cancellation.get(),
-          sizeof(*cancellation),
-          ucxx::Tag{getDestinationCancellationTag(
-              fnv1a_32(PartitionKey{session->taskId, 0}.toString()))},
-          false,
-          [](ucs_status_t /*status*/, std::shared_ptr<void> /*arg*/) {},
-          cancellation);
+      session->peerRequest =
+          session->endpoint->endpoint_
+              ->tagSendBuilder(
+                  cancellation.get(),
+                  sizeof(*cancellation),
+                  ucxx::Tag{getDestinationCancellationTag(
+                      fnv1a_32(PartitionKey{session->taskId, 0}.toString()))})
+              .callbackFunction(
+                  [](ucs_status_t /*status*/, std::shared_ptr<void> /*arg*/) {})
+              .callbackData(cancellation)
+              .build();
       cancellationReady->set_value();
     });
     EXPECT_EQ(
