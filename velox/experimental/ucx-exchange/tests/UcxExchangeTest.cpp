@@ -35,6 +35,7 @@
 #include "velox/common/base/Exceptions.h"
 #include "velox/common/base/tests/GTestUtils.h"
 #include "velox/common/memory/MemoryPool.h"
+#include "velox/common/testutil/TestValue.h"
 #include "velox/core/QueryConfig.h"
 #include "velox/experimental/cudf/CudfConfig.h"
 #include "velox/experimental/cudf/vector/CudfVector.h"
@@ -449,10 +450,44 @@ TEST(UcxExchangeQueueTest, consumerClosedWakesRemainingDriver) {
   queue->enqueueLocked(makeReceivedTable(kPayloadCost), promises);
   EXPECT_TRUE(promises.empty());
 
-  queue->consumerClosedLocked(promises);
+  queue->consumerClosedLocked(/*consumerId=*/1, promises);
   ASSERT_EQ(promises.size(), 1);
   promises.front().setValue();
   EXPECT_TRUE(future.isReady());
+}
+
+// A driver can close while it waits for data. Its promise must leave with it:
+// otherwise the queue holds more waiting drivers than open ones.
+TEST(UcxExchangeQueueTest, consumerClosedWhileWaiting) {
+  auto queue = makeCreditQueue(2, 0);
+  std::vector<ContinuePromise> promises;
+  bool atEnd{false};
+  ContinuePromise stalePromise = ContinuePromise::makeEmpty();
+  std::shared_ptr<CommElement> waiter;
+  ContinueFuture closingFuture = ContinueFuture::makeEmpty();
+  ContinueFuture openFuture = ContinueFuture::makeEmpty();
+  std::lock_guard<std::mutex> l(queue->mutex());
+  queue->addSourceLocked();
+
+  ASSERT_EQ(
+      queue->dequeueLocked(0, &atEnd, &closingFuture, &stalePromise, &waiter),
+      nullptr);
+  ASSERT_EQ(
+      queue->dequeueLocked(1, &atEnd, &openFuture, &stalePromise, &waiter),
+      nullptr);
+
+  queue->consumerClosedLocked(/*consumerId=*/0, promises);
+  ASSERT_EQ(promises.size(), 1);
+  promises.front().setValue();
+  promises.clear();
+  EXPECT_TRUE(closingFuture.isReady());
+  EXPECT_FALSE(openFuture.isReady());
+
+  // The remaining driver is woken by the next table.
+  queue->enqueueLocked(makeReceivedTable(0), promises);
+  ASSERT_EQ(promises.size(), 1);
+  promises.front().setValue();
+  EXPECT_TRUE(openFuture.isReady());
 }
 
 TEST_P(UcxExchangeTest, basicTest) {
@@ -1106,7 +1141,11 @@ TEST_F(UcxExchangeFocusedTest, sharedClientSurvivesOneExchangeClose) {
   auto sinkTask =
       createExchangeTask(sinkTaskId, rowType, partitionId, exchangeNodeId);
   auto exchangeClient = std::make_shared<UcxExchangeClient>(
-      sinkTask->taskId(), sinkTask->destination(), numSinkDrivers);
+      sinkTask->taskId(),
+      sinkTask->destination(),
+      numSinkDrivers,
+      sinkTask->queryCtx()->queryConfig().maxExchangeBufferSize(),
+      defaultReceiveCreditPolicy());
 
   auto split = remoteSplit(srcTaskId, partitionId);
   auto remoteConnectorSplit =
@@ -1162,6 +1201,111 @@ TEST_F(UcxExchangeFocusedTest, sharedClientSurvivesOneExchangeClose) {
 // Test that verifies intra-node exchange does not livelock when a producing
 // task is removed while the consumer is polling IntraNodeTransferRegistry.
 // Before the fix: test times out (livelock). After the fix: test passes.
+// A source that is refused credit joins the wait list in the same critical
+// section as the refusal. This drives a consumer's dequeue into the gap
+// between the refusal and the source going dormant, which is where #18829 lost
+// the wake-up, and checks that the source still receives every payload.
+DEBUG_ONLY_TEST_F(UcxExchangeFocusedTest, creditReleaseDuringRefusalIsNotLost) {
+  const std::string taskPrefix = getUniqueTaskPrefix();
+  const std::string srcTaskId = taskPrefix + "creditRaceSrc";
+  const std::string sinkTaskId = taskPrefix + "creditRaceSink";
+  const int numPartitions = 1;
+  const int partitionId = 0;
+  const int numSourceDrivers = 1;
+  const int numChunks = 4;
+  const int numRowsPerChunk = 1000;
+
+  auto& config = cudf_velox::CudfConfig::getInstance();
+  const bool origIntraNode = config.intraNodeExchange;
+  config.intraNodeExchange = false;
+  common::testutil::TestValue::enable();
+
+  auto rowType = UcxTestData::kTestRowType;
+  auto srcTask = createSourceTask(srcTaskId, pool_, rowType);
+  queueManager()->initializeTask(
+      srcTask,
+      core::PartitionedOutputNode::Kind::kPartitioned,
+      numPartitions,
+      numSourceDrivers);
+  auto sourceMock = std::make_shared<UcxPartitionedOutputMock>(
+      srcTaskId, numSourceDrivers, numPartitions, numChunks, numRowsPerChunk);
+  sourceMock->run();
+  sourceMock->joinThreads();
+
+  core::PlanNodeId exchangeNodeId;
+  auto sinkTask =
+      createExchangeTask(sinkTaskId, rowType, partitionId, exchangeNodeId);
+  // A limit of one byte admits a payload only when nothing else is held, so
+  // the second payload is refused while the first waits for the consumer.
+  auto exchangeClient = std::make_shared<UcxExchangeClient>(
+      sinkTask->taskId(),
+      sinkTask->destination(),
+      /*numberOfConsumers=*/1,
+      /*maxBufferedBytes=*/1,
+      makeReceiveCreditPolicy(ConfiguredBytesPolicy::kName));
+
+  uint64_t rowsReceived{0};
+  std::atomic<bool> released{false};
+  std::promise<void> releasedPromise;
+  auto releasedFuture = releasedPromise.get_future();
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::ucx_exchange::UcxExchangeSource::requestCreditAndReceive",
+      std::function<void(UcxExchangeSource*)>([&](UcxExchangeSource*) {
+        {
+          std::lock_guard<std::mutex> l(exchangeClient->queue()->mutex());
+          if (exchangeClient->queue()->numWaitersLocked() == 0) {
+            return;
+          }
+        }
+        if (released.exchange(true)) {
+          return;
+        }
+        // The source has been refused but has not gone dormant yet. Free its
+        // credit now, from the consumer side.
+        bool atEnd{false};
+        ContinueFuture future = ContinueFuture::makeEmpty();
+        auto data = exchangeClient->next(0, &atEnd, &future);
+        ASSERT_NE(data, nullptr);
+        rowsReceived += data->numRows;
+        releasedPromise.set_value();
+      }));
+
+  auto split = remoteSplit(srcTaskId, partitionId);
+  auto remoteConnectorSplit =
+      std::dynamic_pointer_cast<exec::RemoteConnectorSplit>(
+          split.connectorSplit);
+  ASSERT_NE(remoteConnectorSplit, nullptr);
+  exchangeClient->addRemoteTaskId(remoteConnectorSplit->taskId);
+  exchangeClient->noMoreRemoteTasks();
+
+  // Only the injected callback fulfils this, so the race was exercised.
+  ASSERT_EQ(
+      releasedFuture.wait_for(std::chrono::seconds(30)),
+      std::future_status::ready);
+
+  while (true) {
+    bool atEnd{false};
+    ContinueFuture future = ContinueFuture::makeEmpty();
+    auto data = exchangeClient->next(0, &atEnd, &future);
+    if (data != nullptr) {
+      rowsReceived += data->numRows;
+      continue;
+    }
+    if (atEnd) {
+      break;
+    }
+    // A lost wake-up leaves the source dormant and this future unfulfilled.
+    ASSERT_TRUE(std::move(future).wait(std::chrono::seconds(30)))
+        << "Exchange stalled: a wake-up was lost";
+  }
+
+  EXPECT_EQ(rowsReceived, static_cast<uint64_t>(numChunks) * numRowsPerChunk);
+
+  exchangeClient->close();
+  queueManager()->removeTask(srcTaskId);
+  config.intraNodeExchange = origIntraNode;
+}
+
 TEST_F(UcxExchangeFocusedTest, intraNodeTaskRemovalLivelock) {
   const std::string taskPrefix = getUniqueTaskPrefix();
   const std::string srcTaskId = taskPrefix + "srcProducerNeverSends";

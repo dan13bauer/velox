@@ -70,6 +70,7 @@ class UcxExchangeSource
     WaitingForHandshakeResponse,
     ReadyToReceive,
     WaitingForMetadata,
+    WaitingForCredit,
     WaitingForData,
     WaitingForIntraNodeData,
     Done,
@@ -107,14 +108,10 @@ class UcxExchangeSource
     registered_.store(true, std::memory_order_release);
   }
 
-  /// @brief Called by UcxExchangeClient::next() on the consumer (driver)
-  /// thread to wake up this source after it went dormant due to backpressure.
-  /// Uses CAS to ensure exactly one wake-up per dormant period.
-  void resumeFromBackpressure();
-
-  // Backpressure thresholds. Public so UcxExchangeClient can use them.
-  static constexpr int32_t kBackpressureHighWaterMark = 32;
-  static constexpr int32_t kBackpressureLowWaterMark = 16;
+  /// Reschedules a source that the exchange queue returned from its credit
+  /// wait list. Call after releasing the queue's mutex, since the
+  /// Communicator takes its own lock. Accepts null.
+  static void rescheduleWaiter(const std::shared_ptr<CommElement>& waiter);
 
   // Returns runtime statistics. ExchangeSource is expected to report
   // background CPU time by including a runtime metric named
@@ -147,6 +144,8 @@ class UcxExchangeSource
     std::unique_ptr<rmm::device_buffer> dataBuf;
     cuda::stream_ref stream{
         cudaStream_t{cudaStreamDefault}}; // The stream used to allocate dataBuf
+    // Cost charged against the receive credit limit.
+    uint64_t receiveCost{0};
   };
 
   /// @brief The constructor is private in order to ensure that exchange sources
@@ -194,6 +193,21 @@ class UcxExchangeSource
   /// @param status indication by transport layer of transfer status
   /// @param arg the serialized form of the metadata
   void onMetadata(ucs_status_t status, std::shared_ptr<void> arg);
+
+  // Asks the exchange queue for credit for 'ptr' and, if admitted, allocates
+  // the receive buffer and posts the data receive. If refused, keeps 'ptr' in
+  // 'pendingCredit_' and waits in WaitingForCredit.
+  void requestCreditAndReceive(std::shared_ptr<DataAndMetadata> ptr);
+
+  // Allocates the receive buffer for 'ptr', whose cost is already reserved,
+  // and posts the data receive.
+  void startDataReceive(std::shared_ptr<DataAndMetadata> ptr);
+
+  // Reserves credit for the next intra-node payload before polling for it.
+  // Its size is unknown until the poll returns, so this reserves the average
+  // payload cost and corrects the reservation in onIntraNodeData(). Returns
+  // false, with this source on the wait list, if the reservation is refused.
+  bool reserveIntraNodeCredit();
 
   /// @brief Called by the transport layer when data is available
   /// @param status indication by transport layer of transfer status
@@ -284,10 +298,14 @@ class UcxExchangeSource
   /// When true, intra-node transfer optimizations bypass UCXX transfers.
   bool isIntraNodeTransfer_{false};
 
-  // Backpressure: when queue exceeds kBackpressureHighWaterMark, the source
-  // goes dormant. The consumer thread wakes it via resumeFromBackpressure()
-  // when the queue drains to kBackpressureLowWaterMark.
-  std::atomic<bool> backpressureActive_{false};
+  // Payload whose metadata has arrived but which waits for receive credit.
+  // Only the Communicator thread touches it.
+  std::shared_ptr<DataAndMetadata> pendingCredit_;
+
+  // Bytes this source has reserved and not yet enqueued or given back: a
+  // posted data receive, or an intra-node payload being polled for. Only the
+  // Communicator thread touches it.
+  uint64_t reservedCost_{0};
 
   // Some metrics/counters:
   UcxExchangeMetrics metrics_;

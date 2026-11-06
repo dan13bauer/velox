@@ -133,10 +133,43 @@ class UcxExchangeQueue {
   /// Returns the head of the wait list, or nullptr.
   std::shared_ptr<CommElement> releaseLocked(uint64_t cost);
 
-  /// Records that one consumer driver has closed. Fills 'promises' with a
-  /// waiting driver if a queued payload no longer has a driver to take it, and
-  /// returns the head of the wait list, since the limit may have changed.
+  /// Puts 'source' at the tail of the wait list without admitting it, for a
+  /// source whose buffer allocation failed and that must wait for memory to be
+  /// freed. Returns false, and leaves the list unchanged, if nothing is
+  /// reserved or queued: no release can then follow, so waiting would hang.
+  bool waitForReleaseLocked(const std::shared_ptr<CommElement>& source);
+
+  /// Removes 'source' from the wait list and gives back 'cost' reserved
+  /// bytes, for a source that stops. Returns the head of the wait list, or
+  /// nullptr.
+  std::shared_ptr<CommElement> cancelLocked(
+      const CommElement* source,
+      uint64_t cost);
+
+  /// Changes a reservation from 'fromCost' to 'toCost' bytes without an
+  /// admission check, for an intra-node source that reserved an estimate
+  /// before its payload's size was known. Returns the head of the wait list,
+  /// or nullptr.
+  std::shared_ptr<CommElement> resizeReservationLocked(
+      uint64_t fromCost,
+      uint64_t toCost);
+
+  /// Returns the average cost of the payloads received so far, or zero.
+  uint64_t averagePayloadCostLocked() const {
+    return receivedTables_ > 0 ? receivedCost_ / receivedTables_ : 0;
+  }
+
+  /// Returns the policy that sets the limit and the cost of a payload.
+  const ReceiveCreditPolicy& policy() const {
+    return *policy_;
+  }
+
+  /// Records that consumer driver 'consumerId' has closed. Drops its waiting
+  /// promise, if any, into 'promises' so that the caller fulfils it. Also adds
+  /// a waiting driver if a queued payload no longer has a driver to take it,
+  /// and returns the head of the wait list, since the limit may have changed.
   std::shared_ptr<CommElement> consumerClosedLocked(
+      int consumerId,
       std::vector<ContinuePromise>& promises);
 
   /// Removes and returns every source on the wait list, for close and error,

@@ -37,8 +37,7 @@ uint64_t UcxExchangeQueue::limitLocked() const {
   return policy_->limitBytes(
       {.configuredBytes = configuredBytes_,
        .numConsumers = static_cast<uint32_t>(numOpenConsumers_),
-       .averagePayloadCost =
-           receivedTables_ > 0 ? receivedCost_ / receivedTables_ : 0});
+       .averagePayloadCost = averagePayloadCostLocked()});
 }
 
 ReceiveAdmission UcxExchangeQueue::tryReserveLocked(
@@ -76,6 +75,35 @@ std::shared_ptr<CommElement> UcxExchangeQueue::releaseLocked(uint64_t cost) {
   return headWaiterLocked();
 }
 
+bool UcxExchangeQueue::waitForReleaseLocked(
+    const std::shared_ptr<CommElement>& source) {
+  VELOX_CHECK_NOT_NULL(source);
+  if (reservedBytes_ == 0 && queuedCost_ == 0) {
+    return false;
+  }
+  creditWaiters_.push_back(source);
+  return true;
+}
+
+std::shared_ptr<CommElement> UcxExchangeQueue::cancelLocked(
+    const CommElement* source,
+    uint64_t cost) {
+  std::erase_if(creditWaiters_, [source](const auto& weakWaiter) {
+    auto waiter = weakWaiter.lock();
+    return waiter == nullptr || waiter.get() == source;
+  });
+  return releaseLocked(cost);
+}
+
+std::shared_ptr<CommElement> UcxExchangeQueue::resizeReservationLocked(
+    uint64_t fromCost,
+    uint64_t toCost) {
+  VELOX_CHECK_GE(
+      reservedBytes_, fromCost, "UCX receive reservation resized twice");
+  reservedBytes_ = reservedBytes_ - fromCost + toCost;
+  return toCost < fromCost ? headWaiterLocked() : nullptr;
+}
+
 std::shared_ptr<CommElement> UcxExchangeQueue::headWaiterLocked() {
   while (!creditWaiters_.empty()) {
     if (auto head = creditWaiters_.front().lock()) {
@@ -100,8 +128,15 @@ UcxExchangeQueue::takeAllWaitersLocked() {
 }
 
 std::shared_ptr<CommElement> UcxExchangeQueue::consumerClosedLocked(
+    int consumerId,
     std::vector<ContinuePromise>& promises) {
   VELOX_CHECK_GT(numOpenConsumers_, 0, "More consumers closed than opened");
+  // A closed driver will never wait again, so its promise must not count
+  // against the drivers still open.
+  if (auto it = promises_.find(consumerId); it != promises_.end()) {
+    promises.push_back(std::move(it->second));
+    promises_.erase(it);
+  }
   --numOpenConsumers_;
   wakeConsumersLocked(promises);
   return headWaiterLocked();

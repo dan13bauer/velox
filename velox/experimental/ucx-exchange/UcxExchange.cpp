@@ -226,6 +226,10 @@ void UcxExchange::close() {
   currentData_.reset();
   if (exchangeClient_) {
     recordExchangeClientStats();
+    // Other consumers may still be reading. Tell the queue that this one will
+    // not come back, so that a payload left for it goes to a waiting consumer
+    // instead.
+    exchangeClient_->consumerClosed(driverId_);
   }
   // The client is shared by all consumers of this pipeline and owned by the
   // Task, which closes it on termination. Only drop this operator's reference.

@@ -23,14 +23,15 @@ namespace facebook::velox::ucx_exchange {
 UcxExchangeClient::UcxExchangeClient(
     std::string taskId,
     int destination,
-    int32_t numberOfConsumers)
+    int32_t numberOfConsumers,
+    uint64_t maxBufferedBytes,
+    std::shared_ptr<const ReceiveCreditPolicy> creditPolicy)
     : taskId_{std::move(taskId)},
-      maxQueuedColumns_(kDefaultMaxQueuedColumns),
       queue_(
           std::make_shared<UcxExchangeQueue>(
               numberOfConsumers,
-              /*configuredBytes=*/0,
-              defaultReceiveCreditPolicy())) {
+              maxBufferedBytes,
+              std::move(creditPolicy))) {
   VELOX_CHECK_GE(
       destination, 0, "Exchange client destination must not be negative");
 }
@@ -91,6 +92,19 @@ void UcxExchangeClient::close() {
   queue_->close();
 }
 
+void UcxExchangeClient::consumerClosed(int consumerId) {
+  std::vector<ContinuePromise> promises;
+  std::shared_ptr<CommElement> waiter;
+  {
+    std::lock_guard<std::mutex> l(queue_->mutex());
+    waiter = queue_->consumerClosedLocked(consumerId, promises);
+  }
+  for (auto& promise : promises) {
+    promise.setValue();
+  }
+  UcxExchangeSource::rescheduleWaiter(waiter);
+}
+
 folly::F14FastMap<std::string, RuntimeMetric> UcxExchangeClient::stats() const {
   // TODO: Implement stats collection.
   folly::F14FastMap<std::string, RuntimeMetric> stats;
@@ -103,7 +117,7 @@ UcxExchangeClient::next(int consumerId, bool* atEnd, ContinueFuture* future) {
           << consumerId;
   PackedTableWithStreamPtr data;
   ContinuePromise stalePromise = ContinuePromise::makeEmpty();
-  std::vector<std::shared_ptr<UcxExchangeSource>> sourcesToResume;
+  std::shared_ptr<CommElement> creditWaiter;
   {
     std::lock_guard<std::mutex> l(queue_->mutex());
     if (closed_) {
@@ -113,36 +127,11 @@ UcxExchangeClient::next(int consumerId, bool* atEnd, ContinueFuture* future) {
 
     // not closed, get packed table from the queue.
     *atEnd = false;
-    std::shared_ptr<CommElement> creditWaiter;
     data = queue_->dequeueLocked(
         consumerId, atEnd, future, &stalePromise, &creditWaiter);
     if (*atEnd) {
       // queue is closed!
       return data;
-    }
-
-    // TODO: Review this primitive form of flow control.
-    // Maybe need to inspect the #bytes rather than the #tables?
-    // Don't request more data when queue size exceeds the configured limit.
-    // NOTE: This check is currently a no-op because the UCX exchange is
-    // push-based — there is no mechanism to "request" or "not request" more
-    // data. The server pushes unconditionally. Real backpressure is
-    // implemented in UcxExchangeSource::process() (ReadyToReceive state).
-    if (data != nullptr && queue_->size() > maxQueuedColumns_) {
-      if (!inFlowControl_) {
-        inFlowControl_ = true;
-        VLOG(1) << "[FLOW-CTRL] @" << taskId_ << " consumer=" << consumerId
-                << " entering flow control"
-                << " queueSize=" << queue_->size()
-                << " maxQueued=" << maxQueuedColumns_;
-      }
-      return data;
-    } else if (inFlowControl_ && data != nullptr) {
-      inFlowControl_ = false;
-      VLOG(1) << "[FLOW-CTRL] @" << taskId_ << " consumer=" << consumerId
-              << " leaving flow control"
-              << " queueSize=" << queue_->size()
-              << " maxQueued=" << maxQueuedColumns_;
     }
 
     // Per-stage progress counters.
@@ -155,22 +144,12 @@ UcxExchangeClient::next(int consumerId, bool* atEnd, ContinueFuture* future) {
                 << " queueBytes=" << queue_->totalBytes();
       }
     }
-
-    // Collect sources that need resuming while holding the lock.
-    // We call resumeFromBackpressure() outside the lock to avoid a
-    // lock-ordering hazard: it acquires WorkQueue::mutex_ via
-    // addToWorkQueue(), and holding queue_->mutex_ here would impose
-    // queue_->mutex_ → WorkQueue::mutex_ ordering.
-    if (data != nullptr &&
-        queue_->size() <= UcxExchangeSource::kBackpressureLowWaterMark) {
-      sourcesToResume.assign(sources_.begin(), sources_.end());
-    }
   }
 
-  // Outside of lock: resume backpressured sources and fulfill stale promise.
-  for (auto& source : sourcesToResume) {
-    source->resumeFromBackpressure();
-  }
+  // Outside of lock: reschedule the source this dequeue freed credit for, and
+  // fulfill the stale promise. Communicator::addToWorkQueue() takes its own
+  // lock, so it must not run under the queue's mutex.
+  UcxExchangeSource::rescheduleWaiter(creditWaiter);
   if (stalePromise.valid()) {
     stalePromise.setValue();
   }

@@ -33,18 +33,21 @@ namespace facebook::velox::ucx_exchange {
 /// client type and reaches the data plane directly.
 class UcxExchangeClient : public exec::ExchangeClient {
  public:
-  /// Flow control limit on the number of elements buffered in the queue.
-  static constexpr int32_t kDefaultMaxQueuedColumns = 32;
-
   /// @param taskId Id of the consuming task, for logging.
   /// @param destination Partition the consuming task reads. Only validated:
   /// each split URL names the partition its source fetches.
   /// @param numberOfConsumers Number of UcxExchange operators sharing this
   /// client.
+  /// @param maxBufferedBytes exchange.max_buffer_size. Bounds, through
+  /// 'creditPolicy', the bytes held for payloads that are being received or
+  /// wait for a consumer. Zero removes the bound.
+  /// @param creditPolicy Computes that bound.
   UcxExchangeClient(
       std::string taskId,
       int destination,
-      int32_t numberOfConsumers);
+      int32_t numberOfConsumers,
+      uint64_t maxBufferedBytes,
+      std::shared_ptr<const ReceiveCreditPolicy> creditPolicy);
 
   ~UcxExchangeClient() override;
 
@@ -58,6 +61,11 @@ class UcxExchangeClient : public exec::ExchangeClient {
   void noMoreRemoteTasks() override;
 
   void close() override;
+
+  /// Records that the UcxExchange operator reading as 'consumerId' has closed.
+  /// A closed operator never takes another payload, so the queue stops
+  /// counting on it to.
+  void consumerClosed(int consumerId);
 
   folly::F14FastMap<std::string, RuntimeMetric> stats() const override;
 
@@ -82,7 +90,6 @@ class UcxExchangeClient : public exec::ExchangeClient {
  private:
   // Handy for ad-hoc logging.
   const std::string taskId_;
-  const int32_t maxQueuedColumns_;
 
   const std::shared_ptr<UcxExchangeQueue> queue_;
 
@@ -91,9 +98,8 @@ class UcxExchangeClient : public exec::ExchangeClient {
   // Guarded by queue_->mutex().
   bool closed_{false};
 
-  // Diagnostic counters for progress and flow control.
+  // Diagnostic counter for progress logging.
   int64_t totalDequeued_{0};
-  bool inFlowControl_{false};
 };
 
 } // namespace facebook::velox::ucx_exchange
