@@ -32,12 +32,16 @@
 #include <memory>
 #include <sstream>
 #include <vector>
+#include "velox/common/base/Exceptions.h"
+#include "velox/common/base/tests/GTestUtils.h"
 #include "velox/common/memory/MemoryPool.h"
 #include "velox/core/QueryConfig.h"
 #include "velox/experimental/cudf/CudfConfig.h"
 #include "velox/experimental/cudf/vector/CudfVector.h"
 #include "velox/experimental/ucx-exchange/Communicator.h"
+#include "velox/experimental/ucx-exchange/ReceiveCreditPolicy.h"
 #include "velox/experimental/ucx-exchange/UcxExchangeProtocol.h"
+#include "velox/experimental/ucx-exchange/UcxExchangeQueue.h"
 #include "velox/experimental/ucx-exchange/UcxOutputQueueManager.h"
 #include "velox/experimental/ucx-exchange/tests/SinkDriverMock.h"
 #include "velox/experimental/ucx-exchange/tests/SourceDriverMock.h"
@@ -152,7 +156,9 @@ INSTANTIATE_TEST_SUITE_P(
 // than the deque, so that the Communicator progress thread can poll the depth
 // lock-free. Covers that the counter stays in step with every mutation.
 TEST(UcxExchangeQueueTest, sizeTracksQueuedTables) {
-  UcxExchangeQueue queue{/*numberOfConsumers=*/1};
+  UcxExchangeQueue queue{/*numberOfConsumers=*/1,
+                         /*configuredBytes=*/0,
+                         defaultReceiveCreditPolicy()};
   std::vector<ContinuePromise> promises;
   {
     std::lock_guard<std::mutex> l(queue.mutex());
@@ -169,7 +175,10 @@ TEST(UcxExchangeQueueTest, sizeTracksQueuedTables) {
     bool atEnd{false};
     ContinueFuture future = ContinueFuture::makeEmpty();
     ContinuePromise stalePromise = ContinuePromise::makeEmpty();
-    EXPECT_NE(queue.dequeueLocked(0, &atEnd, &future, &stalePromise), nullptr);
+    std::shared_ptr<CommElement> waiter;
+    EXPECT_NE(
+        queue.dequeueLocked(0, &atEnd, &future, &stalePromise, &waiter),
+        nullptr);
     EXPECT_FALSE(atEnd);
     EXPECT_EQ(queue.size(), 2);
 
@@ -187,7 +196,9 @@ TEST(UcxExchangeQueueTest, sizeTracksQueuedTables) {
 }
 
 TEST(UcxExchangeQueueTest, closeResetsSize) {
-  UcxExchangeQueue queue{/*numberOfConsumers=*/1};
+  UcxExchangeQueue queue{/*numberOfConsumers=*/1,
+                         /*configuredBytes=*/0,
+                         defaultReceiveCreditPolicy()};
   std::vector<ContinuePromise> promises;
   {
     std::lock_guard<std::mutex> l(queue.mutex());
@@ -201,6 +212,247 @@ TEST(UcxExchangeQueueTest, closeResetsSize) {
   queue.close();
   EXPECT_EQ(queue.size(), 0);
   EXPECT_TRUE(queue.empty());
+}
+
+// Stands in for a UcxExchangeSource on the credit wait list. The queue only
+// stores and returns waiters, so nothing here is ever processed.
+class CreditWaiter : public CommElement {
+ public:
+  CreditWaiter() : CommElement(std::shared_ptr<Communicator>{}) {}
+
+  void process() override {}
+
+  void close() override {}
+};
+
+constexpr uint64_t kPayloadCost{1'000};
+
+PackedTableWithStreamPtr makeReceivedTable(uint64_t receiveCost) {
+  auto table = std::make_unique<PackedTableWithStream>();
+  table->receiveCost = receiveCost;
+  return table;
+}
+
+// The configured-bytes policy makes the limit exactly 'configuredBytes', so
+// the tests can reason about it directly.
+std::unique_ptr<UcxExchangeQueue> makeCreditQueue(
+    int32_t numberOfConsumers,
+    uint64_t configuredBytes) {
+  return std::make_unique<UcxExchangeQueue>(
+      numberOfConsumers,
+      configuredBytes,
+      makeReceiveCreditPolicy(ConfiguredBytesPolicy::kName));
+}
+
+TEST(UcxExchangeQueueTest, creditAdmitsUpToLimit) {
+  auto queue = makeCreditQueue(1, 2 * kPayloadCost);
+  auto source = std::make_shared<CreditWaiter>();
+  std::lock_guard<std::mutex> l(queue->mutex());
+
+  EXPECT_EQ(
+      queue->tryReserveLocked(kPayloadCost, source),
+      ReceiveAdmission::kAdmitted);
+  EXPECT_EQ(
+      queue->tryReserveLocked(kPayloadCost, source),
+      ReceiveAdmission::kAdmitted);
+  EXPECT_EQ(queue->reservedBytesLocked(), 2 * kPayloadCost);
+
+  EXPECT_EQ(queue->tryReserveLocked(1, source), ReceiveAdmission::kWaiting);
+  EXPECT_EQ(queue->numWaitersLocked(), 1);
+  EXPECT_EQ(queue->reservedBytesLocked(), 2 * kPayloadCost);
+}
+
+TEST(UcxExchangeQueueTest, creditAdmitsOversizedPayloadWhenEmpty) {
+  auto queue = makeCreditQueue(1, kPayloadCost);
+  auto source = std::make_shared<CreditWaiter>();
+  std::lock_guard<std::mutex> l(queue->mutex());
+
+  // Larger than the limit, but nothing is held, so it must get through.
+  EXPECT_EQ(
+      queue->tryReserveLocked(10 * kPayloadCost, source),
+      ReceiveAdmission::kAdmitted);
+  EXPECT_EQ(queue->tryReserveLocked(1, source), ReceiveAdmission::kWaiting);
+}
+
+TEST(UcxExchangeQueueTest, creditZeroConfiguredBytesIsUnlimited) {
+  auto queue = makeCreditQueue(1, 0);
+  auto source = std::make_shared<CreditWaiter>();
+  std::lock_guard<std::mutex> l(queue->mutex());
+  for (int i = 0; i < 100; ++i) {
+    EXPECT_EQ(
+        queue->tryReserveLocked(kPayloadCost, source),
+        ReceiveAdmission::kAdmitted);
+  }
+}
+
+TEST(UcxExchangeQueueTest, creditMovesFromReservedToQueuedToReleased) {
+  auto queue = makeCreditQueue(1, kPayloadCost);
+  auto first = std::make_shared<CreditWaiter>();
+  auto second = std::make_shared<CreditWaiter>();
+  std::vector<ContinuePromise> promises;
+  std::lock_guard<std::mutex> l(queue->mutex());
+  queue->addSourceLocked();
+
+  ASSERT_EQ(
+      queue->tryReserveLocked(kPayloadCost, first),
+      ReceiveAdmission::kAdmitted);
+  ASSERT_EQ(
+      queue->tryReserveLocked(kPayloadCost, second),
+      ReceiveAdmission::kWaiting);
+
+  // The enqueue only moves the cost, so the limit is still full and the
+  // waiter is returned only for the case that the average raised the limit.
+  queue->enqueueLocked(makeReceivedTable(kPayloadCost), promises);
+  EXPECT_EQ(queue->reservedBytesLocked(), 0);
+  EXPECT_EQ(queue->queuedCostLocked(), kPayloadCost);
+
+  bool atEnd{false};
+  ContinueFuture future = ContinueFuture::makeEmpty();
+  ContinuePromise stalePromise = ContinuePromise::makeEmpty();
+  std::shared_ptr<CommElement> waiter;
+  ASSERT_NE(
+      queue->dequeueLocked(0, &atEnd, &future, &stalePromise, &waiter),
+      nullptr);
+  EXPECT_EQ(queue->queuedCostLocked(), 0);
+  EXPECT_EQ(waiter, second);
+
+  // The woken source asks again and is admitted, which takes it off the list.
+  EXPECT_EQ(
+      queue->tryReserveLocked(kPayloadCost, second),
+      ReceiveAdmission::kAdmitted);
+  EXPECT_EQ(queue->numWaitersLocked(), 0);
+}
+
+TEST(UcxExchangeQueueTest, creditReleaseReturnsHeadWaiter) {
+  auto queue = makeCreditQueue(1, kPayloadCost);
+  auto holder = std::make_shared<CreditWaiter>();
+  auto waiting = std::make_shared<CreditWaiter>();
+  std::lock_guard<std::mutex> l(queue->mutex());
+
+  ASSERT_EQ(
+      queue->tryReserveLocked(kPayloadCost, holder),
+      ReceiveAdmission::kAdmitted);
+  ASSERT_EQ(
+      queue->tryReserveLocked(kPayloadCost, waiting),
+      ReceiveAdmission::kWaiting);
+
+  // A reservation given back without receiving, for example by a source that
+  // fails or closes, must wake the next waiter.
+  EXPECT_EQ(queue->releaseLocked(kPayloadCost), waiting);
+  EXPECT_EQ(queue->reservedBytesLocked(), 0);
+  VELOX_ASSERT_THROW(
+      queue->releaseLocked(1), "UCX receive reservation released twice");
+}
+
+TEST(UcxExchangeQueueTest, creditWaitersAreFirstInFirstOut) {
+  auto queue = makeCreditQueue(1, 10 * kPayloadCost);
+  auto holder = std::make_shared<CreditWaiter>();
+  auto large = std::make_shared<CreditWaiter>();
+  auto small = std::make_shared<CreditWaiter>();
+  std::lock_guard<std::mutex> l(queue->mutex());
+
+  ASSERT_EQ(
+      queue->tryReserveLocked(9 * kPayloadCost, holder),
+      ReceiveAdmission::kAdmitted);
+  ASSERT_EQ(
+      queue->tryReserveLocked(5 * kPayloadCost, large),
+      ReceiveAdmission::kWaiting);
+
+  // The small payload would fit, but it must not overtake the large one.
+  EXPECT_EQ(
+      queue->tryReserveLocked(kPayloadCost, small), ReceiveAdmission::kWaiting);
+  EXPECT_EQ(queue->numWaitersLocked(), 2);
+
+  // Still too little room: the large payload is refused again and stays at
+  // the head instead of moving behind the small one.
+  EXPECT_EQ(queue->releaseLocked(3 * kPayloadCost), large);
+  EXPECT_EQ(
+      queue->tryReserveLocked(5 * kPayloadCost, large),
+      ReceiveAdmission::kWaiting);
+  EXPECT_EQ(queue->releaseLocked(0), large);
+
+  EXPECT_EQ(queue->releaseLocked(6 * kPayloadCost), large);
+  EXPECT_EQ(
+      queue->tryReserveLocked(5 * kPayloadCost, large),
+      ReceiveAdmission::kAdmitted);
+  EXPECT_EQ(queue->releaseLocked(0), small);
+  EXPECT_EQ(
+      queue->tryReserveLocked(kPayloadCost, small),
+      ReceiveAdmission::kAdmitted);
+  EXPECT_EQ(queue->numWaitersLocked(), 0);
+}
+
+TEST(UcxExchangeQueueTest, creditSkipsDestroyedWaiters) {
+  auto queue = makeCreditQueue(1, kPayloadCost);
+  auto holder = std::make_shared<CreditWaiter>();
+  auto live = std::make_shared<CreditWaiter>();
+  std::lock_guard<std::mutex> l(queue->mutex());
+
+  ASSERT_EQ(
+      queue->tryReserveLocked(kPayloadCost, holder),
+      ReceiveAdmission::kAdmitted);
+  {
+    auto destroyed = std::make_shared<CreditWaiter>();
+    ASSERT_EQ(
+        queue->tryReserveLocked(kPayloadCost, destroyed),
+        ReceiveAdmission::kWaiting);
+  }
+  ASSERT_EQ(
+      queue->tryReserveLocked(kPayloadCost, live), ReceiveAdmission::kWaiting);
+
+  EXPECT_EQ(queue->releaseLocked(kPayloadCost), live);
+}
+
+TEST(UcxExchangeQueueTest, creditTakeAllWaiters) {
+  auto queue = makeCreditQueue(1, kPayloadCost);
+  auto holder = std::make_shared<CreditWaiter>();
+  auto first = std::make_shared<CreditWaiter>();
+  auto second = std::make_shared<CreditWaiter>();
+  std::lock_guard<std::mutex> l(queue->mutex());
+
+  ASSERT_EQ(
+      queue->tryReserveLocked(kPayloadCost, holder),
+      ReceiveAdmission::kAdmitted);
+  ASSERT_EQ(
+      queue->tryReserveLocked(kPayloadCost, first), ReceiveAdmission::kWaiting);
+  ASSERT_EQ(
+      queue->tryReserveLocked(kPayloadCost, second),
+      ReceiveAdmission::kWaiting);
+
+  const std::vector<std::shared_ptr<CommElement>> expected{first, second};
+  EXPECT_EQ(queue->takeAllWaitersLocked(), expected);
+  EXPECT_EQ(queue->numWaitersLocked(), 0);
+}
+
+// A driver that closes never comes back for a table. With two drivers, one
+// parked and one closed, a queued table must wake the parked one.
+TEST(UcxExchangeQueueTest, consumerClosedWakesRemainingDriver) {
+  auto queue = makeCreditQueue(2, 0);
+  auto source = std::make_shared<CreditWaiter>();
+  std::vector<ContinuePromise> promises;
+  bool atEnd{false};
+  ContinueFuture future = ContinueFuture::makeEmpty();
+  ContinuePromise stalePromise = ContinuePromise::makeEmpty();
+  std::shared_ptr<CommElement> waiter;
+  std::lock_guard<std::mutex> l(queue->mutex());
+  queue->addSourceLocked();
+
+  ASSERT_EQ(
+      queue->dequeueLocked(0, &atEnd, &future, &stalePromise, &waiter),
+      nullptr);
+  ASSERT_FALSE(future.isReady());
+
+  ASSERT_EQ(
+      queue->tryReserveLocked(kPayloadCost, source),
+      ReceiveAdmission::kAdmitted);
+  // Driver 1 still counts as running, so it is expected to take this table.
+  queue->enqueueLocked(makeReceivedTable(kPayloadCost), promises);
+  EXPECT_TRUE(promises.empty());
+
+  queue->consumerClosedLocked(promises);
+  ASSERT_EQ(promises.size(), 1);
+  promises.front().setValue();
+  EXPECT_TRUE(future.isReady());
 }
 
 TEST_P(UcxExchangeTest, basicTest) {

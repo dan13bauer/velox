@@ -19,9 +19,12 @@
 #include <atomic>
 #include <cinttypes>
 #include <cuda/stream>
+#include <deque>
 #include <memory>
 #include "velox/common/base/Exceptions.h"
 #include "velox/common/future/VeloxPromise.h"
+#include "velox/experimental/ucx-exchange/CommElement.h"
+#include "velox/experimental/ucx-exchange/ReceiveCreditPolicy.h"
 #include "velox/vector/TypeAliases.h"
 
 namespace facebook::velox::ucx_exchange {
@@ -40,6 +43,10 @@ struct PackedTableWithStream {
   /// rows than a cudf::size_type can index.
   vector_size_t numRows{0};
 
+  /// Bytes this table was charged against the receive credit limit when its
+  /// receive was admitted. Released when a consumer driver dequeues it.
+  uint64_t receiveCost{0};
+
   PackedTableWithStream() = default;
   PackedTableWithStream(
       std::unique_ptr<cudf::packed_table>&& table,
@@ -55,12 +62,35 @@ struct PackedTableWithStream {
 
 using PackedTableWithStreamPtr = std::unique_ptr<PackedTableWithStream>;
 
+/// Result of UcxExchangeQueue::tryReserveLocked().
+enum class ReceiveAdmission {
+  /// The bytes are reserved; the caller may allocate and post the receive.
+  kAdmitted,
+  /// The caller is on the wait list and will be returned by a later release.
+  kWaiting,
+};
+
+/// Holds the payloads a UcxExchangeClient has received until its consumer
+/// drivers take them, and bounds the bytes held for payloads that are being
+/// received or wait in the queue.
+///
+/// A source reserves a payload's cost before it allocates the receive buffer.
+/// If the reservation would exceed the limit, the source joins a first-in,
+/// first-out wait list. Every change that can free credit returns the head of
+/// the list, which the caller reschedules after releasing 'mutex()'. The check
+/// and joining the list happen under the same mutex as every release, so a
+/// release cannot be lost between them.
 class UcxExchangeQueue {
  public:
-  explicit UcxExchangeQueue(int32_t numberOfConsumers)
-      : numberOfConsumers_{numberOfConsumers} {
-    VELOX_CHECK_GE(numberOfConsumers, 1);
-  }
+  /// @param numberOfConsumers Consumer drivers reading from this queue.
+  /// @param configuredBytes exchange.max_buffer_size. Zero disables the
+  /// receive credit limit.
+  /// @param policy Computes the limit from the configured bytes, the open
+  /// consumer drivers and the average payload cost.
+  UcxExchangeQueue(
+      int32_t numberOfConsumers,
+      uint64_t configuredBytes,
+      std::shared_ptr<const ReceiveCreditPolicy> policy);
 
   ~UcxExchangeQueue() {
     clearAllPromises();
@@ -82,9 +112,54 @@ class UcxExchangeQueue {
   /// nullptr and the queue is completed serving data, all left over promises
   /// will be returned in 'promises'. When 'data' is nullptr and the queue is
   /// not completed serving data, no 'promises' will be added and returned.
-  void enqueueLocked(
+  ///
+  /// Moves 'data->receiveCost' from reserved to queued bytes. Returns the head
+  /// of the credit wait list if the enqueue may have raised the limit, else
+  /// nullptr.
+  std::shared_ptr<CommElement> enqueueLocked(
       PackedTableWithStreamPtr&& data,
       std::vector<ContinuePromise>& promises);
+
+  /// Reserves 'cost' bytes for a payload that 'source' is about to receive.
+  /// Admits it if the queue holds nothing, or if no other source is waiting
+  /// ahead of 'source' and the reserved and queued bytes plus 'cost' fit the
+  /// limit. Otherwise puts 'source' on the wait list, at the head if it was
+  /// just taken from there, and at the tail if not.
+  ReceiveAdmission tryReserveLocked(
+      uint64_t cost,
+      const std::shared_ptr<CommElement>& source);
+
+  /// Gives back a reservation of 'cost' bytes whose payload was not enqueued.
+  /// Returns the head of the wait list, or nullptr.
+  std::shared_ptr<CommElement> releaseLocked(uint64_t cost);
+
+  /// Records that one consumer driver has closed. Fills 'promises' with a
+  /// waiting driver if a queued payload no longer has a driver to take it, and
+  /// returns the head of the wait list, since the limit may have changed.
+  std::shared_ptr<CommElement> consumerClosedLocked(
+      std::vector<ContinuePromise>& promises);
+
+  /// Removes and returns every source on the wait list, for close and error,
+  /// so that each can be rescheduled and clean up.
+  std::vector<std::shared_ptr<CommElement>> takeAllWaitersLocked();
+
+  /// Returns the current receive credit limit in bytes.
+  uint64_t limitLocked() const;
+
+  /// Returns the bytes reserved for payloads whose receive is in progress.
+  uint64_t reservedBytesLocked() const {
+    return reservedBytes_;
+  }
+
+  /// Returns the bytes charged for payloads waiting in the queue.
+  uint64_t queuedCostLocked() const {
+    return queuedCost_;
+  }
+
+  /// Returns the number of sources waiting for credit.
+  size_t numWaitersLocked() const {
+    return creditWaiters_.size();
+  }
 
   /// If data is permanently not available, e.g. the source cannot be
   /// contacted, this registers an error message and causes the reading
@@ -102,11 +177,14 @@ class UcxExchangeQueue {
   /// one PackedTableWithStream if data is available.
   /// It's possible that the same consumer is already waiting for data. In this
   /// case, a stalePromise is returned which needs to be cleaned up.
+  /// Releases the dequeued table's receive cost and returns the head of the
+  /// credit wait list in 'waiter', or nullptr.
   PackedTableWithStreamPtr dequeueLocked(
       int consumerId,
       bool* atEnd,
       ContinueFuture* future,
-      ContinuePromise* stalePromise);
+      ContinuePromise* stalePromise,
+      std::shared_ptr<CommElement>* waiter);
 
   /// Returns the number of queued packed tables. Safe to call without
   /// 'mutex_'.
@@ -154,8 +232,18 @@ class UcxExchangeQueue {
   std::vector<ContinuePromise> closeLocked() {
     queue_.clear();
     publishSizeLocked();
+    queuedCost_ = 0;
     return clearAllPromisesLocked();
   }
+
+  // Returns the head of the wait list if any credit is available for it, so
+  // that the caller can reschedule it. The head stays on the list until it
+  // asks again, which keeps a newcomer from overtaking it meanwhile.
+  std::shared_ptr<CommElement> headWaiterLocked();
+
+  // Wakes as many waiting consumer drivers as there are queued tables that no
+  // running driver will take.
+  void wakeConsumersLocked(std::vector<ContinuePromise>& promises);
 
   std::vector<ContinuePromise> checkCompleteLocked() {
     if (noMoreSources_ && numCompleted_ == numSources_) {
@@ -197,7 +285,22 @@ class UcxExchangeQueue {
     }
   }
 
-  const int32_t numberOfConsumers_;
+  // Consumer drivers that have not closed. A driver that has closed never
+  // comes back for a table, so the wake-up count must not include it.
+  int32_t numOpenConsumers_;
+
+  const uint64_t configuredBytes_;
+  const std::shared_ptr<const ReceiveCreditPolicy> policy_;
+  // Bytes reserved for payloads whose receive has been admitted but not yet
+  // enqueued.
+  uint64_t reservedBytes_{0};
+  // Bytes charged for the tables in 'queue_'.
+  uint64_t queuedCost_{0};
+  // Total cost of all payloads received, for the average the policy uses.
+  uint64_t receivedCost_{0};
+  // Sources waiting for credit, oldest first. Weak, so that a waiting source
+  // that is destroyed is skipped rather than kept alive.
+  std::deque<std::weak_ptr<CommElement>> creditWaiters_;
 
   int numCompleted_{0};
   int numSources_{0};

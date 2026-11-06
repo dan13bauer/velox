@@ -26,7 +26,11 @@ UcxExchangeClient::UcxExchangeClient(
     int32_t numberOfConsumers)
     : taskId_{std::move(taskId)},
       maxQueuedColumns_(kDefaultMaxQueuedColumns),
-      queue_(std::make_shared<UcxExchangeQueue>(numberOfConsumers)) {
+      queue_(
+          std::make_shared<UcxExchangeQueue>(
+              numberOfConsumers,
+              /*configuredBytes=*/0,
+              defaultReceiveCreditPolicy())) {
   VELOX_CHECK_GE(
       destination, 0, "Exchange client destination must not be negative");
 }
@@ -109,7 +113,9 @@ UcxExchangeClient::next(int consumerId, bool* atEnd, ContinueFuture* future) {
 
     // not closed, get packed table from the queue.
     *atEnd = false;
-    data = queue_->dequeueLocked(consumerId, atEnd, future, &stalePromise);
+    std::shared_ptr<CommElement> creditWaiter;
+    data = queue_->dequeueLocked(
+        consumerId, atEnd, future, &stalePromise, &creditWaiter);
     if (*atEnd) {
       // queue is closed!
       return data;

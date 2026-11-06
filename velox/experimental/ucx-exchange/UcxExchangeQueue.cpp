@@ -15,7 +15,119 @@
  */
 #include "velox/experimental/ucx-exchange/UcxExchangeQueue.h"
 
+#include <limits>
+
 namespace facebook::velox::ucx_exchange {
+
+UcxExchangeQueue::UcxExchangeQueue(
+    int32_t numberOfConsumers,
+    uint64_t configuredBytes,
+    std::shared_ptr<const ReceiveCreditPolicy> policy)
+    : numOpenConsumers_{numberOfConsumers},
+      configuredBytes_{configuredBytes},
+      policy_{std::move(policy)} {
+  VELOX_CHECK_GE(numberOfConsumers, 1);
+  VELOX_CHECK_NOT_NULL(policy_);
+}
+
+uint64_t UcxExchangeQueue::limitLocked() const {
+  if (configuredBytes_ == 0) {
+    return std::numeric_limits<uint64_t>::max();
+  }
+  return policy_->limitBytes(
+      {.configuredBytes = configuredBytes_,
+       .numConsumers = static_cast<uint32_t>(numOpenConsumers_),
+       .averagePayloadCost =
+           receivedTables_ > 0 ? receivedCost_ / receivedTables_ : 0});
+}
+
+ReceiveAdmission UcxExchangeQueue::tryReserveLocked(
+    uint64_t cost,
+    const std::shared_ptr<CommElement>& source) {
+  VELOX_CHECK_NOT_NULL(source);
+  // Drop waiters that have been destroyed, so that the head is live.
+  while (!creditWaiters_.empty() && creditWaiters_.front().expired()) {
+    creditWaiters_.pop_front();
+  }
+  const bool atHead = !creditWaiters_.empty() &&
+      creditWaiters_.front().lock().get() == source.get();
+  const bool othersAhead = !creditWaiters_.empty() && !atHead;
+
+  const uint64_t held = reservedBytes_ + queuedCost_;
+  const uint64_t limit = limitLocked();
+  const bool fits = held <= limit && cost <= limit - held;
+  if (!othersAhead && (held == 0 || fits)) {
+    if (atHead) {
+      creditWaiters_.pop_front();
+    }
+    reservedBytes_ += cost;
+    return ReceiveAdmission::kAdmitted;
+  }
+  if (!atHead) {
+    creditWaiters_.push_back(source);
+  }
+  return ReceiveAdmission::kWaiting;
+}
+
+std::shared_ptr<CommElement> UcxExchangeQueue::releaseLocked(uint64_t cost) {
+  VELOX_CHECK_GE(
+      reservedBytes_, cost, "UCX receive reservation released twice");
+  reservedBytes_ -= cost;
+  return headWaiterLocked();
+}
+
+std::shared_ptr<CommElement> UcxExchangeQueue::headWaiterLocked() {
+  while (!creditWaiters_.empty()) {
+    if (auto head = creditWaiters_.front().lock()) {
+      return head;
+    }
+    creditWaiters_.pop_front();
+  }
+  return nullptr;
+}
+
+std::vector<std::shared_ptr<CommElement>>
+UcxExchangeQueue::takeAllWaitersLocked() {
+  std::vector<std::shared_ptr<CommElement>> waiters;
+  waiters.reserve(creditWaiters_.size());
+  for (auto& weakWaiter : creditWaiters_) {
+    if (auto waiter = weakWaiter.lock()) {
+      waiters.push_back(std::move(waiter));
+    }
+  }
+  creditWaiters_.clear();
+  return waiters;
+}
+
+std::shared_ptr<CommElement> UcxExchangeQueue::consumerClosedLocked(
+    std::vector<ContinuePromise>& promises) {
+  VELOX_CHECK_GT(numOpenConsumers_, 0, "More consumers closed than opened");
+  --numOpenConsumers_;
+  wakeConsumersLocked(promises);
+  return headWaiterLocked();
+}
+
+void UcxExchangeQueue::wakeConsumersLocked(
+    std::vector<ContinuePromise>& promises) {
+  size_t wokenConsumers = 0;
+  while (!promises_.empty()) {
+    VELOX_CHECK_LE(promises_.size(), numOpenConsumers_);
+    const int32_t unblockedConsumers = numOpenConsumers_ - promises_.size();
+    const int64_t unassignedTables = queue_.size() - unblockedConsumers;
+    if (unassignedTables <= 0) {
+      break;
+    }
+    // Resume one of the waiting drivers.
+    auto it = promises_.begin();
+    promises.push_back(std::move(it->second));
+    promises_.erase(it);
+    ++wokenConsumers;
+  }
+  if (wokenConsumers > 0) {
+    VLOG(2) << "[EX-QUEUE] waking " << wokenConsumers << " consumers"
+            << " queueSize=" << queue_.size();
+  }
+}
 
 void UcxExchangeQueue::noMoreSources() {
   std::vector<ContinuePromise> promises;
@@ -36,7 +148,7 @@ void UcxExchangeQueue::close() {
   clearPromises(promises);
 }
 
-void UcxExchangeQueue::enqueueLocked(
+std::shared_ptr<CommElement> UcxExchangeQueue::enqueueLocked(
     PackedTableWithStreamPtr&& data,
     std::vector<ContinuePromise>& promises) {
   if (data == nullptr) {
@@ -50,8 +162,15 @@ void UcxExchangeQueue::enqueueLocked(
     for (auto& promise : completedPromises) {
       promises.push_back(std::move(promise));
     }
-    return;
+    return nullptr;
   }
+
+  const auto cost = data->receiveCost;
+  VELOX_CHECK_GE(
+      reservedBytes_, cost, "UCX receive enqueued more than it reserved");
+  reservedBytes_ -= cost;
+  queuedCost_ += cost;
+  receivedCost_ += cost;
 
   auto dataSize = data->gpuDataSize();
   totalBytes_ += dataSize;
@@ -78,24 +197,10 @@ void UcxExchangeQueue::enqueueLocked(
     peakSize_ = newSize;
   }
 
-  size_t wokenConsumers = 0;
-  while (!promises_.empty()) {
-    VELOX_CHECK_LE(promises_.size(), numberOfConsumers_);
-    const int32_t unblockedConsumers = numberOfConsumers_ - promises_.size();
-    const int64_t unassignedTables = queue_.size() - unblockedConsumers;
-    if (unassignedTables <= 0) {
-      break;
-    }
-    // Resume one of the waiting drivers.
-    auto it = promises_.begin();
-    promises.push_back(std::move(it->second));
-    promises_.erase(it);
-    ++wokenConsumers;
-  }
-  if (wokenConsumers > 0) {
-    VLOG(2) << "[EX-QUEUE] waking " << wokenConsumers << " consumers"
-            << " queueSize=" << queue_.size();
-  }
+  wakeConsumersLocked(promises);
+  // The new table updates the average payload cost, which can raise the
+  // limit.
+  return headWaiterLocked();
 }
 
 void UcxExchangeQueue::addPromiseLocked(
@@ -112,15 +217,17 @@ void UcxExchangeQueue::addPromiseLocked(
   } else {
     promises_[consumerId] = std::move(promise);
   }
-  VELOX_CHECK_LE(promises_.size(), numberOfConsumers_);
+  VELOX_CHECK_LE(promises_.size(), numOpenConsumers_);
 }
 
 PackedTableWithStreamPtr UcxExchangeQueue::dequeueLocked(
     int consumerId,
     bool* atEnd,
     ContinueFuture* future,
-    ContinuePromise* stalePromise) {
+    ContinuePromise* stalePromise,
+    std::shared_ptr<CommElement>* waiter) {
   VELOX_CHECK_NOT_NULL(future);
+  VELOX_CHECK_NOT_NULL(waiter);
   if (!error_.empty()) {
     *atEnd = true;
     VELOX_FAIL(error_);
@@ -148,6 +255,8 @@ PackedTableWithStreamPtr UcxExchangeQueue::dequeueLocked(
   queue_.pop_front();
   publishSizeLocked();
   totalBytes_ -= data->gpuDataSize();
+  queuedCost_ -= data->receiveCost;
+  *waiter = headWaiterLocked();
 
   return data;
 }
@@ -165,6 +274,7 @@ void UcxExchangeQueue::setError(std::string_view error) {
     // errored queue.
     queue_.clear();
     publishSizeLocked();
+    queuedCost_ = 0;
     promises = clearAllPromisesLocked();
   }
   clearPromises(promises);
