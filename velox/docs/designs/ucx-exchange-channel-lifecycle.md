@@ -220,7 +220,8 @@ although no driver reads them any more.
 The producer half has one more, also found while preparing this note. When a
 server's send fails, the server stops without deleting its destination's
 results or releasing its reader, so the producer task stays `RUNNING` until it
-is removed.
+is removed. #19047 keeps this behavior on purpose for the last metadata
+message and leaves the task for the coordinator to remove.
 
 Each fix so far has handled one of these cases where it was found.
 
@@ -317,10 +318,16 @@ its tasks ends, for example when the coordinator aborts the query.
 The proposal starts from the baseline, the current design with #19701 and
 #19047 landed, with one close message shared by the two. #19047 binds each
 server to the output queue it started with, so a server looks its task ID up
-only once. The two PRs disagree on one point. On removal, #19047 deletes the
-queued output and ends each destination with a clean end marker, while #19701
-sends the producer's error. The tables below follow #19701, because a clean end
-after lost output is the row loss #19701 fixes.
+only once. The two PRs disagree on two points:
+
+- On removal, #19047 deletes the queued output and ends each destination with
+  a clean end marker, while #19701 sends the producer's error. The tables below
+  follow #19701, because a clean end after lost output is the row loss #19701
+  fixes.
+- When a consumer closes before its producer initialized, #19701 drops the
+  placeholder, while #19047 remembers the release so that the producer can
+  finish once it initializes. The tables below follow #19047, because
+  otherwise the producer waits until the coordinator removes it.
 
 The intra-node path is out of scope; its removal is a separate change (see
 Related change). Two of the three races in #19701's drafts go away with it,
@@ -328,34 +335,51 @@ not with this design.
 
 ### Where each half's state lives
 
-Each half's state machine goes into the object that holds its side's
-task-wide state: one entry per destination inside the output queue, and one
-entry per source inside the exchange queue. Every decision that ends a channel
-is taken under that object's lock. On the consumer side, this keeps the lock
-that already decides endings. On the producer side, removal is decided under
-the output queue's lock in one step, instead of the read, release and retry
-described under Root causes. Velox's CPU exchange makes the same choice: one
-lock per task's output buffer, over its destination buffers.
+Each half's state machine goes into the object that holds its side's task-wide
+state: one entry per destination inside the output queue, and one entry per
+source inside the exchange queue. Every decision that ends a channel is taken
+under that object's lock. On the consumer side, this keeps the lock that
+already decides endings. On the producer side, each task's entry stays one
+object for its whole life, so removal is decided under that entry's lock in one
+step, instead of the read, release and retry described under Root causes.
+Velox's CPU exchange makes the same choice: one lock per task's output buffer,
+over its destination buffers.
 
 ### The producer half
 
-`UcxOutputQueueManager` keeps one map, with one entry per task ID. That map
-replaces the map of output queues, the placeholders, the records of removed
-tasks and the tasks whose initialization failed:
+`UcxOutputQueueManager` keeps one map, with one entry per task ID. In the
+baseline, the manager keeps three maps: `queues_.byTaskId` holds the output
+queues and the placeholders, `removedTasks_` the records of removed tasks, and
+`failedInitializations_` the tasks whose `initializeTask()` threw. A fourth,
+`queues_.numArrivingReaders`, counts for each placeholder the readers that
+have not installed themselves yet. The one map replaces all three, and that
+count becomes part of a Pending entry:
 
 | Task state | Entered when | Left when |
 |---|---|---|
-| Pending | a server asks for a task the output queue manager has not seen | `initializeTask()`, `removeTask()`, or its last waiting server closes |
+| Pending | a server asks for a task the output queue manager has not seen | `initializeTask()` or `removeTask()`; or its last waiting server closes while no destination is Released |
 | Active | `initializeTask()` | `removeTask()` |
 | Removed | `removeTask()` | the next removal after the producer's `Task` is destroyed drops it, or the task ID is initialized again |
 
-A Pending or Active entry is the task's output queue. A Removed entry keeps
-only a `std::weak_ptr` to the producer's `Task` and the outcome, and holds no
-chunks. It must not hold a `std::shared_ptr`, or the `Task` would never be
-destroyed. For a task whose `initializeTask()` threw, the output queue manager
-keeps the `Task` from that call. A server whose handshake names a Removed task
-is bound to the Removed entry and sends the last metadata message with the
-stored outcome. `updateOutputBuffers()` for a Removed task does nothing.
+Each entry is the task's output queue, and it stays the same object from
+Pending to Removed. A placeholder becomes the task's output queue at
+`initializeTask()`, as in the baseline. Removal turns the same object into a
+Removed entry: it frees the chunks and keeps only a `std::weak_ptr` to the
+producer's `Task` and the outcome. It must not hold a `std::shared_ptr`, or the
+`Task` would never be destroyed. For a task whose `initializeTask()` threw, the
+output queue manager keeps the `Task` from that call. A server whose handshake
+names a Removed task is bound to that entry and sends the last metadata message
+with the stored outcome. `updateOutputBuffers()` for a Removed task does
+nothing.
+
+Because the entry keeps its identity, every change of the task's state and of
+its destinations' states happens under the entry's one lock. The manager's
+lock only adds and erases entries. It adds an entry on the first contact for a
+task ID, from `initializeTask()` or a server's request. It erases the entry
+when its `Task` is gone, or when the last server of a Pending entry closes. No
+decision is made under the manager's lock. A server that looks up a task
+during its removal therefore finds the same entry and reads its decision; it
+cannot create a new placeholder in between.
 
 A Removed entry lives long enough for the consumers that need it. A producer
 that succeeds cannot be removed before its consumers connect: `Task` reports
@@ -369,12 +393,14 @@ seconds by default (see Open questions for other workers). A consumer that
 connects after the `Task` is gone creates a Pending entry, which ends when that
 consumer is aborted and its server closes.
 
-When the last server of a Pending entry closes, the entry is dropped with
-everything it recorded. If the task initializes later, its destinations wait
-for readers that never come, so the task does not finish until it is removed.
-The coordinator removes it when it ends the query, which it does once the
-consumers have closed. Keeping the entry instead would bring back the
-placeholders that stay for the life of the worker.
+When a consumer of a Pending task closes, through the close message or a
+closed endpoint, the entry keeps that destination as Released, and nothing
+else: no reader and no chunks. When the task initializes, the destination
+starts Released, so the producer can finish without waiting for the
+coordinator. Such an entry lives until the task initializes or is removed. If
+the task never starts on this worker, it stays for the life of the worker;
+it holds only the task ID and the released destinations. A Pending entry whose
+last server closes without having released its destination is dropped.
 
 Inside the output queue, each destination has one state:
 
@@ -385,8 +411,10 @@ Inside the output queue, each destination has one state:
 | Ended(outcome) | the end marker, or the error, is decided and queued |
 | Released | its results are deleted; nothing more is sent |
 
-Removal decides for all destinations of the task at once; the other events
-decide for one destination. The first decision for a destination wins:
+The producer's **outcome table** lists each event that can end a destination
+and its outcome. Removal decides for all destinations of the task at once; the
+other events decide for one destination. The first decision for a destination
+wins:
 
 | Event | Outcome |
 |---|---|
@@ -399,8 +427,8 @@ decide for one destination. The first decision for a destination wins:
 | `deleteResults()` after Ended, as the server does once the send of the last metadata message completed | none; the destination becomes Released |
 | a reader for a destination beyond the final count | clean, at once, as in the current design: no rows are ever produced for such a destination |
 | the close message arrives, or the endpoint closes | none for the consumer, which is gone or sees its endpoint close; the destination becomes Released and its results are deleted |
-| a send fails while the endpoint stays open | error: the output queue fails the producer task with the send's error (`Task::setError()`), so the coordinator aborts the query; the consumer, whose receive may never fail, is aborted with it |
-| the close message for an Unpublished destination of an Active task | none; the destination is Released before it is published, and publishing it later keeps it Released, as in the baseline |
+| a send fails while the endpoint stays open | error: the output queue fails the producer task with the send's error (`Task::setError()`), so the coordinator aborts the query; the consumer, whose receive may never fail, is aborted with it. #19047 leaves the task `RUNNING` instead |
+| the close message, or a closed endpoint, for an Unpublished destination of a Pending or Active task | none; the destination is Released before it is published, and publishing it later keeps it Released, as #19064 and #19047 do |
 
 Releasing the destination when the consumer is gone matches Presto's HTTP
 exchange, whose consumer deletes its results on the producer when it aborts.
@@ -429,7 +457,8 @@ which #19701 adds; UCX reports a closed endpoint only with
 | Ended(outcome) | the source reports an end: clean, the producer's error, or a transport error |
 | Released | the client closes |
 
-The first decision for a source wins:
+The consumer's **outcome table** lists each event that can end a source and
+its outcome. The first decision for a source wins:
 
 | Event | Outcome |
 |---|---|
@@ -438,7 +467,7 @@ The first decision for a source wins:
 | a failed connect, handshake or receive, an undecodable metadata message, or a failed allocation | transport error; the consumer fails |
 | the endpoint closes | transport error, unless the source is already Ended or Released |
 | the client closes | none; the source becomes Released, and its server is told with the close message if the channel has not ended |
-| the client adds a source after it closed | none; the source starts Released |
+| the client adds a source after it closed | none for the consumer; the source still connects and sends the close message, so that its producer can finish, and is then Released |
 
 The consumer has finished when the client called `noMoreRemoteTasks()` and
 every entry is Ended or Released; with no sources, that is at once. It fails
@@ -470,11 +499,12 @@ A consumer close and the end of a channel can race in four ways:
   the design, the entry's state does.
 - **The producer's error and close at the same time.** In the current design,
   the error and the client's closed flag are both set under the queue's lock,
-  and a read checks the closed flag first. A driver that reads before the close
-  sees the error and fails; after the close, reads end without it. The client
-  closes only when its task ends, so an error dropped this way belongs to a
-  task that is ending anyway, for example after a satisfied `LIMIT`. The design
-  keeps this order.
+  and a read checks the closed flag first, so a close hides an error that came
+  before it. In the design, the first decision wins: an error recorded before
+  the close still fails the reads after it, as #19859 requires
+  (`terminalClientErrorIsNotMaskedByClose`). An error that arrives after the
+  close is ignored; it belongs to a task that is ending anyway, for example
+  after a satisfied `LIMIT`.
 - **The close message and the end at the same time.** A source sends the close
   message only if it has not yet seen the end. If the server ended first, the
   producer's Communicator still receives the message and drops it (see the
@@ -539,15 +569,18 @@ Rules for the messages:
 - Reader callbacks and promises run after that lock is released, as the code
   already does. Chunks and tables that an entry frees are freed after the lock
   is released, too.
-- The lock order is the output queue manager's map, then the output queue. No
-  lock of the `Task` is taken while either is held. Removal reads the task's
+- Every decision for a task is made under its entry's lock. The manager's lock
+  only adds and erases entries; when both are needed, as when erasing an
+  entry, the manager's lock comes first. No lock of the `Task` is taken while
+  the entry's lock is held. Removal reads the task's
   state and error message before it takes the output queue's lock; they are
   final by then, because `Task::terminate()` sets the task's final state before
   it calls `removeTask()`. #19047 reads `Task::isRunning()` under the output
   queue's lock; under this rule, that read moves before the lock.
-- `initializeTask()` for a task ID in Removed starts a new entry. Servers that
-  still hold the old entry see it as Removed. Presto does not reuse task IDs,
-  but the tests do.
+- `initializeTask()` for a task ID in Removed replaces the entry in the map
+  with a new one, under the manager's lock. This is the only time an entry is
+  replaced. Servers that still hold the old entry see it as Removed. Presto
+  does not reuse task IDs, but the tests do.
 - Entries treat chunks and tables as opaque handles and never look inside
   them, so the lifecycle does not depend on the backend that produced them.
   That keeps the transport engine-agnostic, as Velox's GPU acceleration guide
@@ -564,30 +597,158 @@ Rules for the messages:
 
 ### What changes where
 
-| Class | Change |
-|---|---|
-| `UcxOutputQueueManager` | one map of task entries replaces four side maps |
-| `UcxOutputQueue` | one state per destination; the outcome table; removal decided under its lock |
-| `UcxExchangeServer` | reads its destination's state; reports the close message, endpoint closure and failed sends; a failed send fails the producer task; deletes results when the last send completes |
-| `UcxExchangeQueue` | one entry per source; the outcome table; frees tables once the consumer failed or closed |
-| `UcxExchangeSource` | reports every end through `end(outcome)`; drops its end-marker-delivered and registered flags; waits, with a timeout, for the handshake response before deciding on the close message |
-| `UcxExchangeClient` | `close()` releases the entries |
-| `Communicator` | keeps one close receive for the worker and hands each close message to its server |
-| `Acceptor`, `EndpointRef` | unchanged |
+- **`UcxOutputQueueManager`** keeps one map of task entries, Pending, Active or
+  Removed, instead of `queues_.byTaskId` (output queues and placeholders),
+  `removedTasks_` and `failedInitializations_`; the count in
+  `queues_.numArrivingReaders` becomes part of a Pending entry. Each entry is
+  the task's output queue and stays the same object from Pending to Removed;
+  removal frees its chunks and keeps only a `std::weak_ptr` to the `Task` and
+  the outcome, and the entry is erased once the `Task` is gone. The manager's
+  lock only adds and erases entries. This fixes side maps that had to agree
+  with each other and could stay for the life of the worker, and the race in
+  which a server created a placeholder between two lookups of one
+  `removeTask()` call: a server that looks up a task during its removal now
+  finds the same entry.
+- **`UcxOutputQueue`** gives each destination a state, Unpublished, Open, Ended
+  or Released, and implements the producer's outcome table as one function of
+  state and event. `removeTask()` decides the outcome for all destinations in
+  one step under the queue's lock, after reading the task's final state and
+  error, and turns the queue into a Removed entry in place. This removes the
+  read, release and retry sequence of removal, where races came from, and turns
+  the producer's endings into one table: a new ending becomes one new row, not
+  fixes in several components.
+- **`UcxExchangeServer`** keeps only its UCX progress, reads its destination's
+  state through the output queue it is bound to, and reports three events: the
+  close message, endpoint closure and a failed send. A send that fails while
+  the endpoint stays open fails the producer task. As with #19047, the
+  destination's results are deleted when the last send completes, not when it
+  is posted. This fixes a failed send that left the producer `RUNNING` until
+  the coordinator removed it.
+- **`UcxExchangeQueue`** keeps one entry per source, Registered, Open, Ended or
+  Released, and implements the consumer's outcome table. Whether the consumer
+  has finished or failed becomes a view of the entries, and once it has failed
+  or closed, the queue frees every table that still arrives, after releasing
+  its lock. This fixes a table that arrives during a close and holds GPU memory
+  until the consumer's `Task` is destroyed, and tables from other sources that
+  pile up after one source failed.
+- **`UcxExchangeSource`** keeps only its UCX progress and reports every end
+  through one call, `end(outcome)`. That call replaces four paths that each
+  decided part of the end with flags of their own; the end-marker-delivered and
+  registered flags go away. A source that closes during the handshake waits,
+  with a timeout, for the response and then sends the close message only if
+  its server accepts it. This removes the place where the close and end races
+  lived, and fixes a close during the handshake that never reached its server
+  with #19701, or reached servers that do not accept it with #19047.
+- **`UcxExchangeClient`** releases its sources' entries when it closes, so the
+  closed state lives in the entries rather than in a flag of its own. A source
+  that the client adds after closing still connects and sends the close
+  message, as #19047 does, so that its producer can finish. The client and the
+  queue then have nothing left to keep consistent.
+- **`Communicator`** keeps one receive for every close message on its worker
+  and hands each message to its server, or drops it if that server has
+  ended. Servers no longer post and cancel close receives of their own. This
+  fixes a close message that arrives after its server ended: in the baseline it
+  stays in UCX for the life of the worker, and with `UCX_RNDV_THRESH=0` the
+  consumer's send never completes.
+- **`Acceptor`** and **`EndpointRef`** are unchanged.
 
-Against the baseline, the design changes five behaviors, each one a fix:
+The components still hold state after this change, but only one kind of it
+decides how a channel ends. On the producer side, that lifecycle state lives
+only in the output queue manager's task entries: the entry's state, and the
+state of each destination inside it. Every event that can end a channel goes
+to the entry:
+
+- Velox's calls, `initializeTask()`, `removeTask()`, `noMoreData()` and
+  `deleteResults()`, reach the entry through the manager.
+- A server is bound to its entry once, at the handshake. It asks the entry for
+  its next step, which is to send a chunk, send the last metadata message with
+  the entry's outcome, or stop. It reports the close message, which the
+  Communicator hands to it, endpoint closure and failed sends back to the
+  entry.
+
+The entry decides under its lock, and the other components act on that
+decision. What they keep is transport state: the server's UCX requests and
+the chunk in flight, and the Communicator's endpoints and work queue. None of
+it records whether a channel is open or how it ended. The consumer side
+follows the same pattern, with the exchange queue's source entries, a source
+that keeps only its receives, and a client whose close goes to those entries.
+
+Against the baseline, the design changes four behaviors, each one a fix:
 
 - a send that fails while its endpoint stays open fails the producer task,
   instead of leaving it `RUNNING` until it is removed;
-- the server deletes its destination's results when the send of the last
-  metadata message completes, not when it is posted, so that a failed last
-  send also fails the producer task instead of letting it finish;
 - tables that arrive after the consumer failed or closed are freed;
 - a close message that arrives after its server ended is received and
   dropped, instead of staying in UCX for the life of the worker;
 - a source that closes during the handshake tells its server, if the server
   accepts the close message. With #19701 alone it never tells the server, and
   #19047 sends the message whether or not the server accepts it.
+
+## How the design relates to existing fixes
+
+The design is judged against the fixes already merged and the open PRs of the
+baseline, in two ways. First, the tests these PRs add are the contract: each
+must pass on the design unchanged, unless the note names it as a deliberate
+change. Second, a few measures show whether the state really moves into one
+place. A prototype that runs these tests belongs in the detailed plan.
+
+### What happens to each PR
+
+| PR | Status | What the design does with it |
+|---|---|---|
+| #17752 | merged | unaffected: it fixed who owns the shared client, not how a channel ends |
+| #17753 | merged | intra-node path; out of scope |
+| #19064 | merged | its readers of unpublished destinations and its tombstones become the Unpublished state and "Released before published" |
+| #19047 | open | keeps its close message, its binding of each server to its queue, its rule that results are deleted when the last send completes, the release it remembers for a consumer that closed before its producer initialized, and its late sources that still tell their server; changes one of its behaviors (below) |
+| #19701 | open | keeps its producer error, its close message and `acceptsClose`; folds `removedTasks_`, `failedInitializations_` and `numArrivingReaders` into the task entries, and replaces its removal in steps with removal in place; changes one of its behaviors (below) |
+| #19859 | open | mostly orthogonal: flow control and memory accounting. Its rule that an error is not hidden by a later close is the design's "first decision wins" |
+| #18590 | open | compatible: entries free chunks, and a chunk's charge goes with it |
+
+### The PRs' tests against the outcome tables
+
+| Outcome-table row | Tests |
+|---|---|
+| producer: clean end, including removal after all output was delivered | #19701 `removeTaskAfterAllOutputKeepsCleanEndMarker`; #19047 `terminalMetadataWaitsForRemoteReceive` (first half) |
+| producer: error on removal, and a late consumer of a Removed task | #19701 `producerFailureMidStreamFailsConsumer`, `oversizedProducerErrorFailsConsumer`, `lateConsumerOfFailedProducerFails`, `getDataAfterTerminateReportsProducerError`, `truncatedProducerErrorKeepsWholeCharacters`; #19064 `terminateUnpublishedReader`; #19047 `terminalMetadataTaskAbortRemovesUcxOutput`, `terminateReleasesRetainedQueueResources` |
+| producer: Removed entry lifetime and task-ID reuse | #19701 `removedTaskRecordLivesAsLongAsItsTask`; #19047 `queueHandleDoesNotFollowReusedTaskId`, `terminalMetadataCallbackStaysWithOriginalTask`; #19859 `removeTaskTombstoneIsIdempotent` |
+| producer: consumer gone, results deleted | #19701 `releasingGoneConsumerDeletesItsResults`, `limitBeforeProducerFinishesStillSucceeds`; #19859 `callbackFiredOnDeleteResults`, `enqueueClearsDeletedDestinationReservation` |
+| producer: Unpublished destinations, readers beyond the final count | #19064 `pendingReadersBeforeInitialization`, `broadcastReaderArrivesBeforeBufferUpdate`, `broadcastLargeDestinationBothArrivalOrders`, `broadcastEndsReaderAfterFinalBuffers`, `invalidReaderDestinations`, `deleteUnpublishedReader`, `deleteUnpublishedDestinationBeforeGetData` |
+| producer: Pending entries | #19701 `releasingLastReaderDropsPlaceholder`, `arrivingReaderKeepsPlaceholder`, `closedExchangeDropsPlaceholder`, `endpointFailureDropsPlaceholder`; #19047 `terminalMetadataCancellationBeforeTaskInit` |
+| producer: a failed send | #19047 `terminalMetadataFailureLeavesOutputPending`, `terminalMetadataWaitsForRemoteReceive` (second half) |
+| producer: no ending event | #19047 `terminalMetadataCloseLeavesOutputPending`: a server closed on its own side leaves the output for `deleteResults()` |
+| producer: chunks freed when their send completes | #19859 `retainedUntilTransferCompletion` |
+| consumer: errors | #19701 `endpointClosedMidStreamFailsConsumer`, `unresolvableProducerHostFailsConsumer`, `undecodableMetadataFailsConsumer`; #19859 `terminalClientErrorIsNotMaskedByClose` |
+| consumer: client closes | #17752 `sharedClientSurvivesOneExchangeClose`; #19047 `terminalMetadataCloseBeforeRemoteTaskAdded` |
+| protocol | #19701 `olderServerGetsNoCloseMessage` and its five `UcxExchangeProtocolTest` cases for the producer error |
+| out of scope | the intra-node tests of #19701 and #19859; #19064 `unpublishedReadersDoNotAmplifyBackpressure`; #19859's tests of flow control, memory accounting and partitioning |
+
+Every lifecycle test of these PRs maps to a row, so the tables miss no ending
+that the tests know. Four tests change their expectations, each on purpose;
+all others pass unchanged:
+
+- **A failed last send.** #19047's `terminalMetadataFailureLeavesOutputPending`,
+  and the second half of `terminalMetadataWaitsForRemoteReceive`, expect the
+  producer task to stay `RUNNING` until the coordinator removes it. The design
+  fails the task instead, so that the query ends without waiting for the
+  coordinator. This is a deliberate change; the tests expect `kFailed`.
+- **A consumer that closes before its producer initialized.** #19701's
+  `closedExchangeDropsPlaceholder` and `endpointFailureDropsPlaceholder` expect
+  the placeholder to be dropped. The design follows #19047's
+  `terminalMetadataCancellationBeforeTaskInit` instead and keeps the release,
+  so that the producer finishes once it initializes. The two #19701 tests then
+  expect a Pending entry that holds the released destination, with no reader
+  and no chunks.
+
+### Measures
+
+Measured on #19701's branch, which carries the baseline's producer side:
+
+| Measure | Baseline | Design |
+|---|---|---|
+| maps in the output queue manager | three keyed by task ID (`queues_.byTaskId`, `removedTasks_`, `failedInitializations_`) and one keyed by queue (`numArrivingReaders`) | one map of task entries |
+| locks one `removeTask()` takes | five, one after another: the registry's freeze, `failedInitializations_`, the output queue twice, `queues_` and `removedTasks_` | one for the decision, the entry's |
+| paths that end a consumer's source | four: delivering the end marker, failing the source, closing it, and handling a closed endpoint | one: `end(outcome)` |
+| flags and counters that decide a consumer's end | eleven in three objects: six in the source, four in the exchange queue, one in the client | one state per source entry, plus whether more sources can come |
 
 ## Comparison with the HTTP exchange
 
@@ -669,7 +830,7 @@ bounded waits (see Open questions).
 | | HTTP exchange | UCX exchange, as proposed |
 |---|---|---|
 | producer failure | `getResults()` waits for the request's maximum wait and returns an empty page that is not marked complete. The consumer keeps asking until the coordinator sees the failure in the producer's task status and aborts the consumer | the server sends the producer's error in the last metadata message, and the consumer fails at once with that error |
-| clean end | a page is marked complete when the producer's buffer delivers its end marker, or when the producer `Task` has finished. The consumer then deletes its results on the producer with `DELETE` | the server sends the last metadata message with `atEnd` set, and deletes the destination's results when that send completes (proposed; the baseline deletes them when the send is posted). The consumer ends after it has received that message |
+| clean end | a page is marked complete when the producer's buffer delivers its end marker, or when the producer `Task` has finished. The consumer then deletes its results on the producer with `DELETE` | the server sends the last metadata message with `atEnd` set, and deletes the destination's results when that send completes, as #19047 does. The consumer ends after it has received that message |
 | producer memory freed | when the consumer acknowledges a sequence number or deletes its results. Until then the producer keeps the pages, so that the consumer can ask for them again after an error | when the send of a chunk completes. The design never retransmits, so nothing is kept for a second attempt |
 | transport errors | every request is retried for up to `exchange.max-error-duration`, 3 minutes by default. Only then does the consumer's queue get the error, and the consumer fails | a failed receive, an undecodable message or a failed allocation fails the source at once, and with it the consumer. A send that fails while its endpoint stays open fails the producer task (proposed) |
 | dead peer | always detected in the end: every request expires, and the retries stop after `exchange.max-error-duration` | detected only with `ucxx.error_handling` on. UCX then reports it on the endpoint, and every server and source on that endpoint ends. With it off, a dead peer is never reported, and its channels wait until the coordinator aborts their tasks |
