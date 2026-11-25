@@ -2,6 +2,7 @@
 
 **Status:** proposal for discussion.
 **Scope:** `velox/experimental/ucx-exchange`.
+**Author:** dnb@zurich.ibm.com
 
 ## Summary
 
