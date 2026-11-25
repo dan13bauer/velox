@@ -16,13 +16,17 @@ A channel spans two workers, so no structure on one worker can hold all of
 it. This note proposes one design: each half of a channel gets one state
 machine, kept in the object that already holds that side's task-wide state
 under one lock. Protocol messages are the only transitions between the
-halves. The server and the source keep only their UCX progress.
+halves. The server and the source keep only their UCX progress. The protocol
+gets a version and changes without backward compatibility; workers of
+different versions never crash, and the query fails with a message instead.
+The design carries the fixes of the open PRs #19047 and #19701, in one
+change.
 
 ## Background
 
 The **current design** is the upstream code at the time of writing. The
-**baseline** is the current design with the open PRs #19701 and #19047
-landed; the proposal starts from the baseline.
+proposal starts from it, and takes the fixes of #19047 and #19701 into the
+design instead of landing them first.
 
 ### UCX in brief
 
@@ -49,7 +53,7 @@ default); some fabrics require it off.
   (`UcxExchangeQueue`) for the tables they receive.
 - When a source connects, the producer's worker creates a **server**
   (`UcxExchangeServer`) for its destination. The server sends each chunk as a
-  metadata message and a data message; the last metadata message ends the
+  metadata message and a data message; a final message ends the
   channel.
 - The **Communicator** is one per worker. It runs the event loop that drives
   UCX for all servers and sources, and owns the endpoints, which all channels
@@ -141,14 +145,20 @@ retries under the manager's lock, and two races came from those gaps.
 - Every way a half can end is listed in one table, with one test each.
 - No state outlives what needs it: a removed task's entry is dropped once its
   `Task` is gone, and a channel's state ends with its last participant.
-- Each half can be changed and landed on its own.
+- Each half can be tested on its own, without UCX.
+- A worker never crashes on a peer of another protocol version; the query
+  fails with a message that names both versions.
 
 ## Requirements
 
 - No change to the Velox core interfaces (`exec::OutputBufferManager`,
   `exec::ExchangeClient`).
-- No change to the data encoding: `cudf::packed_columns` and its metadata stay
-  as they are.
+- No change to the data encoding: `cudf::packed_columns` and its cuDF
+  metadata stay as they are. Only the exchange's own messages change.
+- No backward compatibility. The exchange's messages may change in the most
+  efficient way, provided that workers with an older or newer version fail
+  gracefully: neither crashes, and the query fails with a message that says
+  why. A cluster runs one version.
 - UCX and UCXX remain the transport.
 - The data path stays zero-copy, with no new copies or synchronization per
   chunk.
@@ -159,15 +169,27 @@ its tasks ends.
 
 ## Proposal
 
-### Baseline
+### Starting point
 
-The proposal starts from the baseline, with one close message shared by #19701
-and #19047; #19047 binds each server to its output queue once. Where the two
-PRs disagree, the proposal follows #19701 on removal: a removed producer with
-undelivered output sends its error, never a clean end. It follows #19047 on a
-consumer that closes before its producer initialized: the release is
-remembered, so the producer can finish. The intra-node path is out of scope and
-is to be removed separately.
+The proposal goes from the current design to the design in one change, which
+replaces #19047 and #19701 and takes their fixes:
+
+- from #19047: a producer finishes only after the send of its last message
+  completed; a close message for a consumer that leaves early; each server
+  bound to its output queue once; the release remembered for a consumer that
+  closed before its producer initialized;
+- from #19701: the producer's error in the last message of a channel, kept for
+  consumers that connect after the producer was removed; and a consumer that
+  fails when its endpoint closes or a message cannot be decoded.
+
+Both PRs had to keep the current wire format, so #19701 adds a capability flag
+for the close message and older consumers still cannot see the producer's
+error. The design versions the protocol instead. Where the two PRs disagree,
+it follows #19701 on removal: a removed producer with undelivered output sends
+its error, never a clean end. It follows #19047 on a consumer that closes
+before its producer initialized: the release is remembered, so the producer
+can finish. The intra-node path is out of scope and is to be removed
+separately.
 
 ### Where each half's state lives
 
@@ -182,9 +204,10 @@ choice: one lock per task's output buffer, over its destination buffers.
 ### The producer half
 
 The output queue manager keeps one map of task entries: Pending (a server asked
-before the task initialized), Active, and Removed. It replaces the baseline's
-`queues_.byTaskId` (output queues and placeholders), `removedTasks_` and
-`failedInitializations_`. Each entry is the task's output queue and stays the
+before the task initialized), Active, and Removed. It replaces the current design's
+`queues_` (output queues and placeholders) and `removedTasks_`, whose late
+readers get a clean end, and the `failedInitializations_` that #19701 would
+add. Each entry is the task's output queue and stays the
 same object from Pending to Removed: removal frees its chunks and keeps only a
 `std::weak_ptr` to the `Task` and its outcome, so a Removed entry lives as long
 as the worker keeps the `Task`; a Pending entry is dropped with its last
@@ -199,7 +222,7 @@ The endings fall into four groups. The first decision for a destination wins.
   all drivers finished with nothing left to deliver.
 - **Producer error:** the task is removed with output still undelivered, never
   initialized, or discarded its output after running out of GPU memory. The
-  server sends the error in the last metadata message. A consumer that
+  server sends the error in the end message. A consumer that
   connects to a Removed task gets the same outcome.
 - **Consumer gone:** the close message arrives or the endpoint closes. The
   destination is Released and its results are deleted, so the producer can
@@ -216,12 +239,14 @@ The exchange queue keeps one entry per source: Registered, Open, Ended(outcome)
 or Released. The endings fall into three groups, and again the first decision
 wins:
 
-- **Clean end:** the last metadata message arrives without an error.
-- **Error:** the last metadata message carries the producer's error, or a
-  connect, handshake, receive, decode or allocation fails, or the endpoint
-  closes. The consumer fails.
+- **Clean end:** the end message arrives without an error.
+- **Error:** the end message carries the producer's error; the handshake
+  response has another protocol version; a connect, handshake, receive,
+  decode or allocation fails; or the endpoint closes. The consumer fails.
 - **Closed:** the client closes. The source is Released and tells its server
-  with the close message if the channel has not ended. A source added after the
+  with the close message if the channel has not ended. A source that closes
+  during the handshake first waits, with a timeout, for the response, because
+  the server exists only once the response is sent. A source added after the
   close still connects to tell its server.
 
 The consumer has finished when every source has Ended or been Released, and
@@ -234,29 +259,41 @@ an end that race are settled by the entry's state: only one is counted.
 
 | Message | Producer half | Consumer half |
 |---|---|---|
-| handshake | binds a server to a Pending, Active or Removed task entry | Registered |
-| handshake response, with capability flags | — | Open |
+| handshake, with the protocol version | binds a server to a Pending, Active or Removed task entry, if the versions match | Registered |
+| handshake response, with the protocol version | — | Open if the versions match; otherwise Ended with a version error |
 | metadata and data messages | Open | Open |
-| last metadata message, with `atEnd` and the producer's error, if any | Ended | Ended, with the same outcome |
+| end message, with the outcome and the producer's error, if any | Ended | Ended, with the same outcome |
 | close message | Released | Released |
 | endpoint closed | Released | Ended with an error, unless already Ended or Released |
 
-- **Capability flags.** The handshake response has padding bytes that older
-  builds send as zero; a new message or field gets a flag there, so old and new
-  builds work together. #19701 uses the first flag, `acceptsClose`. The
-  handshake could get flags of its own the same way, since older servers
-  ignore a longer handshake.
-- **One close message.** #19047 and #19701 add the same message. One PR should
-  carry it and the other build on it, sent only if the server set
-  `acceptsClose`. A source that closes during the handshake waits, with a
-  timeout, for the response before deciding.
-- **One close receive per worker.** The Communicator keeps one receive for all
-  close messages on its worker and hands each to its server, or drops it if the
-  server has ended. In the baseline, such a message stays in UCX for the life
-  of the worker.
-- **Why the channel ended.** #19701 adds the producer's error to the last
-  metadata message, without a flag. An older consumer ignores it and can still
-  miss rows; later format changes should use a flag.
+- **One protocol version, no flags.** The handshake and its response each
+  carry a version, which every wire-format change increments. A server
+  accepts only a handshake of its own version, and a source only a response
+  of its own version.
+- **A fixed prefix.** The handshake keeps the current design's fields at their
+  current offsets, with the version after them, sent as the same active
+  message; the response is 16 bytes in every version, with the version beyond
+  the current design's 8 bytes, on the same tag. So any
+  two versions, including the current design, tell each other apart:
+  - a current producer accepts the longer handshake and sends its 8-byte
+    response; the new source finds no version and fails the query;
+  - a new producer finds no version in a current handshake, creates no
+    server, and fails the producer task if it is Active; its 16-byte response
+    makes the current source's 8-byte receive fail with a truncation error;
+  - two different new versions: the response rejects the handshake, and both
+    sides fail with both versions in the message.
+  No worker crashes; a rolling upgrade fails the queries that span versions.
+- **An end message.** A channel ends with an end message, which carries the
+  outcome and the producer's error, instead of a metadata message with
+  `atEnd`. A clean end is a few bytes.
+- **One close message**, naming the channel by task ID and destination, and
+  **one close receive per worker**: the Communicator hands each close message
+  to its server, or drops it if the server has ended. With a receive per
+  server, as in #19047 and #19701, such a message stays in UCX for the life of
+  the worker.
+- **No check that aborts the worker.** A message that cannot be decoded fails
+  its channel, instead of failing a `VELOX_CHECK` inside a UCX callback as
+  the current design does.
 
 ### Rules for both halves
 
@@ -286,22 +323,30 @@ an end that race are settled by the entry's state: only one is counted.
   its lock. This removes the read, release and retry of removal, where races
   came from, and makes a new ending one new table row.
 - **`UcxExchangeServer`** keeps only its UCX progress and reports the close
-  message, endpoint closure and failed sends. A failed send fails the producer
-  task. This fixes producers left `RUNNING` after a failed send.
+  message, endpoint closure and failed sends. It ends a channel with the end
+  message, which carries the producer's error. A failed send fails the
+  producer task. This fixes the clean end of a failed producer, which loses
+  rows, and producers left `RUNNING` after a failed send.
 - **`UcxExchangeQueue`** keeps one entry per source and implements the
   consumer's outcome table; once the consumer has failed or closed, it frees
   every table that still arrives. This fixes tables that hold GPU memory after
   a close or a failure.
-- **`UcxExchangeSource`** keeps only its UCX progress and reports every end
-  through `end(outcome)`, which replaces four paths with flags of their own. A
-  close during the handshake waits for the response, so it reaches servers
-  that accept it. This removes the close and end races and fixes a close that
-  never reached its server.
+- **`UcxExchangeSource`** keeps only its UCX progress, checks the response's
+  version, and reports every end through `end(outcome)`, which replaces the
+  paths that each decide part of the end with flags of their own. A close
+  during the handshake waits for the response, so it reaches its server. This
+  removes the close and end races and fixes a consumer that leaves early
+  without telling its producer.
 - **`UcxExchangeClient`** releases its sources' entries when it closes, so the
   closed state lives in one place.
 - **`Communicator`** keeps one receive for all close messages on its worker
-  and drops those whose server has ended. This fixes close messages that stay
-  in UCX for the life of the worker.
+  and drops those whose server has ended, and tells every server and source on
+  a closed endpoint, as #19701 does.
+- **`Acceptor`** checks the handshake's version and rejects a mismatch with a
+  response and an error, and drops a malformed handshake instead of failing a
+  `VELOX_CHECK`. This fixes a protocol mismatch that aborts the worker.
+- **`UcxExchangeProtocol`** gets the versioned handshake and response, the end
+  message and the close message.
 
 The other components still hold state, but only transport state: UCX
 requests, the chunk in flight, endpoints and the work queue. None of it
@@ -321,13 +366,16 @@ entries.
 
 The tests that #17752, #19064, #19047, #19701 and #19859 add are the design's
 contract; the detailed version maps each of them to a row of the outcome
-tables. Every lifecycle test maps to a row, and four change their expectations
-on purpose. Two are #19047's tests of a failed last send, which expect the
-producer to stay `RUNNING`; the design fails it. Two are #19701's placeholder
-tests: the design keeps the release of a consumer that closed before its
-producer initialized, as #19047 does. In the baseline, one removal takes five
-locks one after another, and a consumer's end is decided by four paths and
-eleven flags; in the design, each is one decision under one lock.
+tables. The design's PR carries the tests of #19047 and #19701. Every
+lifecycle test maps to a row; four change their expectations and one is
+replaced, on purpose. Two are #19047's tests of a failed last send, which
+expect the producer to stay `RUNNING`; the design fails it. Two are #19701's
+placeholder tests: the design keeps the release of a consumer that closed
+before its producer initialized, as #19047 does. #19701's
+`olderServerGetsNoCloseMessage` becomes tests of the three version cases.
+With #19701, one removal takes five locks one after another, and a consumer's
+end is decided by four paths and eleven flags; in the design, each is one
+decision under one lock.
 
 ## Comparison with the HTTP exchange
 
@@ -344,7 +392,7 @@ It differs in three ways:
 - **Acknowledgments.** HTTP retries requests for up to 3 minutes, so the
   producer keeps pages until the consumer acknowledges them. The UCX exchange
   sends over reliable connections without retries. A source accepts chunks
-  only in sequence and ends only after the last metadata message, so a lost
+  only in sequence and ends only after the end message, so a lost
   message fails or stalls the channel but never ends it cleanly. No
   acknowledgment is needed, and chunks are freed as soon as their send
   completes.
@@ -360,4 +408,5 @@ error reports, and the HTTP exchange gives bounded waits.
 - Velox pull requests:
   - landed: #17752, #17753 (as commit d66364f743), #19064;
   - closed without landing: #18921;
-  - open: #18590, #19047, #19701, #19859.
+  - open: #18590, #19859;
+  - open, replaced by the proposal: #19047, #19701.
