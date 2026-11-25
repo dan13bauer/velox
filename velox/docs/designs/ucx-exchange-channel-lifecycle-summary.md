@@ -366,13 +366,16 @@ entries.
 
 The tests that #17752, #19064, #19047, #19701 and #19859 add are the design's
 contract; the detailed version maps each of them to a row of the outcome
-tables. The design's PR carries the tests of #19047 and #19701. Every
-lifecycle test maps to a row; four change their expectations and one is
-replaced, on purpose. Two are #19047's tests of a failed last send, which
-expect the producer to stay `RUNNING`; the design fails it. Two are #19701's
-placeholder tests: the design keeps the release of a consumer that closed
-before its producer initialized, as #19047 does. #19701's
-`olderServerGetsNoCloseMessage` becomes tests of the three version cases.
+tables. All tests are retained and adapted to the new design; most need only
+the new message format. Some change their expected outcome on purpose:
+- tests that expect a clean end after a failed producer, or after its output
+  was deleted, now expect the producer's error;
+- #19047's tests of an endpoint closed during the last send, and of a close
+  without a handshake response, follow the design's rules for these cases;
+- #19701's two placeholder tests keep the release of a consumer that closed
+  before its producer initialized, as #19047 does;
+- #19701's `olderServerGetsNoCloseMessage` becomes tests of the three version
+  cases.
 With #19701, one removal takes five locks one after another, and a consumer's
 end is decided by four paths and eleven flags; in the design, each is one
 decision under one lock.

@@ -730,7 +730,9 @@ runs the new one.
 - **`UcxExchangeProtocol`** gets the versioned handshake and handshake
   response, the end message and the close message, and decoding that returns
   an error instead of failing a `VELOX_CHECK`.
-- **`EndpointRef`** is unchanged.
+- **`EndpointRef`** records why UCX closed its endpoint and passes that
+  reason to every server and source on it, so that the consumer's error names
+  the cause, as #19701 does.
 
 The components still hold state after this change, but only one kind of it
 decides how a channel ends. On the producer side, that lifecycle state lives
@@ -792,30 +794,45 @@ place. A prototype that runs these tests belongs in the detailed plan.
 
 | Outcome-table row | Tests |
 |---|---|
-| producer: clean end, including removal after all output was delivered | #19701 `removeTaskAfterAllOutputKeepsCleanEndMarker`; #19047 `terminalMetadataWaitsForRemoteReceive` (first half) |
+| producer: clean end, including removal after all output was delivered | #19701 `removeTaskAfterAllOutputKeepsCleanEndMarker`; #19047 `terminalMetadataWaitsForRemoteReceive` |
 | producer: error on removal, and a late consumer of a Removed task | #19701 `producerFailureMidStreamFailsConsumer`, `oversizedProducerErrorFailsConsumer`, `lateConsumerOfFailedProducerFails`, `getDataAfterTerminateReportsProducerError`, `truncatedProducerErrorKeepsWholeCharacters`; #19064 `terminateUnpublishedReader`; #19047 `terminalMetadataTaskAbortRemovesUcxOutput`, `terminateReleasesRetainedQueueResources` |
 | producer: Removed entry lifetime and task-ID reuse | #19701 `removedTaskRecordLivesAsLongAsItsTask`; #19047 `queueHandleDoesNotFollowReusedTaskId`, `terminalMetadataCallbackStaysWithOriginalTask`; #19859 `removeTaskTombstoneIsIdempotent` |
-| producer: consumer gone, results deleted | #19701 `releasingGoneConsumerDeletesItsResults`, `limitBeforeProducerFinishesStillSucceeds`; #19859 `callbackFiredOnDeleteResults`, `enqueueClearsDeletedDestinationReservation` |
+| producer: consumer gone, results deleted | #19701 `releasingGoneConsumerDeletesItsResults`, `limitBeforeProducerFinishesStillSucceeds`; #19859 `callbackFiredOnDeleteResults` |
 | producer: Unpublished destinations, readers beyond the final count | #19064 `pendingReadersBeforeInitialization`, `broadcastReaderArrivesBeforeBufferUpdate`, `broadcastLargeDestinationBothArrivalOrders`, `broadcastEndsReaderAfterFinalBuffers`, `invalidReaderDestinations`, `deleteUnpublishedReader`, `deleteUnpublishedDestinationBeforeGetData` |
 | producer: Pending entries | #19701 `releasingLastReaderDropsPlaceholder`, `arrivingReaderKeepsPlaceholder`, `closedExchangeDropsPlaceholder`, `endpointFailureDropsPlaceholder`; #19047 `terminalMetadataCancellationBeforeTaskInit` |
-| producer: a failed send | #19047 `terminalMetadataFailureLeavesOutputPending`, `terminalMetadataWaitsForRemoteReceive` (second half) |
+| producer: the endpoint closes during the last send | #19047 `terminalMetadataFailureLeavesOutputPending` |
+| producer: a send fails while the endpoint stays open | tested on the output queue alone: no test over UCX can make a send fail while its endpoint stays open |
 | producer: no ending event | #19047 `terminalMetadataCloseLeavesOutputPending`: a server closed on its own side leaves the output for `deleteResults()` |
-| producer: chunks freed when their send completes | #19859 `retainedUntilTransferCompletion` |
 | consumer: errors | #19701 `endpointClosedMidStreamFailsConsumer`, `unresolvableProducerHostFailsConsumer`, `undecodableMetadataFailsConsumer`; #19859 `terminalClientErrorIsNotMaskedByClose` |
 | consumer: client closes | #17752 `sharedClientSurvivesOneExchangeClose`; #19047 `terminalMetadataCloseBeforeRemoteTaskAdded` |
 | protocol | #19701's five `UcxExchangeProtocolTest` cases for the producer error, against the end message; #19701 `olderServerGetsNoCloseMessage`, replaced by the version tests below |
-| out of scope | the intra-node tests of #19701 and #19859; #19064 `unpublishedReadersDoNotAmplifyBackpressure`; #19859's tests of flow control, memory accounting and partitioning |
+| out of scope | the intra-node tests of #19701 and #19859; #19064 `unpublishedReadersDoNotAmplifyBackpressure`; #19859's tests of flow control, memory accounting and partitioning, including `enqueueClearsDeletedDestinationReservation` and `retainedUntilTransferCompletion`, which stay with #19859 |
 
 Every lifecycle test of these PRs maps to a row, so the tables miss no ending
-that the tests know. The design's PR carries these tests. Four change their
-expectations and one is replaced, each on purpose; all others pass unchanged,
-apart from the message format they build:
+that the tests know. All tests are retained and adapted to the new design.
+Most need only the new message format or reader interface. The following
+change their expected outcome on purpose:
 
-- **A failed last send.** #19047's `terminalMetadataFailureLeavesOutputPending`,
-  and the second half of `terminalMetadataWaitsForRemoteReceive`, expect the
-  producer task to stay `RUNNING` until the coordinator removes it. The design
-  fails the task instead, so that the query ends without waiting for the
-  coordinator. This is a deliberate change; the tests expect `kFailed`.
+- **A failed producer's end.** Tests that expect a clean end after a producer
+  was removed with output left, or before all its drivers finished, now expect
+  the producer's error. This is the lost-rows fix of #19701, which already
+  changed most of them:
+  - `callbackFiredOnTerminateBeforeInit`, `callbackFiredOnTerminateAfterInit`
+    and `terminateUnpublishedReader`;
+  - `sourceTaskAbortDoesNotCrashOrHang` and `intraNodeTaskRemovalLivelock`;
+  - #19047's `terminateReleasesRetainedQueueResources`.
+- **Output deleted before the end.** #19064's `deleteUnpublishedReader` and
+  `deleteUnpublishedDestinationBeforeGetData` expect a clean end. Like #19701,
+  the design reports that the producer discarded its output.
+- **An endpoint closed during the last send.** #19047's
+  `terminalMetadataFailureLeavesOutputPending` closes the endpoint while the
+  last send is pending, and expects the producer task to stay `RUNNING`. UCX
+  then completes the send as cancelled. For the design, that is a closed
+  endpoint: the destination is Released, so the producer finishes.
+- **A close without a handshake response.** #19047's
+  `terminalMetadataCancellationWithoutHandshakeResponse` expects the close
+  message although the server never answered. In the design, a source that
+  gets no response sends nothing.
 - **A consumer that closes before its producer initialized.** #19701's
   `closedExchangeDropsPlaceholder` and `endpointFailureDropsPlaceholder` expect
   the placeholder to be dropped. The design follows #19047's
