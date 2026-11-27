@@ -469,6 +469,8 @@ wins:
 | the close message arrives, or the endpoint closes | none for the consumer, which is gone or sees its endpoint close; the destination becomes Released and its results are deleted, also after its server closed on its own side |
 | the handshake response cannot be sent | none for the consumer, which fails or gives up on its own; the destination becomes Released |
 | a send fails while the endpoint stays open | error: the output queue fails the producer task with the send's error (`Task::setError()`), so the coordinator aborts the query; the consumer, whose receive may never fail, is aborted with it. #19047 leaves the task `RUNNING` instead |
+| a server's `process()` throws on the Communicator thread | error, as for a failed send: the output queue fails the producer task with the exception's message. The consumer is still there, so the failure is not taken for a consumer that is gone, which would let the task finish without the destination's rows |
+| `removeTask()` after a send failed, or a server failed | error: the failure's message. The failed destination's chunks were freed, so counting the output left would find none |
 | the close message, or a closed endpoint, for an Unpublished destination of a Pending or Active task | none; the destination is Released before it is published, and publishing it later keeps it Released, as #19064 and #19047 do |
 
 Releasing the destination when the consumer is gone matches Presto's HTTP
@@ -852,6 +854,7 @@ place. A prototype that runs these tests belongs in the detailed plan.
 | producer: Pending `UcxOutputQueue` | #19701 `releasingLastReaderDropsPlaceholder`, `arrivingReaderKeepsPlaceholder`, `closedExchangeDropsPlaceholder`, `endpointFailureDropsPlaceholder`; #19047 `terminalMetadataCancellationBeforeTaskInit` |
 | producer: the endpoint closes during the last send | #19047 `terminalMetadataFailureLeavesOutputPending` |
 | producer: a send fails while the endpoint stays open | tested on the output queue alone: no test over UCX can make a send fail while its endpoint stays open |
+| producer: a server's `process()` throws, and the removal after it | `serverFailureFailsProducer`, remote and intra-node, Debug only: a `TestValue` makes the server throw, since no input does; `removalAfterSendFailureReportsProducerError` on the output queue, and `throwingElementFailsAndLoopContinues` on the Communicator, both in Release |
 | producer: no ending event | #19047 `terminalMetadataCloseLeavesOutputPending`: a server closed on its own side leaves the output for `deleteResults()` |
 | consumer: errors | #19701 `endpointClosedMidStreamFailsConsumer`, `unresolvableProducerHostFailsConsumer`, `undecodableMetadataFailsConsumer`; #19859 `terminalClientErrorIsNotMaskedByClose` |
 | consumer: client closes | #17752 `sharedClientSurvivesOneExchangeClose`; #19047 `terminalMetadataCloseBeforeRemoteTaskAdded` |

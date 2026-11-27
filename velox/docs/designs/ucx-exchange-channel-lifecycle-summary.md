@@ -227,11 +227,13 @@ The endings fall into four groups. The first decision for a destination wins.
 - **Consumer gone:** the close message arrives or the endpoint closes. The
   destination is Released and its results are deleted, so the producer can
   finish.
-- **Producer cannot deliver:** a send fails while the endpoint stays open. The
-  producer task fails, so the coordinator aborts the query.
+- **Producer cannot deliver:** a send fails while the endpoint stays open, or
+  the server fails on its own worker. The producer task fails, so the
+  coordinator aborts the query, and a later removal ends the remaining
+  consumers with that error.
 
 The server keeps its UCX progress and reports three events to the output
-queue: the close message, endpoint closure and a failed send.
+queue: the close message, endpoint closure, and a failed send or server.
 
 ### The consumer half
 
