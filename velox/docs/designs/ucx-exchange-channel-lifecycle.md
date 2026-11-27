@@ -461,11 +461,13 @@ wins:
 | the server takes the end marker | clean |
 | `removeTask()`, after every driver called `noMoreData()`, with no chunk left in any destination | clean, even if the task is aborted at that point |
 | `removeTask()` with chunks left in any destination, in a broadcast's chunks kept for later destinations, or in flight on the intra-node path; or before every driver called `noMoreData()` | producer error, with the task's state and error message |
+| `removeTask()` while the server's send of a chunk it already took is pending | the outcome of the rows above: removal does not destroy that chunk, so it does not count as left. The server finishes the send and then sends the end with that outcome; a send that fails sends no end |
 | `removeTask()` without a successful `initializeTask()` | error: the producer never initialized its output |
 | `deleteResults()` while the destination is Open, as the producer does when it runs out of GPU memory | error: the producer discarded its output; the results are deleted, and the server sends the error |
 | `deleteResults()` after Ended, as the server does once the send of the end message completed | none; the destination becomes Released |
 | a reader for a destination beyond the final count | clean, at once, as in the current design: no rows are ever produced for such a destination |
-| the close message arrives, or the endpoint closes | none for the consumer, which is gone or sees its endpoint close; the destination becomes Released and its results are deleted |
+| the close message arrives, or the endpoint closes | none for the consumer, which is gone or sees its endpoint close; the destination becomes Released and its results are deleted, also after its server closed on its own side |
+| the handshake response cannot be sent | none for the consumer, which fails or gives up on its own; the destination becomes Released |
 | a send fails while the endpoint stays open | error: the output queue fails the producer task with the send's error (`Task::setError()`), so the coordinator aborts the query; the consumer, whose receive may never fail, is aborted with it. #19047 leaves the task `RUNNING` instead |
 | the close message, or a closed endpoint, for an Unpublished destination of a Pending or Active task | none; the destination is Released before it is published, and publishing it later keeps it Released, as #19064 and #19047 do |
 
@@ -526,14 +528,25 @@ current design, and handling a closed endpoint, which #19701 adds. They rely
 on a compare-and-swap on the end-marker flag and on the exchange queue keeping
 only its first error.
 
-A source that closes before the handshake response arrives does not know yet
-whether its server exists: the Acceptor creates the server and then sends the
-response. The handshake and the close message also travel by different UCX
-mechanisms, an active message and a tagged send, so UCX does not keep them in
-order. The source therefore waits for the response and then sends the close
-message, unless the response rejected the handshake. The wait ends when the
-endpoint closes or after a timeout; with `ucxx.error_handling` off, only the
-timeout ends it. A source that gets no response sends nothing.
+A source that closes before the handshake response arrives waits for the
+response, up to a timeout, and then sends the close message, unless the
+response rejected the handshake. If the timeout passes first, the source still
+sends the close message, as long as its handshake was sent. The close goes to
+the producer task's output queue, not to the server, so it releases the
+destination whether or not the server exists yet; a server that binds to a
+released destination stops at once. The wait also ends when the endpoint
+closes; with `ucxx.error_handling` off, only the timeout ends it.
+
+Two cases are left to the coordinator, as long as the endpoint stays open:
+- A source whose handshake send has not completed by the timeout sends
+  nothing. If the handshake still arrives, its server waits until the
+  coordinator aborts the producer task.
+- A close that arrives before the producer's worker knows the task is dropped.
+  A later handshake then creates a Pending output queue and a server that
+  wait the same way.
+
+A per-channel timeout, still to be designed, would end both (see Open
+questions).
 
 A consumer close and the end of a channel can race in four ways:
 
@@ -599,8 +612,10 @@ their own:
   the tag's 32-bit hash. It is always understood, since the versions match.
 - **One close receive per worker.** Instead of one close receive per server,
   as in #19047 and #19701, the Communicator keeps one receive that matches
-  every close message on its worker. It hands each message to the server it
-  names, or drops it if that server has already ended. With a receive per
+  every close message on its worker. It hands each message to the output queue
+  of the task it names, which releases the destination even if its server has
+  ended or does not exist yet. It drops a message only if the worker has no
+  output queue for that task. With a receive per
   server, a close message that arrives after its server ended is never
   received: it stays in UCX's queue of unexpected messages for the life of the
   UCX worker, and with `UCX_RNDV_THRESH=0` the consumer's send never completes
@@ -734,8 +749,9 @@ The list below describes the same changes component by component.
   close message, as #19047 does, so that its producer can finish. The client and
   the queue then have nothing left to keep consistent.
 - **`Communicator`** keeps one receive for every close message on its worker
-  and hands each message to its server, or drops it if that server has
-  ended. Servers no longer post and cancel close receives of their own. This
+  and hands each message to the output queue of the task it names, or drops it
+  if the worker has no output queue for that task. Servers no longer post and
+  cancel close receives of their own. This
   fixes a close message that arrives after its server ended: with a receive
   per server, as in #19047 and #19701, it stays in UCX for the life of the
   worker, and with `UCX_RNDV_THRESH=0` the consumer's send never completes. As
@@ -744,8 +760,10 @@ The list below describes the same changes component by component.
 - **`Acceptor`** checks the handshake's version. On a mismatch, it creates no
   server, answers with a response that names its version, and fails the
   producer task if it is Active. A handshake too short to name its channel is
-  logged and dropped instead of failing a `VELOX_CHECK` in the callback. This
-  fixes a protocol mismatch that aborts the worker.
+  logged and dropped instead of failing a `VELOX_CHECK` in the callback. A
+  response that cannot be sent releases the destination, since its source will
+  never send the close message. This fixes a protocol mismatch that aborts the
+  worker.
 - **`UcxExchangeProtocol`** gets the versioned handshake and handshake
   response, the end message and the close message, and decoding that returns
   an error instead of failing a `VELOX_CHECK`.
@@ -1082,14 +1100,17 @@ upgrade, the queries that span the two versions fail with the version error.
 - When a consumer fails with the producer's error from the end
   message, does the query report the producer's own error as its cause, or can
   the consumer's derived error be reported first?
-- Does the UCX exchange need a bound on how long a channel may wait, for
-  example an idle timeout per channel, when `ucxx.error_handling` is off?
-- Is a consumer that connects after its producer's `Task` was destroyed worth
-  handling beyond waiting until the coordinator aborts the query, as Presto's
-  HTTP exchange does?
-- Is failing the query enough on a version mismatch, or should the worker
-  also report the mismatch to the coordinator, for example in its node
-  status, so that a mixed cluster is visible before the first query fails?
+- How should a per-channel timeout be defined when `ucxx.error_handling` is
+  off? Review agreed that it should be based on protocol progress, not on the
+  absence of data while a healthy channel is backpressured. It is follow-up
+  work.
+
+Resolved in review:
+- A consumer that connects after both its producer's `Task` and its Removed
+  output queue are gone relies on the coordinator cancelling the query, as
+  Presto's HTTP exchange does.
+- Failing the query on a version mismatch is enough. Queries that span an
+  upgrade fail and can be retried once every worker runs the same version.
 
 ## References
 

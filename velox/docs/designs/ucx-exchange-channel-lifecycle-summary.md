@@ -245,9 +245,10 @@ wins:
   decode or allocation fails; or the endpoint closes. The consumer fails.
 - **Closed:** the client closes. The source is Released and tells its server
   with the close message if the channel has not ended. A source that closes
-  during the handshake first waits, with a timeout, for the response, because
-  the server exists only once the response is sent. A source added after the
-  close still connects to tell its server.
+  during the handshake waits, with a timeout, for the response. It sends the
+  close even without a response, once its handshake was sent, since the close
+  reaches the producer task's output queue whether or not the server exists. A
+  source added after the close still connects to tell its server.
 
 The consumer has finished when every source has Ended or been Released, and
 fails when any source ends with an error. Once it has failed or closed, the
@@ -288,7 +289,8 @@ an end that race are settled by the entry's state: only one is counted.
   `atEnd`. A clean end is a few bytes.
 - **One close message**, naming the channel by task ID and destination, and
   **one close receive per worker**: the Communicator hands each close message
-  to its server, or drops it if the server has ended. With a receive per
+  to the output queue of the task it names, which releases the destination
+  even if its server has ended or does not exist yet. With a receive per
   server, as in #19047 and #19701, such a message stays in UCX for the life of
   the worker.
 - **No check that aborts the worker.** A message that cannot be decoded fails
@@ -340,11 +342,12 @@ an end that race are settled by the entry's state: only one is counted.
 - **`UcxExchangeClient`** releases its sources' entries when it closes, so the
   closed state lives in one place.
 - **`Communicator`** keeps one receive for all close messages on its worker
-  and drops those whose server has ended, and tells every server and source on
-  a closed endpoint, as #19701 does.
+  and hands each to the task's output queue, and tells every server and source
+  on a closed endpoint, as #19701 does.
 - **`Acceptor`** checks the handshake's version and rejects a mismatch with a
   response and an error, and drops a malformed handshake instead of failing a
-  `VELOX_CHECK`. This fixes a protocol mismatch that aborts the worker.
+  `VELOX_CHECK`. A response that cannot be sent releases the destination.
+  This fixes a protocol mismatch that aborts the worker.
 - **`UcxExchangeProtocol`** gets the versioned handshake and response, the end
   message and the close message.
 
