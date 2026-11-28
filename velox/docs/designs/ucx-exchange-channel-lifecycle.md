@@ -1,4 +1,4 @@
-# UCX Exchange: One State Machine for Each Half of a Channel
+# UCX Exchange: One State Machine on Each Side of a Channel
 
 **Status:** proposal for discussion.
 **Scope:** `velox/experimental/ucx-exchange`.
@@ -14,24 +14,24 @@ in a way that one component handles. Another component, holding its own copy
 of the channel's state, never hears about it. A consumer then waits until its
 query is aborted, finishes with rows missing, or leaves memory behind.
 
-A channel spans two workers. Its producer half runs on the producer's worker,
-and its consumer half on the consumer's worker, so no structure on one worker
+A channel spans two workers. Its producer side runs on the producer's worker,
+and its consumer side on the consumer's worker, so no structure on one worker
 can hold a whole channel. This note proposes one change to the current
 design, which also carries the fixes of the open PRs #19047 and #19701:
 
-- Each half of a channel gets one state machine, with a written table of the
+- Each side of a channel gets one state machine, with a written table of the
   events that end it and the outcome of each.
 - Each state machine lives in the object that holds that side's task-wide
   state under one lock: the producer task's output queue, and the consumer's
   exchange queue.
-- Only protocol messages carry an outcome from one half to the other: the
+- Only protocol messages carry an outcome from one side to the other: the
   handshake, the end message with the producer's outcome, and the close
   message.
 - The protocol gets a version and changes without backward compatibility.
   Workers that speak different versions never crash; the query fails with a
   message that names both versions.
 - The server and the source keep only their UCX progress. They report what
-  happened on the wire to their half's state machine and act on its decisions.
+  happened on the wire to their side's state machine and act on its decisions.
 
 The design adds no singleton, moves no chunks between components, and changes
 no Velox interface.
@@ -40,8 +40,7 @@ no Velox interface.
 
 The **current design** is the upstream code at the time of writing. The
 proposal starts from it. The open PRs #19047 and #19701 fix parts of the same
-problem; the proposal takes their fixes into the design, in one change,
-instead of landing them first.
+problem.
 
 ### UCX in brief
 
@@ -72,73 +71,76 @@ red. The lower part shows the messages that channel carries, in time order.
 - A **worker** is a process that runs Velox tasks, such as a Prestissimo
   worker, the C++ worker of Presto. The **coordinator**, a separate process,
   schedules tasks on the workers and aborts a query's remaining tasks when the
-  query finishes or fails. The worker decides how long a finished `exec::Task`
-  object stays alive. A query's exchange connects a producer task on one worker
-  with consumer tasks on the same or other workers.
+  query finishes or fails. The worker decides how long a finished `Task` stays.
 - A **producer task** is a task whose plan ends in a `PartitionedOutputNode`
-  that selects the UCX transport. Its drivers run `UcxPartitionedOutput`
-  operators, which write **chunks** into the task's **output queue**
-  (`UcxOutputQueue`). A chunk is the unit a server sends as one metadata
-  message and one data message; today it is a cuDF table packed into
-  `cudf::packed_columns`.
-- An output queue holds one **destination** queue (`UcxDestinationQueue`) per
-  consumer that reads from the producer task: one per partition for a
-  partitioned output, one per consumer for a broadcast. One lock in the output
-  queue guards all of its destination queues. A destination is **published**
-  once its queue exists in the output queue: at `initializeTask()`, or, for
-  broadcast, when `updateOutputBuffers()` announces it. A broadcast output
-  queue keeps its chunks for destinations that arrive late. The chunks
+  that selects the UCX transport. Its `UcxPartitionedOutput` operators write
+  **chunks**, today cuDF tables packed into `cudf::packed_columns`, into the
+  task's **output queue** (`UcxOutputQueue`).
+- An output queue holds, under one lock, one **destination** queue
+  (`UcxDestinationQueue`) per consumer that reads from the producer task: one
+  per partition for a partitioned output, one per consumer for a broadcast. A
+  destination is **published** once its queue exists: at `initializeTask()`,
+  or, for broadcast, when `updateOutputBuffers()` announces it. A broadcast
+  output queue keeps its chunks for destinations that arrive late. The chunks
   a destination queue holds are its **results**. The **end marker** is a null
-  chunk that ends a destination's channel; the output queue queues it once
-  every driver of the producer task called `noMoreData()`.
+  chunk that ends a destination's channel, queued once every driver of the
+  producer task called `noMoreData()`.
 - The **output queue manager** (`UcxOutputQueueManager`) is a singleton on each
-  worker. It holds the output queues of the producer tasks running on that
-  worker, keyed by task ID, and implements Velox's `exec::OutputBufferManager`
-  interface for the UCX transport.
+  worker. It holds the output queues of the worker's producer tasks, keyed by
+  task ID, and implements Velox's `exec::OutputBufferManager` interface for the
+  UCX transport.
 - A **consumer task** is a task with an `ExchangeNode` that selects the UCX
   transport. The task owns one `UcxExchangeClient` per such node, shared by the
   node's `UcxExchange` operators. The client owns one **source**
   (`UcxExchangeSource`) per producer task it reads from, and one **exchange
-  queue** (`UcxExchangeQueue`), into which all its sources put the tables they
+  queue** (`UcxExchangeQueue`), into which its sources put the tables they
   receive.
-- A source connects to the worker of its producer task. On that worker, the
-  `Acceptor` creates a **server** (`UcxExchangeServer`) when the source's
-  handshake arrives. A server serves one destination of one producer task: it
-  waits for that destination's next chunk, which makes it the destination's
-  **reader**, and sends the chunk to its source.
-- A **placeholder** is an output queue that the output queue manager on the
-  producer's worker creates when a server asks it for a task that has not
-  called `initializeTask()` yet. The server's request waits in the
-  placeholder, and when the task calls `initializeTask()`, the placeholder
-  becomes the task's output queue.
-- The **Communicator** is a singleton on each worker that serves both its
-  producer and its consumer tasks. It owns the worker's UCX worker, a work
-  queue, and the endpoints to and from the worker's peers. All channels
-  between two workers share these endpoints. The worker process runs the
-  Communicator's event loop, `Communicator::run()`, on one thread of its own.
+- On the producer's worker, the `Acceptor` creates a **server**
+  (`UcxExchangeServer`) when a source's handshake arrives. A server serves one
+  destination: it waits for its next chunk, which makes it the destination's
+  **reader**, and sends the chunk to its source as one metadata message and
+  one data message.
+- A **placeholder** is an output queue that the output queue manager creates
+  when a server asks for a task that has not called `initializeTask()` yet.
+- The **Communicator** is a singleton on each worker. It owns the worker's UCX
+  worker, a work queue, and the endpoints to and from its peers, which all
+  channels between two workers share. It runs its event loop,
+  `Communicator::run()`, on a thread of its own.
 - The **intra-node path** hands chunks between a server and a source in the
   same worker through the **intra-node registry**
   (`IntraNodeTransferRegistry`) instead of UCX transfers. It is off by default
   (`cudf.intra_node_exchange`), and it is not used for broadcast or for
   placeholders.
-- A **channel** is one producer task and destination together with the server,
-  on the producer's worker, and the source, on the consumer's worker, that move
-  its chunks. Its **producer half** is the destination queue and its server;
-  its **consumer half** is the source and the tables it has put into the
-  exchange queue. A channel is neither the UCX endpoint, which all channels to
-  one peer share, nor a consumer's set of sources.
+- A **channel** is one producer task and destination together with the server
+  and the source that move its chunks. Its **producer side** is the
+  destination queue and its server; its **consumer side** is the source and
+  the tables it has put into the exchange queue. A channel is not the UCX
+  endpoint. Each destination has exactly one channel, and a source never
+  reconnects.
 - A channel's **outcome** is how it ended: cleanly, or with an error and the
   error's message.
 
 ### How a chunk travels
 
+0. The consumer opens the channel, which is identified by the producer's task
+   ID and destination:
+   1. the source connects an endpoint to the producer's worker, or reuses one;
+   2. it sends the handshake as an active message: the task ID, the
+      destination and the worker ID, and in the design also the protocol
+      version and the source's channel ID;
+   3. the producer's Acceptor checks the version, which only the design does,
+      binds a server to the destination, creating a placeholder if the task is
+      not yet initialized, and sends the handshake response, 8 bytes in the
+      current design and 16 in the design;
+   4. the source receives the response, and the channel is open on both sides.
 1. A producer driver calls `UcxOutputQueueManager::enqueue()`. If a server is
    waiting on that destination, its callback runs on the producer's driver
    thread, stores the chunk, and puts the server on the Communicator's work
    queue.
 2. On the Communicator thread, the server sends a metadata message and then
    the data. Each message has a tag built from a hash of the task ID and
-   destination, an operation byte and a sequence number.
+   destination, an operation byte and a sequence number. The design replaces
+   the hash with the channel ID (see the protocol).
 3. The source receives both on the Communicator thread and puts the table into
    the exchange queue, where the consumer's drivers read it.
 4. A channel ends with a metadata message that has `atEnd` set. Right after
@@ -146,9 +148,8 @@ red. The lower part shows the messages that channel carries, in time order.
 
 ### Who touches a channel's state
 
-In the current design, the channel state is distributed across multiple
-components, as shown in the table below. #19701 would add the items marked
-(†).
+In the current design, eight components hold channel state. #19701 would add
+the items marked (†).
 
 | Component | Channel state |
 |---|---|
@@ -172,9 +173,9 @@ These components are called from at least five kinds of threads:
 - the worker's other threads, such as those that handle the coordinator's
   requests, through `stats()` and `updateOutputBuffers()`.
 
-In the current design, the headers in `velox/experimental/ucx-exchange` declare
-11 locks and 10 atomic members, in about 7,500 lines of code without tests. The
-components refer to each other by task-ID strings and tag hashes.
+The headers in `velox/experimental/ucx-exchange` declare 11 locks and 10 atomic
+members, in about 7,500 lines of code without tests. The components refer to
+each other by task-ID strings and tag hashes.
 
 ## The problem
 
@@ -190,118 +191,97 @@ components refer to each other by task-ID strings and tag hashes.
 | #19701 (open) | a producer that failed or was aborted ended its channels cleanly, so a TPC-DS query returned 0 rows | output queue vs. server vs. registry |
 | #19859 (open) | producer backpressure counted queued bytes, consumer backpressure counted queued tables, and neither counted GPU memory still in use after dequeue | queue vs. server vs. consumer |
 
-#19701 shows the pattern from the inside. Review of its first drafts found
-three races of this kind in its own new code:
+Review of #19701's first drafts found three races of this kind in its own new
+code:
 
-- A chunk that a source had already read from the intra-node registry, but
-  whose read the server had not processed yet, was counted as lost when the
-  producer was removed in between
+- A chunk that a source had read from the intra-node registry, before the
+  server processed the read, counted as lost when the producer was removed in
+  between
   ([comment](https://github.com/facebookincubator/velox/pull/19701#discussion_r4378663516)).
-- A server could create a placeholder between the two lookups that one
-  `removeTask()` call makes, and that placeholder then ended cleanly instead of
-  with the producer's error
+- A server could create a placeholder between the two lookups of one
+  `removeTask()`, and that placeholder ended cleanly instead of with the
+  producer's error
   ([comment](https://github.com/facebookincubator/velox/pull/19701#discussion_r4378734102)).
-- The record of a removal in the output queue manager and the one in the
-  intra-node registry could carry different reasons
+- The output queue manager and the intra-node registry could record different
+  reasons for one removal
   ([comment](https://github.com/facebookincubator/velox/pull/19701#discussion_r4554522671)).
 
-It also found older cases in the current design, which #19701 fixes:
+It also found older cases, which #19701 fixes:
 
 - Records of removed tasks are freed only when a task ID is initialized or
   removed again, which Presto never does, so they stay for the life of the
   worker ([comment](https://github.com/facebookincubator/velox/pull/19701#discussion_r4554522689)).
-- A placeholder for a producer that never arrives outlives the server that
-  waited on it, and stays for the life of the worker.
-- A server whose consumer closed early keeps waiting, with the results kept
-  for that consumer, until the producer is removed.
+- A placeholder for a producer that never arrives outlives its server and
+  stays for the life of the worker.
+- A server whose consumer closed early keeps waiting, with its results, until
+  the producer is removed.
 
-The consumer half has cases of its own, found while preparing this note. A
-source checks its closed flag when a data message arrives, then puts the table
-into the exchange queue. If the client's close empties the queue between the
-check and the put, the late table stays in the closed queue, holding GPU
-memory until the consumer's `Task` is destroyed. After one source fails, the
-other sources keep putting tables into the queue until the client closes,
-although no driver reads them any more.
+Preparing this note found three more:
 
-The producer half has one more, also found while preparing this note. When a
-server's send fails, the server stops without deleting its destination's
-results or releasing its reader, so the producer task stays `RUNNING` until it
-is removed. #19047 keeps this behavior on purpose for the last metadata
-message and leaves the task for the coordinator to remove.
+- A source checks its closed flag, then puts the table into the exchange
+  queue. A close in between leaves the table in the closed queue, holding GPU
+  memory until the consumer's `Task` is destroyed.
+- After one source fails, the others keep queuing tables that no driver reads
+  until the client closes.
+- A server whose send fails stops without deleting its results or releasing
+  its reader, so the producer stays `RUNNING` until removed; #19047 keeps this
+  on purpose for the last metadata message.
 
 Each fix so far has handled one of these cases where it was found.
 
 ### Root causes
 
 **No component owns a channel's ending.** A channel can end in at least six
-ways:
-
-- every producer driver calls `noMoreData()`;
-- the producer task is removed (`removeTask()`), which `Task::terminate()`
-  does when the task finishes, fails, or is aborted or cancelled;
-- the destination's results are deleted (`deleteResults()`), by the server
-  after the end marker, or by the producer itself when it runs out of GPU
-  memory;
-- the consumer closes;
-- the connection fails;
-- on the intra-node path, a published chunk is never read.
-
-Each event reaches some of the components above and not others. On the
-producer side, the output queue, the output queue manager and the server each
-decide part of the ending. On the consumer side, the source, the exchange queue
-and the client do. The endings are not written down anywhere, so every new
-way to end a channel needs a fix at every boundary it crosses.
+ways: every producer driver calls `noMoreData()`; the producer task is removed
+(`removeTask()`), which `Task::terminate()` does when the task finishes,
+fails, or is aborted or cancelled; the destination's results are deleted
+(`deleteResults()`); the consumer closes; the connection fails; or,
+on the intra-node path, a published chunk is never read. Each event reaches
+some components and not others. The output queue, the output queue manager
+and the server each decide part of the producer's ending, and the source, the
+exchange queue and the client part of the consumer's. The endings are not
+written down, so every new one needs a fix at every boundary it crosses.
 
 **Task lifetime clashes with UCX connection lifetime.** A Velox `Task` lives
-as long as the worker keeps it. A UCX connection lives as long as the network
-and the peer allow. A consumer can connect, and so create a server, before its
-producer task exists or long after it is gone. The only link between the two is
-the task ID. The code bridges the gap with placeholders and records of removed
-tasks, both kept in side maps keyed by task ID. Their lifetime follows from the
-`Task`'s lifetime only indirectly, and the cases above show both staying for
-the life of the worker.
+as long as the worker keeps it; a UCX connection, as long as the network and
+the peer allow. A consumer can connect, and so create a server, before its
+producer task exists or long after it is gone, linked only by the task ID.
+Placeholders and records of removed tasks bridge the gap in side maps whose
+lifetime follows the `Task`'s only indirectly.
 
-**The protocol carries little of the lifecycle.** In the current design, the
-wire format has no way to say why a channel ended and no message for a consumer
-that leaves early. Its only version check is a magic number that the receiver
-verifies with `VELOX_CHECK` inside a UCX callback, which the Communicator loop
-does not catch, so a mismatch aborts the worker. State therefore has to be
-inferred: an unknown task ID means "not created yet", and a silent consumer
-means "still reading".
+**The protocol carries little of the lifecycle.** The current wire format
+cannot say why a channel ended and has no message for a consumer that leaves
+early. Its only version check is a magic number that the receiver verifies
+with `VELOX_CHECK` inside a UCX callback, which the Communicator loop does not
+catch, so a mismatch aborts the worker. State has to be inferred: an unknown
+task ID means "not created yet", a silent consumer "still reading".
 
 **Two transports double the cases.** The intra-node path has its own registry
-and its own handoff. With #19701, removing a task also has to coordinate with
-the registry and count the chunks in flight there. Two of the three races in
-#19701's drafts exist only on that path.
+and handoff, and two of the three races above exist only on that path.
 
 **Endings are task-wide, but only the consumer decides them under one lock.**
-The decisions that end a channel concern the whole task on both sides:
-
-- On the producer side, removing a task ends all of its destinations at once,
-  and whether that end is clean depends on what all of them still hold. The
-  count of drivers that called `noMoreData()`, and a broadcast's chunks for
-  later destinations, are per task as well.
-- On the consumer side, the consumer has finished when every source has ended,
-  and it fails when any source fails.
-
-The consumer side keeps these under one lock: the exchange queue's lock guards
-the count of sources that ended and the one error, and the client's closed
-flag is changed under the same lock. The producer side does not. With #19701,
-removal reads the output queue under its lock, releases it, and then retries
-under the manager's lock until the queue stops changing; on the intra-node
-path it also holds the registry still. Two of the races in #19701's drafts
-came from the gaps between those steps.
+Removal ends all of a task's destinations at once, and whether that end is
+clean depends on what all of them still hold. A consumer finishes when every
+source has ended and fails when any fails; the exchange queue's lock guards
+the count of ended sources, the one error and the client's closed flag. The
+producer side has no such lock. With #19701, removal reads the output queue
+under its lock, releases it, then retries under the manager's lock until the
+queue stops changing, and on the intra-node path holds the registry still and
+counts the chunks in flight there. Two of the races came from the gaps
+between those steps.
 
 ## Goals
 
 - Every reader gets exactly one outcome: a chunk, a clean end, or an error that
   says why the channel ended.
-- Each half of a channel decides its outcome once, in one place, and the
-  protocol carries that decision to the other half.
-- Every way a half can end is listed in one table, with one test each.
+- Each side of a channel decides its outcome once, in one place, and the
+  protocol carries that decision to the other side.
+- Every way a channel can end is listed in one table per side, with one test
+  each.
 - No state outlives what needs it: a removed task's `UcxOutputQueue` is dropped
-  once its `Task` is gone, and a channel's state ends with its last participant.
-- Each half can be tested on its own, without UCX.
+  once its `Task` is gone, an unclaimed Pending one after a timeout, and a
+  channel's state ends with its last participant.
+- Each side can be tested on its own, without UCX.
 - A worker never crashes on a peer that speaks another protocol version.
   The query fails instead, with a message that names both versions.
 
@@ -319,10 +299,17 @@ came from the gaps between those steps.
 - UCX and UCXX remain the transport.
 - The data path stays zero-copy, with no new copies or synchronization per
   chunk.
+- No thread blocks on a peer. One exception remains: with
+  `ucxx.error_handling` off, closing an endpoint flushes it on the
+  Communicator thread and can wait on an unresponsive peer without limit (see
+  Open questions).
 
 The proposal inherits one limit of UCX. With `ucxx.error_handling` off, a
 failed peer is never reported, so a channel to that peer ends only when one of
-its tasks ends, for example when the coordinator aborts the query.
+its tasks ends, for example when the coordinator aborts the query. Error
+handling off is not a supported configuration but a workaround for fabrics
+where peer error handling does not work today. The design keeps working with
+it.
 
 ## Proposal
 
@@ -343,10 +330,9 @@ replaces #19047 and #19701. It takes these fixes from them:
   decoded, or its producer's worker cannot be resolved; and an error for
   consumers of a task whose `initializeTask()` threw.
 
-Both PRs had to stay compatible with the current wire format, so #19701 adds a
-capability flag for the close message and leaves older consumers unable to see
-the producer's error. The design drops that constraint and versions the
-protocol instead (see the protocol rules).
+Both PRs had to stay compatible with the current wire format; the design
+versions the protocol instead (see Protocol, and Alternatives considered for
+#19701's capability flag).
 
 The two PRs disagree on two points:
 
@@ -364,11 +350,12 @@ Related change). Two of the three races in #19701's drafts go away with it,
 not with this design.
 
 The test of each fix comes along with it; How the design relates to existing
-fixes maps every test to a row of the outcome tables.
+fixes maps every test to a row of the outcome tables. The design takes fixes
+and tests from #19047 at `5dd89b66a5` and from #19701 at `09c4707e92`.
 
-### Where each half's state lives
+### Where each side's state lives
 
-Each half's state machine goes into the object that holds its side's task-wide
+Each side's state machine goes into the object that holds its side's task-wide
 state: one state per destination inside `UcxOutputQueue`, and one state per
 source inside `UcxExchangeQueue`. Every decision that ends a channel is taken
 under that object's lock. These are the mutexes that the two classes have today,
@@ -381,7 +368,7 @@ choice: one lock per task's output buffer, over its destination buffers.
 `QueueManager.lock` is the one lock of `UcxOutputQueueManager` over its map from
 task ID to `UcxOutputQueue`.
 
-### The producer half
+### The producer side
 
 `UcxOutputQueueManager` keeps one map, from task ID to `UcxOutputQueue`. In the
 current design, the manager keeps two maps: `queues_` holds the output queues
@@ -394,9 +381,9 @@ Pending `UcxOutputQueue`:
 
 | Task state | Entered when | Left when |
 |---|---|---|
-| Pending | a server asks for a task the output queue manager has not seen | `initializeTask()` or `removeTask()`; or its last waiting server closes while no destination is Released |
+| Pending | a server, or a close message, names a task the output queue manager has not seen | `initializeTask()` or `removeTask()`; its last waiting server closes while no destination is Released; or the sweep drops it, with no bound server, after the Pending timeout |
 | Active | `initializeTask()` | `removeTask()` |
-| Removed | `removeTask()` | the next removal after the producer's `Task` is destroyed drops it, or the task ID is initialized again |
+| Removed | `removeTask()` | the sweep drops it once the producer's `Task` is destroyed and no server is bound, or the task ID is initialized again |
 
 The task's `UcxOutputQueue` stays the same object from Pending to Removed. A
 placeholder becomes the task's output queue at `initializeTask()`, as in the
@@ -410,36 +397,51 @@ the stored outcome. `updateOutputBuffers()` for a Removed task does nothing.
 
 Because the `UcxOutputQueue` keeps its identity, every change of the task's
 state and of its destinations' states happens under `UcxOutputQueue.lock`.
-`QueueManager.lock` only adds and erases `UcxOutputQueue` objects in the map. It
-adds one on the first contact for a task ID, from `initializeTask()` or a
-server's request. It erases one when its `Task` is gone, or when the last server
-of a Pending `UcxOutputQueue` closes. No decision is made under
-`QueueManager.lock`. A server that looks up a task during its removal therefore
-finds the same `UcxOutputQueue` and reads its decision; it cannot create a new
-placeholder in between.
+`QueueManager.lock` only adds a `UcxOutputQueue` on the first contact for a
+task ID and erases one as the table above says. A server that looks up a task
+during its removal therefore finds the same `UcxOutputQueue` and reads its
+decision; it cannot create a new placeholder in between.
 
 A Removed `UcxOutputQueue` lives long enough for the consumers that need it. A
-producer that succeeds cannot be removed before its consumers connect: `Task`
-reports itself finished only after each destination's end marker was sent or its
-consumer left. Only a failed or aborted producer is removed early, and a
-consumer that connects while its `Task` exists gets the producer's error from
-the Removed `UcxOutputQueue`. This relies on the worker keeping a finished
-`Task` until the coordinator has seen it end; the coordinator then aborts the
+producer that succeeds cannot be removed before its consumers connect: the
+output queue calls `setAllOutputConsumed()` only when
+`isFinishedLocked()` holds: the output queue is Active, no destination waits
+unpublished, a broadcast has received `noMoreBuffers`, and every destination is
+Released. Only a failed or aborted producer is removed early, and a consumer
+that connects while its `Task` exists gets the producer's error. This relies on the worker
+keeping a finished `Task` until the coordinator has seen it end and aborted the
 query's consumers. Prestissimo keeps a terminated `Task` for
 `old-task-cleanup-ms`, 60 seconds by default (see Open questions for other
 workers). A consumer that connects after the `Task` is gone creates a Pending
-`UcxOutputQueue`, which ends when that consumer is aborted and its server
-closes.
+`UcxOutputQueue`, which the sweep drops once the consumer's abort has closed
+its server and the Pending timeout has passed.
 
-When a consumer of a Pending task closes, through the close message or a closed
-endpoint, the Pending `UcxOutputQueue` keeps that destination as Released, and
-nothing else: no reader and no chunks. When the task initializes, the
-destination starts Released, so the producer can finish without waiting for the
-coordinator. Such a `UcxOutputQueue` lives until the task initializes or is
-removed. If the task never starts on this worker, it stays for the life of the
-worker; it holds only the task ID and the released destinations. A Pending
-`UcxOutputQueue` whose last server closes without having released its
-destination is dropped.
+A Pending `UcxOutputQueue` keeps a destination whose consumer closed as
+Released, with no reader and no chunks. One that no task claims needs a
+timeout. In
+Prestissimo, a DELETE that arrives before the CREATE marks the `PrestoTask`
+ABORTED without a Velox `Task`, and the later CREATE returns at once.
+`initializeTask()` and `removeTask()` are then never called for the task. Each
+such output queue is small, but their number is unbounded over a long-lived
+worker.
+
+**The sweep.** One sweep drops the output queues that nothing claims any more.
+It runs in `initializeTask()`, and only there, so it removes old state where
+new state is added. It runs once per producer task, never per chunk or per
+handshake, so it needs no rate limit. Under `QueueManager.lock`, with a
+lock-free state check first, it drops:
+
+- Removed output queues whose `Task` is gone and that have no bound server,
+  together with the task's cancellation in the intra-node registry;
+- Pending output queues that have no bound server and were created more than
+  the Pending timeout ago, measured with `steady_clock`.
+
+It never drops the output queue of the task being initialized, which claims a
+Pending output queue of any age. The Pending timeout is a constructor
+parameter of `UcxOutputQueueManager`, 60 seconds by default, so that tests can
+shorten it; it is not a configuration setting. A Removed output queue and its
+cancellation in the registry therefore live until the next producer task
+starts on the worker.
 
 Inside the output queue, each destination has one state:
 
@@ -450,33 +452,65 @@ Inside the output queue, each destination has one state:
 | Ended(outcome) | the end marker, or the error, is decided and queued |
 | Released | its results are deleted; nothing more is sent |
 
-The producer's **outcome table** lists each event that can end a destination
-and its outcome. Removal decides for all destinations of the task at once; the
-other events decide for one destination. The first decision for a destination
-wins:
+The producer's **outcome table** lists, for each state, each event that can
+reach a destination, the next state and the outcome. Removal decides for all
+destinations of the task at once.
+The code knows six events: publishing (`kPublished`), the server taking the
+end marker (`kEndMarkerTaken`), removal (`kRemoved`), deleting the results
+(`kResultsDeleted`), the consumer gone (`kConsumerGone`) and a failed send
+(`kSendFailed`). The first decision for a destination wins:
 
-| Event | Outcome |
-|---|---|
-| every driver called `noMoreData()` | none yet; the end marker is queued behind the remaining chunks |
-| the server takes the end marker | clean |
-| `removeTask()`, after every driver called `noMoreData()`, with no chunk left in any destination | clean, even if the task is aborted at that point |
-| `removeTask()` with chunks left in any destination, in a broadcast's chunks kept for later destinations, or in flight on the intra-node path; or before every driver called `noMoreData()` | producer error, with the task's state and error message |
-| `removeTask()` while the server's send of a chunk it already took is pending | the outcome of the rows above: removal does not destroy that chunk, so it does not count as left. The server finishes the send and then sends the end with that outcome; a send that fails sends no end |
-| `removeTask()` without a successful `initializeTask()` | error: the producer never initialized its output |
-| `deleteResults()` while the destination is Open, as the producer does when it runs out of GPU memory | error: the producer discarded its output; the results are deleted, and the server sends the error |
-| `deleteResults()` after Ended, as the server does once the send of the end message completed | none; the destination becomes Released |
-| a reader for a destination beyond the final count | clean, at once, as in the current design: no rows are ever produced for such a destination |
-| the close message arrives, or the endpoint closes | none for the consumer, which is gone or sees its endpoint close; the destination becomes Released and its results are deleted, also after its server closed on its own side |
-| the handshake response cannot be sent | none for the consumer, which fails or gives up on its own; the destination becomes Released |
-| a send fails while the endpoint stays open | error: the output queue fails the producer task with the send's error (`Task::setError()`), so the coordinator aborts the query; the consumer, whose receive may never fail, is aborted with it. #19047 leaves the task `RUNNING` instead |
-| a server's `process()` throws on the Communicator thread | error, as for a failed send: the output queue fails the producer task with the exception's message. The consumer is still there, so the failure is not taken for a consumer that is gone, which would let the task finish without the destination's rows |
-| `removeTask()` after a send failed, or a server failed | error: the failure's message. The failed destination's chunks were freed, so counting the output left would find none |
-| the close message, or a closed endpoint, for an Unpublished destination of a Pending or Active task | none; the destination is Released before it is published, and publishing it later keeps it Released, as #19064 and #19047 do |
+| In state | Event | Next state | Outcome |
+|---|---|---|---|
+| Unpublished | `initializeTask()` or `updateOutputBuffers()` publishes the destination | Open | none |
+| Open | every driver called `noMoreData()` | Open | none yet; the end marker is queued behind the remaining chunks |
+| Open | the server takes the end marker | Ended | clean |
+| Unpublished, Open | `removeTask()`, after every driver called `noMoreData()`, with no chunk left in any destination | Ended | clean, even if the task is aborted at that point |
+| Unpublished, Open | `removeTask()` with chunks left in any destination, in a broadcast's chunks kept for later destinations, or in flight on the intra-node path; or before every driver called `noMoreData()` | Ended | producer error, with the task's state and error message |
+| Open | `removeTask()` while the server's send of a chunk it already took is pending | Ended | the outcome of the rows above: removal does not destroy that chunk, so it does not count as left. The server finishes the send and then sends the end with that outcome; a send that fails sends no end |
+| Unpublished | `removeTask()` without a successful `initializeTask()` | Ended | error: the producer never initialized its output |
+| Unpublished, Open | `removeTask()` after a send failed, or a server failed, in another destination | Ended | error: the failure's message. The failed destination's chunks were freed, so counting the output left would find none |
+| Open | `deleteResults()`, as the producer does when it runs out of GPU memory | Ended | error: the producer discarded its output; the results are deleted, and the server sends the error |
+| Unpublished | `deleteResults()` | Released | error: the producer discarded its output; the waiting reader gets the error |
+| Ended | `deleteResults()`, as the server does once the send of the end message completed | Released | none |
+| none | a reader for a destination beyond the final count | none | clean, at once, as in the current design: no rows are ever produced for such a destination |
+| Open, Ended | the close message arrives, or the endpoint closes | Released | none for the consumer, which is gone or sees its endpoint close; the results are deleted, also after its server closed on its own side |
+| Unpublished | the close message, or a closed endpoint, in a Pending or Active task | Released | none; publishing it later keeps it Released, as #19064 and #19047 do |
+| none | the close message for a task the producer's worker does not know | Released | none; the output queue manager creates a Pending `UcxOutputQueue` with this destination Released |
+| Released | a handshake names the destination | Released | none; the server gets `kStop` and ends without sending |
+| Unpublished, Open, Ended | the handshake response cannot be sent | Released | none for the consumer, which fails or gives up on its own |
+| Open, Ended | a send fails while the endpoint stays open | Released | error: the output queue fails the producer task with the send's error, so the coordinator aborts the query; the consumer, whose receive may never fail, is aborted with it |
+| Open, Ended | a server's `process()` throws on the Communicator thread | Released | error, as for a failed send: the output queue fails the producer task with the exception's message. The consumer is still there, so the failure is not taken for a consumer that is gone, which would let the task finish without the destination's rows |
+| Ended, Released | a late event: for Ended, `removeTask()` after the server took the end marker; for Released, `removeTask()`, `deleteResults()`, the close message after the endpoint closed, a last send that fails because the destination was released while it was pending, or publishing after its consumer closed | unchanged | no change, the first decision stands |
+| Unpublished, Open, Ended, Released | an impossible pair: publishing an Open or Ended destination, which is published once; the server taking the end marker of an Unpublished destination, which no server reads, or of an Ended or Released one, whose queue is gone; a send failing in an Unpublished destination, which sends nothing | unchanged | no change; a debug check (`VELOX_DCHECK`) names the pair |
 
-Releasing the destination when the consumer is gone matches Presto's HTTP
-exchange, whose consumer deletes its results on the producer when it aborts.
-A producer that is aborted later, as after a satisfied `LIMIT`, then finds the
-destination already Released. The destination's state tells the two uses of
+A late event happens in normal races and decides, frees and fails nothing. An
+impossible pair happens only through a bug. Its debug check throws a
+`VeloxRuntimeError` in Debug builds, which ends the operation that produced the
+event; in Release builds it compiles to nothing, and the state is kept. No
+check throws in Release, since the decisions run under `UcxOutputQueue.lock`
+and on the Communicator thread.
+
+A chunk enqueued into a destination that is not Open is freed at once and not
+counted toward backpressure; a broadcast counts a chunk once per Open
+destination. A producer after a satisfied `LIMIT` therefore does not block on
+a consumer that has gone.
+
+Removal learns about chunks on the intra-node path from the output queue
+alone. The output queue counts, under `UcxOutputQueue.lock`, the chunks that
+intra-node servers took and whose read from the registry they have not seen
+yet. Removal decides from the queued chunks and that count, and never reads
+the registry. Afterwards, with no output queue lock held, the
+output queue manager hands the decided outcome to the registry, which only
+delivers it to sources still polling. A removal between a source's read and
+the server's next `process()` still counts the chunk and decides a producer
+error. The count can therefore only turn a clean end into an error, never
+cause wrong results, and a normal finish, after every destination is Released,
+is not affected.
+
+A producer that is aborted after its consumer is gone, as after a satisfied
+`LIMIT`, finds the destination already Released. The destination's state
+tells the two uses of
 `deleteResults()` apart, so its signature does not change. When the producer
 runs out of GPU memory, the "discarded" error comes first and the later
 `removeTask()` keeps it, so the consumer fails either way.
@@ -486,10 +520,9 @@ the send to complete. It reads its destination's state through the output
 queue it is bound to and reports three events: the close message arrived, its
 endpoint closed, and a send failed. As in #19701, the Communicator tells every
 server and source on a closed endpoint through `onEndpointClosed()`; in the
-current design, a closed endpoint only closes them. UCX reports a closed
-endpoint only with `ucxx.error_handling` on.
+current design, a closed endpoint only closes them.
 
-### The consumer half
+### The consumer side
 
 `UcxExchangeQueue` keeps one state per source:
 
@@ -500,27 +533,38 @@ endpoint only with `ucxx.error_handling` on.
 | Ended(outcome) | the source reports an end: clean, the producer's error, or a transport error |
 | Released | the client closes |
 
-The consumer's **outcome table** lists each event that can end a source and
-its outcome. The first decision for a source wins:
+The consumer's **outcome table** has the same form. The code knows three events:
+the handshake response accepted (`kResponseAccepted`), the source's end
+(`kEnded`) and the client's close (`kClientClosed`). The first decision for a
+source wins:
 
-| Event | Outcome |
-|---|---|
-| the end message, without an error | clean |
-| the end message, with the producer's error | producer error; the consumer fails |
-| a handshake response of another protocol version | version error, which names both versions; the consumer fails |
-| a failed connect, handshake or receive, an undecodable message, or a failed allocation | transport error; the consumer fails |
-| the endpoint closes | transport error, unless the source is already Ended or Released |
-| the client closes | none; the source becomes Released, and its server is told with the close message if the channel has not ended |
-| the client adds a source after it closed | none for the consumer; the source still connects and sends the close message, so that its producer can finish, and is then Released |
+| In state | Event | Next state | Outcome |
+|---|---|---|---|
+| Registered | a handshake response of the same protocol version | Open | none |
+| Open | the end message, without an error | Ended | clean |
+| Open | the end message, with the producer's error | Ended | producer error; the consumer fails |
+| Registered | a handshake response of another protocol version | Ended | version error, which names both versions; the consumer fails |
+| Registered | no handshake response within `cudf.exchange_handshake_timeout_ms` | Ended | transport error: no response, the producer may run an older protocol version; the consumer fails, and the source sends its close |
+| Registered, Open | a failed connect, handshake or receive, an undecodable message, or a failed allocation | Ended | transport error; the consumer fails |
+| Registered, Open | the endpoint closes | Ended | transport error |
+| Registered, Open | the client closes | Released | none; its server is told with the close message |
+| Ended | the client closes | Released | none; the channel has ended, so no close message is sent |
+| none | the client adds a source after it closed | Released | none for the consumer; the source still connects and sends the close message, so that its producer can finish |
+| Open | a second handshake response | Open | no change, the first decision stands |
+| Ended, Released | a handshake response, after the source ended or the client closed | unchanged | no change, the first decision stands |
+| Ended | a second end, such as a second error or a closed endpoint | Ended | no change, the first decision stands |
+| Released | an end, such as an error after the client closed | Released | no change, the first decision stands |
+| Released | a second close | Released | no change, the first decision stands |
+
+Every unlisted pair on the consumer side is a late event, so the consumer side
+has no debug checks.
 
 The consumer has finished when the client called `noMoreRemoteTasks()` and every
 source's state is Ended or Released; with no sources, that is at once. It fails
 when any source's state ends with an error before the client closes. In the
-current design, these are the exchange queue's count of sources that ended and
-its one error; both become views of the per-source states. Once the consumer
-has failed or closed, `UcxExchangeQueue` frees every table a source puts into
-it, from any source. It collects them under `UcxExchangeQueue.lock` and frees
-them after the lock is released.
+current design, these are the exchange queue's count of ended sources and its
+one error; both become views of the source states. Once the consumer has
+failed or closed, `UcxExchangeQueue` frees every table any source puts into it.
 
 The source keeps its UCX progress: connecting, the handshake, waiting for
 metadata, waiting for data, and done. It reports every end through one call,
@@ -530,25 +574,17 @@ current design, and handling a closed endpoint, which #19701 adds. They rely
 on a compare-and-swap on the end-marker flag and on the exchange queue keeping
 only its first error.
 
-A source that closes before the handshake response arrives waits for the
-response, up to a timeout, and then sends the close message, unless the
-response rejected the handshake. If the timeout passes first, the source still
-sends the close message, as long as its handshake was sent. The close goes to
-the producer task's output queue, not to the server, so it releases the
-destination whether or not the server exists yet; a server that binds to a
-released destination stops at once. The wait also ends when the endpoint
-closes; with `ucxx.error_handling` off, only the timeout ends it.
+A source sends the close message as soon as it closes, also during the
+handshake; it does not wait for the handshake response. The handshake, an
+active message, and the close, a tagged send, can arrive in either order; the
+close reaches the output queue either way (see Protocol). A Released
+destination never gets a consumer again.
 
-Two cases are left to the coordinator, as long as the endpoint stays open:
-- A source whose handshake send has not completed by the timeout sends
-  nothing. If the handshake still arrives, its server waits until the
-  coordinator aborts the producer task.
-- A close that arrives before the producer's worker knows the task is dropped.
-  A later handshake then creates a Pending output queue and a server that
-  wait the same way.
-
-A per-channel timeout, still to be designed, would end both (see Open
-questions).
+The handshake timeout, `cudf.exchange_handshake_timeout_ms`, is 30 s by
+default. A close to a producer of version 0, which never receives the version
+1 handshake (see Protocol), stays unmatched in that producer's UCX worker. It
+happens only during a rolling upgrade, whose queries that span the versions
+fail anyway.
 
 A consumer close and the end of a channel can race in four ways:
 
@@ -565,269 +601,181 @@ A consumer close and the end of a channel can race in four ways:
   after a satisfied `LIMIT`.
 - **The close message and the end at the same time.** A source sends the close
   message only if it has not yet seen the end. If the server ended first, the
-  producer's Communicator still receives the message and drops it (see the
-  protocol rules).
-- **A table in flight at close.** In the design, the table is freed, as
-  described above. In the current design, it stays in the closed
-  queue.
+  producer's Communicator still receives the message, and the output queue
+  changes nothing (see The producer side).
+- **A table in flight at close.** It is freed; in the current design, it stays
+  in the closed queue.
 
-### Between the halves: the protocol
+### Between the sides: the protocol
 
 The protocol messages are the only transitions that cross workers:
 
-| Message | Producer half | Consumer half |
+| Message | Producer side | Consumer side |
 |---|---|---|
-| handshake, with the protocol version | binds a server to a Pending, Active or Removed `UcxOutputQueue`, if the versions match | Registered, waiting for the response |
+| handshake, with the protocol version and the channel ID | binds a server to a Pending, Active or Removed `UcxOutputQueue`, if the versions match | Registered, waiting for the response |
 | handshake response, with the protocol version | — | Open if the versions match; otherwise Ended with a version error |
+| no handshake response within the handshake timeout | — | Ended with a transport error |
 | metadata and data messages | Open | Open |
 | end message, with the outcome and the producer's error, if any | Ended | Ended, with the same outcome |
 | close message | Released | Released |
 | endpoint closed | Released | Ended with a transport error, unless already Ended or Released |
 
-The design does not keep the current wire format. Every message may change in
-the way that is most efficient for the design, and no flag says what a peer
-understands. Instead, both sides check one protocol version and accept only
-their own:
+The design replaces the current wire format:
 
 - **The protocol version.** The handshake and the handshake response each
   carry one version number, which every change of the wire format increments.
   A server accepts only a handshake of its own version, and a source only a
-  response of its own version. There are no capability flags: two workers
-  either speak the same protocol or fail the query.
-- **A fixed prefix.** Two things stay fixed in every version, so that any two
-  versions, including the current design, can tell each other apart without
-  crashing. The handshake begins with the current design's fields at their
-  current offsets, `taskId`, `destination` and `workerId`, and carries the
-  version after them; later versions may append fields, but never remove
-  these, and it travels as the same active message, to the same receiver
-  callback. The handshake response is 16 bytes in every version, twice the
-  current design's 8, carries the version beyond its first 8 bytes, and uses
-  the current design's response tag.
+  response of its own version. There are no capability flags. The current
+  design is version 0, and the design defines version 1, which has not
+  shipped.
+- **Versions 0 and 1 never exchange handshakes.** The protocol changes
+  require it: the active message that sets up a channel is where the
+  incompatibility is detected. Version 1 sends its handshake under a new
+  active-message ID, which a version 0 worker does not know: UCXX logs the
+  message and drops it. Under the old ID, version 1 keeps only a handler that
+  rejects.
+- **A fixed prefix from version 1 on.** Every later version keeps the
+  active-message ID, a handshake that begins with the version at offset 0 and
+  the channel ID at offset 4, and a 16-byte response on the channel-ID tag with
+  the version at offset 8. Everything after the prefix may change with the
+  version, and a peer that reads another version rejects without interpreting
+  the rest.
+- **Tags unique per consumer worker.** UCX matches tagged receives per UCX
+  worker, not per endpoint, so all sources on a consumer worker share one
+  matching space. In the current design, a tag's upper 32 bits are a hash of
+  the task ID and destination, and two channels with equal hashes take each
+  other's messages. In the design, the consumer's Communicator gives each new
+  source a 32-bit channel ID that no live source on that worker uses. The
+  source sends it in the handshake and uses it in its receives; the server
+  uses it instead of the hash in the tags of the response, metadata and data.
+  The close message keeps its tag, since its body names the channel, and the
+  intra-node path uses no tags.
 - **An end message.** The last message of a channel is an end message with
-  the outcome, clean or failed, and the producer's error, if any, instead of a
-  metadata message whose `atEnd` flag is set. It is sent with the next
-  metadata tag, so the source's posted metadata receive takes it. A clean end
-  is a few bytes. The error is truncated to a bound at whole characters, as
-  #19701 does.
-- **One close message.** A source that leaves early sends one close message
-  that names its channel: the producer's task ID and the destination, not only
-  the tag's 32-bit hash. It is always understood, since the versions match.
+  the outcome and the producer's error, if any, instead of a metadata message
+  whose `atEnd` flag is set. It is sent with the next metadata tag, so the
+  source's posted metadata receive takes it. A clean end is a few bytes. The
+  error is truncated to a bound at whole characters, as #19701 does.
+- **Control messages.** A source that leaves early sends one close message
+  that names its channel by task ID and destination, not only the tag's
+  32-bit hash. It is the first control message, a message from the consumer
+  to the producer after the handshake. Every control message starts with a
+  header that holds its type and the length of its body. The close body is a
+  256-byte task ID and a 4-byte destination. Its tag is the
+  operation byte `0x05` (`CLOSE_TAG`), with the channel's hash in the upper 32
+  bits, which the receive ignores. Later types, such as a credit grant for
+  flow control, which #19859 approaches today by counting on each side, reuse
+  the same tag, receive and dispatch, and come with a new protocol version.
+  Version 1 has only the close type.
 - **One close receive per worker.** Instead of one close receive per server,
   as in #19047 and #19701, the Communicator keeps one receive that matches
-  every close message on its worker. It hands each message to the output queue
-  of the task it names, which releases the destination even if its server has
-  ended or does not exist yet. It drops a message only if the worker has no
-  output queue for that task. With a receive per
-  server, a close message that arrives after its server ended is never
-  received: it stays in UCX's queue of unexpected messages for the life of the
-  UCX worker, and with `UCX_RNDV_THRESH=0` the consumer's send never completes
-  either.
-- **No check that aborts the worker.** In the current design, the metadata
-  message's magic number and the handshake's size are checked with
-  `VELOX_CHECK` inside UCX callbacks, which the Communicator loop does not
-  catch. In the design, a message that cannot be decoded fails its channel
-  with an error; a handshake too short to name its channel is logged and
-  dropped. The version check makes these cases rare, but a corrupt message
-  must not end the worker.
-- **Further control messages.** Later changes, for example messages for flow
-  control, which #19859 approaches today by counting on each side, increment
-  the version.
+  every control message on its worker, on the operation byte alone
+  (`kOperationTagMask`). Its buffer is sized for the largest control message
+  of the version. The Communicator handles each completed receive in its loop
+  and posts the next one right away; a message that arrives in between waits
+  in UCX. A message whose type is unknown, or whose length does not match its
+  type or the bytes received, is logged and dropped. Each close goes through
+  the output queue manager to the output queue of the task it names, so it
+  releases the destination even if its server has ended or does not exist
+  yet. With a receive per server, a close that arrives after its server ended
+  stays in UCX's queue of unexpected messages for the life of the UCX worker,
+  and with `UCX_RNDV_THRESH=0` the consumer's send never completes either.
+- **No check that aborts the worker.** The `VELOX_CHECK`s of the metadata
+  message's magic number and the handshake's size go (see Root causes). A
+  message that cannot be decoded fails its channel with an error; a handshake
+  too short to name its channel is logged and dropped.
 
 A worker meets a peer of another version in three ways. None of them crashes
-either worker, and each fails the query with a message:
+either worker, both keep serving other queries, and each fails the query with
+a message:
 
 | Producer's worker | Consumer's worker | What happens |
 |---|---|---|
-| current design | design | The current Acceptor accepts the longer handshake, because it checks only that a handshake is at least as long as its own, creates a server, and sends its 8-byte response. The source reads no version beyond those 8 bytes, sends nothing more, and fails the consumer: the producer's worker runs an older protocol version than this worker's. The current server keeps sending to a source that no longer receives. Its metadata messages wait unmatched in the consumer's UCX worker, and its first data send never completes, so the producer task stays `RUNNING` until the coordinator aborts it. |
-| design | current design | The Acceptor finds no version in the 272-byte handshake. It creates no server, logs the mismatch, and fails the producer task with it if the task is Active on this worker. It sends its 16-byte response; the current source's 8-byte receive fails with a truncation error, which fails the consumer. A test must confirm that UCXX reports the truncation to the receive's callback as a status. |
-| design, version N | design, version M | The Acceptor creates no server and sends a response that rejects the handshake and names version N. The source fails the consumer with both versions. The Acceptor also fails the producer task if it is Active. |
+| version 0 | version 1 | The producer's worker drops the handshake. The source fails the consumer after the handshake timeout, with a message that the producer may run an older protocol version. |
+| version 1 | version 0 | The handshake arrives under the old active-message ID, whose handler only rejects. It creates no server, logs the mismatch, and fails the producer task if it is Active on this worker. It sends a 16-byte response on the current design's response tag; the current source's 8-byte receive fails with a truncation error, which fails the consumer. A test must confirm that UCXX reports the truncation to the receive's callback as a status. |
+| version N ≥ 1 | version M ≥ 1 | The Acceptor creates no server and sends a response that rejects the handshake and names version N. The source fails the consumer at once with both versions. The Acceptor also fails the producer task if it is Active. |
 
-Both workers keep running and serve other queries. A rolling upgrade
-therefore fails the queries that span the two versions, until every worker
-runs the new one.
+### Rules for both sides
 
-### Rules for both halves
-
-- Every event in the tables above goes through the object that holds its half's
-  state. State changes happen under the lock that guards it: `UcxOutputQueue.lock`
-  on the producer side, `UcxExchangeQueue.lock` on the consumer side.
-- Reader callbacks and promises run after that lock is released, as the code
-  already does. Chunks and tables that `UcxOutputQueue` or `UcxExchangeQueue`
-  frees are freed after the lock is released, too.
-- Every decision for a task is made under `UcxOutputQueue.lock`.
-  `QueueManager.lock` only adds and erases `UcxOutputQueue` objects; when both
-  are needed, as when erasing one, `QueueManager.lock` comes first. No lock of
-  the `Task` is taken while `UcxOutputQueue.lock` is held. Removal reads the
-  task's state and error message before it takes `UcxOutputQueue.lock`; they are
-  final by then, because `Task::terminate()` sets the task's final state before
-  it calls `removeTask()`. #19047 reads `Task::isRunning()` under the output
-  queue's lock; under this rule, that read moves before the lock.
-- `initializeTask()` for a task ID in Removed replaces the `UcxOutputQueue` in
-  the map with a new one, under `QueueManager.lock`. This is the only time a
-  `UcxOutputQueue` is replaced. Servers that still hold the old `UcxOutputQueue`
+- Reader callbacks and promises run, and the chunks and tables that a queue
+  frees are freed, after its lock is released.
+- When both locks are needed, as when erasing a `UcxOutputQueue`,
+  `QueueManager.lock` comes first. No `Task` method runs, and no `Task` lock is
+  taken, while `UcxOutputQueue.lock` is held. Removal reads the task's state and
+  error message before it takes the lock; they are final by then, because
+  `Task::terminate()` sets the final state before it calls `removeTask()`.
+  #19047 reads `Task::isRunning()` under the output queue's lock; that read
+  moves before the lock.
+- `Task::setError()` never runs on the Communicator thread. It terminates the
+  task synchronously, closing drivers, freeing memory, which with some memory
+  resources waits for the whole device, and running completion listeners,
+  which would stall every exchange on the worker. It is posted to the task's
+  executor, `task->queryCtx()->executor()`, and the
+  posted function holds the task; Prestissimo always runs tasks in parallel
+  mode, which requires an executor. The output queue decides before the post,
+  and the producer's other destinations keep working until `setError()` runs.
+  The Acceptor posts its version-mismatch failure to the Communicator loop, to
+  leave the UCX callback, and the loop posts `setError()`.
+- No thread blocks on a peer, with the one exception named under
+  Requirements.
+- `initializeTask()` for a Removed task ID is the only time a `UcxOutputQueue`
+  is replaced, under `QueueManager.lock`. Servers that still hold the old one
   see it as Removed. Presto does not reuse task IDs, but the tests do.
-- `UcxOutputQueue` and `UcxExchangeQueue` treat chunks and tables as opaque
-  handles and never look inside them, so the lifecycle does not depend on the
-  backend that produced them. That keeps the transport engine-agnostic, as
-  Velox's GPU acceleration guide describes it.
-- Neither keeps memory accounting of its own. #18590 (open) charges the chunks
-  that `UcxPartitionedOutput` queues to a per-query exchange pool in Velox's
-  memory system, and a chunk releases its charge when it is freed. The job of
-  `UcxOutputQueue` is to free its chunks when its channel is released or ends
-  with an error. No state that outlives a channel, such as a Removed
+- Both queues treat chunks and tables as opaque handles, so the lifecycle does
+  not depend on the backend, which keeps the transport engine-agnostic, as
+  Velox's GPU acceleration guide describes it. Neither keeps memory accounting
+  of its own: #18590 (open) charges the chunks that `UcxPartitionedOutput`
+  queues to a per-query exchange pool, and a chunk releases its charge when it
+  is freed. No state that outlives a channel, such as a Removed
   `UcxOutputQueue`, may hold a chunk.
-- Each table is implemented as one function from the current state and an
-  event to the next state and its outcome. Each row gets one test, run against
-  `UcxOutputQueue` or `UcxExchangeQueue` alone, without UCX.
+- Each table is one function from the current state and an event to the next
+  state and its outcome. Each row gets one test, run against the queue alone,
+  without UCX. One more test walks every pair of each table; for an impossible
+  pair it expects, in Debug, the throw with its message (`VELOX_ASSERT_THROW`),
+  and in Release, no change.
 
 ### What changes where
 
-The first two diagrams show, for the producer half and then for the consumer
-half, which object holds each piece of channel state in the current design and
-where it lives in the design. The left side shows the current design with the
-additions of #19701, which are marked †. Solid arrows show state that moves,
-dashed grey arrows show state that stays where it is, and dotted orange arrows
-show a field that is removed.
+The first two diagrams show where each piece of channel state lives now, with
+#19701's additions marked †, and in the design. Solid arrows show state that
+moves, dashed grey arrows state that stays, dotted orange arrows a removed
+field.
 
-![Producer half: where the channel state lives today and where it moves](images/ucx-exchange-producer-state-moves.drawio.svg)
+![Producer side: where the channel state lives today and where it moves](images/ucx-exchange-producer-state-moves.drawio.svg)
 
-![Consumer half: where the channel state lives today and where it moves](images/ucx-exchange-consumer-state-moves.drawio.svg)
+![Consumer side: where the channel state lives today and where it moves](images/ucx-exchange-consumer-state-moves.drawio.svg)
 
-The list below describes the same changes component by component.
+| Component | What changes | Described in | What it fixes |
+|---|---|---|---|
+| `UcxOutputQueueManager` | one map; the sweep | The producer side | side maps that must agree and outlive their task; **an unclaimed Pending output queue kept for the worker's life**; a placeholder created during removal; the clean end `removedTasks_` gives a failed producer's late reader |
+| `UcxOutputQueue` | destination states; removal in one step | The producer side | the races of removal in steps; a new ending is one row |
+| `UcxExchangeServer` | UCX progress only; the end message; channel-ID tags | The producer side, Protocol | the clean end of a failed producer; **a failed send that leaves the producer `RUNNING`** |
+| `UcxExchangeQueue` | source states; frees late tables | The consumer side | **tables that hold GPU memory after a close or a failure** |
+| `UcxExchangeSource` | one `end(outcome)`, without the end-marker-delivered and registered flags; channel ID, version check, handshake timeout; immediate close | The consumer side, Protocol | the close and end races; a consumer that leaves silently; **a close during the handshake, which with #19701 never reaches its server** |
+| `UcxExchangeClient` | closed state as Released sources | The consumer side | a flag that must agree with the queue |
+| `Communicator` | one control-message receive; channel IDs; `onEndpointClosed()`, as in #19701 | Protocol, The producer side | **a close after its server ended**; **a tag hash two channels share** |
+| `Acceptor` | the new active-message ID, a reject-only old one; drops a too-short handshake; releases the destination when the response cannot be sent, since no close will come | Protocol | **a version mismatch that aborts the worker** |
+| `UcxExchangeProtocol` | the new messages and tags; decoding that returns an error | Protocol | a corrupt message that aborts the worker |
+| `EndpointRef` | passes UCX's reason for the close to its servers and sources, as #19701 does | here | a consumer error that hides its cause |
 
-- **`UcxOutputQueueManager`** keeps one map from task ID to `UcxOutputQueue`,
-  whose state is Pending, Active or Removed, instead of the current design's
-  `queues_` (output queues and placeholders) and `removedTasks_`, and the
-  `failedInitializations_` that #19701 would add; #19701's count of arriving
-  readers becomes part of a Pending `UcxOutputQueue`. The task's
-  `UcxOutputQueue` stays the same object from Pending to Removed; removal frees
-  its chunks and keeps only a `std::weak_ptr` to the `Task` and the outcome, and
-  the `UcxOutputQueue` is erased once the `Task` is gone. `QueueManager.lock`
-  only adds and erases `UcxOutputQueue` objects. This fixes side maps that had
-  to agree with each other and could stay for the life of the worker, and the
-  race in which a server created a placeholder between two lookups of one
-  `removeTask()` call: a server that looks up a task during its removal now
-  finds the same `UcxOutputQueue`. It also fixes the clean end that a late
-  reader of a failed producer gets from `removedTasks_` in the current design:
-  it gets the producer's error, as with #19701.
-- **`UcxOutputQueue`** gives each destination a state, Unpublished, Open, Ended
-  or Released, and implements the producer's outcome table as one function of
-  state and event. `removeTask()` decides the outcome for all destinations in
-  one step under `UcxOutputQueue.lock`, after reading the task's final state and
-  error, and moves the task to the Removed state in place. This removes the
-  read, release and retry sequence of removal, where races came from, and turns
-  the producer's endings into one table: a new ending becomes one new row, not
-  fixes in several components.
-- **`UcxExchangeServer`** keeps only its UCX progress, reads its destination's
-  state through the output queue it is bound to, and reports three events: the
-  close message, endpoint closure and a failed send. It ends a channel with
-  the end message, which carries the producer's error, as with #19701. A send
-  that fails while the endpoint stays open fails the producer task. As with
-  #19047, the
-  destination's results are deleted when the last send completes, not when it
-  is posted. This fixes the clean end of a failed producer, which loses rows,
-  and a failed send that left the producer `RUNNING` until the coordinator
-  removed it.
-- **`UcxExchangeQueue`** keeps one state per source, Registered, Open, Ended or
-  Released, and implements the consumer's outcome table. Whether the consumer
-  has finished or failed becomes a view of those states, and once it has failed
-  or closed, the queue frees every table that still arrives, after releasing
-  its lock. This fixes a table that arrives during a close and holds GPU memory
-  until the consumer's `Task` is destroyed, and tables from other sources that
-  pile up after one source failed.
-- **`UcxExchangeSource`** keeps only its UCX progress and reports every end
-  through one call, `end(outcome)`. That call replaces the paths that each
-  decided part of the end with flags of their own; the end-marker-delivered and
-  registered flags go away. It checks the version in the handshake response.
-  A source that closes during the handshake waits, with a timeout, for the
-  response and then sends the close message. As with #19701, a closed
-  endpoint, an undecodable message and an unresolvable producer worker fail
-  the consumer. This removes the place where the close and end races lived,
-  and fixes a consumer that leaves early without telling its producer, and a
-  close during the handshake that never reaches its server with #19701.
-- **`UcxExchangeClient`** releases its sources' states in `UcxExchangeQueue`
-  when it closes, so the closed state lives there rather than in a flag of its
-  own. A source that the client adds after closing still connects and sends the
-  close message, as #19047 does, so that its producer can finish. The client and
-  the queue then have nothing left to keep consistent.
-- **`Communicator`** keeps one receive for every close message on its worker
-  and hands each message to the output queue of the task it names, or drops it
-  if the worker has no output queue for that task. Servers no longer post and
-  cancel close receives of their own. This
-  fixes a close message that arrives after its server ended: with a receive
-  per server, as in #19047 and #19701, it stays in UCX for the life of the
-  worker, and with `UCX_RNDV_THRESH=0` the consumer's send never completes. As
-  in #19701, the Communicator also tells every server and source on a closed
-  endpoint through `onEndpointClosed()`.
-- **`Acceptor`** checks the handshake's version. On a mismatch, it creates no
-  server, answers with a response that names its version, and fails the
-  producer task if it is Active. A handshake too short to name its channel is
-  logged and dropped instead of failing a `VELOX_CHECK` in the callback. A
-  response that cannot be sent releases the destination, since its source will
-  never send the close message. This fixes a protocol mismatch that aborts the
-  worker.
-- **`UcxExchangeProtocol`** gets the versioned handshake and handshake
-  response, the end message and the close message, and decoding that returns
-  an error instead of failing a `VELOX_CHECK`.
-- **`EndpointRef`** records why UCX closed its endpoint and passes that
-  reason to every server and source on it, so that the consumer's error names
-  the cause, as #19701 does.
+The fixes in bold are the seven behaviors that change compared with landing
+#19047 and #19701. The other components keep only transport state: UCX
+requests, the chunk in flight, endpoints and the work queue.
 
-The components still hold state after this change, but only one kind of it
-decides how a channel ends. On the producer side, that lifecycle state lives
-only in the `UcxOutputQueue` of each task: the task's state, and the state of
-each destination inside it. Every event that can end a channel goes to the
-`UcxOutputQueue`:
+The last two diagrams show the calls that change each queue's state and what
+each caller gets back: solid arrows are calls, dashed green arrows returned
+state, a dashed grey arrow the Communicator thread handing an event on. Where
+the note states no thread or return value, the diagram says so.
 
-- Velox's calls, `initializeTask()`, `removeTask()`, `noMoreData()` and
-  `deleteResults()`, reach the `UcxOutputQueue` through the
-  `UcxOutputQueueManager`.
-- A server is bound to its `UcxOutputQueue` once, at the handshake. It asks the
-  `UcxOutputQueue` for its next step, which is to send a chunk, send the end
-  message with the stored outcome, or stop. It reports the close message, which
-  the Communicator hands to it, endpoint closure and failed sends back to the
-  `UcxOutputQueue`.
+![Producer side: calls into UcxOutputQueue and the state that comes back](images/ucx-exchange-producer-state-calls.drawio.svg)
 
-The `UcxOutputQueue` decides under `UcxOutputQueue.lock`, and the other
-components act on that decision. What they keep is transport state: the
-server's UCX requests and the chunk in flight, and the Communicator's endpoints
-and work queue. None of it records whether a channel is open or how it ended.
-The consumer side follows the same pattern, with the per-source states in
-`UcxExchangeQueue`, a source that keeps only its receives, and a client whose
-close goes to those states.
-
-The last two diagrams show the calls that record a state change in
-`UcxOutputQueue` and in `UcxExchangeQueue`, and the state that each caller gets
-back. Solid arrows are calls, dashed green arrows are state returned to the
-caller, and a dashed grey arrow shows the Communicator thread handing an event
-to the server or the source. Where the note does not state a thread or a return
-value, the diagram says so.
-
-![Producer half: calls into UcxOutputQueue and the state that comes back](images/ucx-exchange-producer-state-calls.drawio.svg)
-
-![Consumer half: calls into UcxExchangeQueue and the state that comes back](images/ucx-exchange-consumer-state-calls.drawio.svg)
-
-Compared with landing #19047 and #19701, the design changes five behaviors,
-each one a fix:
-
-- a send that fails while its endpoint stays open fails the producer task,
-  instead of leaving it `RUNNING` until it is removed;
-- tables that arrive after the consumer failed or closed are freed;
-- a close message that arrives after its server ended is received and
-  dropped, instead of staying in UCX for the life of the worker;
-- a source that closes during the handshake tells its server once the
-  response has arrived. With #19701 it never tells the server;
-- a peer of another protocol version fails the query with a message. In the
-  current design, a mismatch aborts the worker; #19701's capability flag
-  covers only the close message, and older consumers still read a failed
-  producer's end as clean.
+![Consumer side: calls into UcxExchangeQueue and the state that comes back](images/ucx-exchange-consumer-state-calls.drawio.svg)
 
 ## How the design relates to existing fixes
 
 The design is judged against the fixes already merged and the open PRs it
 replaces, in two ways. First, the tests these PRs add are the contract: each
-must pass on the design unchanged, unless the note names it as a deliberate
-change. Second, a few measures show whether the state really moves into one
+must pass on the design, adapted only to its interfaces, unless the note names
+it as a deliberate change. Second, a few measures show whether the state really moves into one
 place. A prototype that runs these tests belongs in the detailed plan.
 
 ### What happens to each PR
@@ -837,68 +785,27 @@ place. A prototype that runs these tests belongs in the detailed plan.
 | #17752 | merged | unaffected: it fixed who owns the shared client, not how a channel ends |
 | #17753 | merged | intra-node path; out of scope |
 | #19064 | merged | its readers of unpublished destinations and its tombstones become the Unpublished state and "Released before published" |
-| #19047 | open; replaced by the design's PR | keeps its close message, its binding of each server to its queue, its rule that results are deleted when the last send completes, the release it remembers for a consumer that closed before its producer initialized, and its late sources that still tell their server; changes one of its behaviors (below) |
+| #19047 | open; replaced by the design's PR | keeps its fixes (see Starting point); changes one of its behaviors (below) |
 | #19701 | open; replaced by the design's PR | keeps its producer error and its close message, and replaces `acceptsClose` with the protocol version; folds `removedTasks_`, `failedInitializations_` and `numArrivingReaders` into `UcxOutputQueue`, and replaces its removal in steps with removal in place; changes one of its behaviors (below) |
 | #19859 | open | mostly orthogonal: flow control and memory accounting. Its rule that an error is not hidden by a later close is the design's "first decision wins" |
 | #18590 | open | compatible: `UcxOutputQueue` and `UcxExchangeQueue` free chunks, and a chunk's charge goes with it |
 
-### The PRs' tests against the outcome tables
+### The PRs' tests
 
-| Outcome-table row | Tests |
-|---|---|
-| producer: clean end, including removal after all output was delivered | #19701 `removeTaskAfterAllOutputKeepsCleanEndMarker`; #19047 `terminalMetadataWaitsForRemoteReceive` |
-| producer: error on removal, and a late consumer of a Removed task | #19701 `producerFailureMidStreamFailsConsumer`, `oversizedProducerErrorFailsConsumer`, `lateConsumerOfFailedProducerFails`, `getDataAfterTerminateReportsProducerError`, `truncatedProducerErrorKeepsWholeCharacters`; #19064 `terminateUnpublishedReader`; #19047 `terminalMetadataTaskAbortRemovesUcxOutput`, `terminateReleasesRetainedQueueResources` |
-| producer: Removed `UcxOutputQueue` lifetime and task-ID reuse | #19701 `removedTaskRecordLivesAsLongAsItsTask`; #19047 `queueHandleDoesNotFollowReusedTaskId`, `terminalMetadataCallbackStaysWithOriginalTask`; #19859 `removeTaskTombstoneIsIdempotent` |
-| producer: consumer gone, results deleted | #19701 `releasingGoneConsumerDeletesItsResults`, `limitBeforeProducerFinishesStillSucceeds`; #19859 `callbackFiredOnDeleteResults` |
-| producer: Unpublished destinations, readers beyond the final count | #19064 `pendingReadersBeforeInitialization`, `broadcastReaderArrivesBeforeBufferUpdate`, `broadcastLargeDestinationBothArrivalOrders`, `broadcastEndsReaderAfterFinalBuffers`, `invalidReaderDestinations`, `deleteUnpublishedReader`, `deleteUnpublishedDestinationBeforeGetData` |
-| producer: Pending `UcxOutputQueue` | #19701 `releasingLastReaderDropsPlaceholder`, `arrivingReaderKeepsPlaceholder`, `closedExchangeDropsPlaceholder`, `endpointFailureDropsPlaceholder`; #19047 `terminalMetadataCancellationBeforeTaskInit` |
-| producer: the endpoint closes during the last send | #19047 `terminalMetadataFailureLeavesOutputPending` |
-| producer: a send fails while the endpoint stays open | tested on the output queue alone: no test over UCX can make a send fail while its endpoint stays open |
-| producer: a server's `process()` throws, and the removal after it | `serverFailureFailsProducer`, remote and intra-node, Debug only: a `TestValue` makes the server throw, since no input does; `removalAfterSendFailureReportsProducerError` on the output queue, and `throwingElementFailsAndLoopContinues` on the Communicator, both in Release |
-| producer: no ending event | #19047 `terminalMetadataCloseLeavesOutputPending`: a server closed on its own side leaves the output for `deleteResults()` |
-| consumer: errors | #19701 `endpointClosedMidStreamFailsConsumer`, `unresolvableProducerHostFailsConsumer`, `undecodableMetadataFailsConsumer`; #19859 `terminalClientErrorIsNotMaskedByClose` |
-| consumer: client closes | #17752 `sharedClientSurvivesOneExchangeClose`; #19047 `terminalMetadataCloseBeforeRemoteTaskAdded` |
-| protocol | #19701's five `UcxExchangeProtocolTest` cases for the producer error, against the end message; #19701 `olderServerGetsNoCloseMessage`, replaced by the version tests below |
-| out of scope | the intra-node tests of #19701 and #19859; #19064 `unpublishedReadersDoNotAmplifyBackpressure`; #19859's tests of flow control, memory accounting and partitioning, including `enqueueClearsDeletedDestinationReservation` and `retainedUntilTransferCompletion`, which stay with #19859 |
+All tests of #19064, #19047 and #19701 are retained and adapted, and every
+lifecycle test among them covers a row of the outcome tables. Most need only
+the new message format or reader interface. These change their expected
+outcome on purpose:
 
-Every lifecycle test of these PRs maps to a row, so the tables miss no ending
-that the tests know. All tests are retained and adapted to the new design.
-Most need only the new message format or reader interface. The following
-change their expected outcome on purpose:
-
-- **A failed producer's end.** Tests that expect a clean end after a producer
-  was removed with output left, or before all its drivers finished, now expect
-  the producer's error. This is the lost-rows fix of #19701, which already
-  changed most of them:
-  - `callbackFiredOnTerminateBeforeInit`, `callbackFiredOnTerminateAfterInit`
-    and `terminateUnpublishedReader`;
-  - `sourceTaskAbortDoesNotCrashOrHang` and `intraNodeTaskRemovalLivelock`;
-  - #19047's `terminateReleasesRetainedQueueResources`.
-- **Output deleted before the end.** #19064's `deleteUnpublishedReader` and
-  `deleteUnpublishedDestinationBeforeGetData` expect a clean end. Like #19701,
-  the design reports that the producer discarded its output.
-- **An endpoint closed during the last send.** #19047's
-  `terminalMetadataFailureLeavesOutputPending` closes the endpoint while the
-  last send is pending, and expects the producer task to stay `RUNNING`. UCX
-  then completes the send as cancelled. For the design, that is a closed
-  endpoint: the destination is Released, so the producer finishes.
-- **A close without a handshake response.** #19047's
-  `terminalMetadataCancellationWithoutHandshakeResponse` expects the close
-  message although the server never answered. In the design, a source that
-  gets no response sends nothing.
-- **A consumer that closes before its producer initialized.** #19701's
-  `closedExchangeDropsPlaceholder` and `endpointFailureDropsPlaceholder` expect
-  the placeholder to be dropped. The design follows #19047's
-  `terminalMetadataCancellationBeforeTaskInit` instead and keeps the release,
-  so that the producer finishes once it initializes. The two #19701 tests then
-  expect a Pending `UcxOutputQueue` that holds the released destination, with no reader
-  and no chunks.
-- **An older server.** #19701's `olderServerGetsNoCloseMessage` checks that a
-  source sends no close message to a server without `acceptsClose`. The
-  design has no flag. Its place is taken by tests of the three version cases:
-  a handshake in the current design's layout, a response in the current
-  design's 8 bytes, and a response of another version. Each must fail the
-  query with a message that names the versions, and none may crash.
+- a producer removed with output left, or before all its drivers finished,
+  ends its consumers with the producer's error, the lost-rows fix of #19701;
+- output deleted before the end reports that the producer discarded it;
+- an endpoint closed during the last send Releases the destination, so the
+  producer finishes instead of staying `RUNNING`;
+- a consumer that closes before its producer initialized keeps the release,
+  as #19047 does, instead of dropping the placeholder as #19701 does;
+- #19701's test of the `acceptsClose` flag is replaced by tests of the three
+  version cases.
 
 ### Measures
 
@@ -914,99 +821,51 @@ Measured on #19701's branch, which carries its producer side and most of
 
 ## Comparison with the HTTP exchange
 
-The HTTP exchange is implemented across Velox and
-Prestissimo (Presto's C++ worker) together. In Velox, the producer
-side is `OutputBuffer` and the consumer side is `ExchangeClient`,
-`ExchangeQueue` and `ExchangeSource`. Prestissimo adds `PrestoExchangeSource`
-and the results endpoints of its `TaskManager`.
-
-This section compares the HTTP exchange with the UCX exchange as this note
-proposes it, with the fixes it takes from #19047 and #19701. The table marks
-what the current design does not do yet.
-
-**The state lives in the same places.** The HTTP exchange keeps the producer's
-state in one `OutputBuffer` per task, under one lock, over its destination
-buffers. It keeps the consumer's state in one `ExchangeQueue` per client,
-under one lock, with one source per producer. `UcxExchangeQueue` is modeled on
-`ExchangeQueue`. This design puts each half's state machine into exactly
-these two places.
-
-**The way a producer failure reaches the consumer differs.** In the HTTP
-exchange, the data path never reports it:
-
-- When the producer task has failed or was aborted, `TaskManager::getResults()`
-  waits for the request's maximum wait and returns an empty page that is not
-  marked complete. The consumer keeps asking.
-- A page is marked complete only when the producer's buffer delivers its end
-  marker or the producer `Task` has finished. After a failure, neither
-  happens, so a consumer never ends cleanly after lost output.
-- The coordinator sees the failure in the producer's task status and aborts
-  the query, including the waiting consumers.
-
-In the design, as in #19701, the UCX exchange sends the producer's error in
-the end message, and the consumer fails at once. This avoids polling over a
-UCX endpoint while the coordinator catches up, and it gives the consumer the
-producer's message. The consumer's error is derived from the producer's, so
-the query should still report the producer's error as its cause (see Open
-questions).
-
-**UCX gives stronger delivery guarantees, and they are enforced by the
-receiver.** UCX promises only that a completed send's buffer may be reused.
-For a message sent with rendezvous, that implies the receiver has matched it
-and fetched the data. For a small message sent eagerly, such as every metadata
-message, it implies nothing about the receiver. The design does not rely on
-either:
-
-- A source posts receives for exact, sequence-numbered tags, one chunk after
-  another, and ends cleanly only after it has received the end
-  message. It cannot skip a chunk.
-- If any message is lost, the source never sees the end. With
-  `ucxx.error_handling` on, it fails on its endpoint's error. Tag receives
-  belong to the UCX worker, not to an endpoint, so this goes through the
-  endpoint's error callback (`onEndpointClosed()`). With error handling off,
-  the source waits.
-- On the producer side, a send's completion only decides when a chunk may be
-  freed. That is always safe, because the design never retransmits: a failed
-  transfer fails the channel.
-
-UCX's synchronous tag send, which completes only after a remote match, cannot
-be used here: it is not supported when peer error handling is enabled.
-
-**No acknowledgment is needed.** The HTTP exchange retries every request for
-up to `exchange.max-error-duration` (3 minutes by default). A response can be
-lost after the producer sent it, so the consumer asks for the same sequence
-number again, and the producer keeps the pages until the consumer acknowledges
-them or deletes the results. The acknowledgment exists because of those
-retries. The UCX exchange sends over reliable connections, has no retries,
-and frees a chunk as soon as its send completes, which also keeps the data
-path zero-copy.
-
-**HTTP bounds every wait, and UCX does not.** Every HTTP request expires, and
-the retries end after `exchange.max-error-duration`, so a consumer of a dead
-producer always fails eventually. In the UCX exchange, failure detection
-depends on `ucxx.error_handling`. With it off, a lost peer is never reported,
-and an acknowledgment would not help without a timeout either. So the UCX
-exchange gives stronger delivery guarantees, and the HTTP exchange gives
-bounded waits (see Open questions).
+The HTTP exchange spans Velox, with `OutputBuffer` on the producer side and
+`ExchangeClient`, `ExchangeQueue` and `ExchangeSource` on the consumer side,
+and Prestissimo, with `PrestoExchangeSource` and its `TaskManager`'s results
+endpoints. Its state lives in the same places as in this design: one
+`OutputBuffer` per task and one `ExchangeQueue` per client, each under one
+lock. `UcxExchangeQueue` is modeled on `ExchangeQueue`. In the table,
+"proposed" marks what the current UCX design does not do yet.
 
 | | HTTP exchange | UCX exchange, as proposed |
 |---|---|---|
-| producer failure | `getResults()` waits for the request's maximum wait and returns an empty page that is not marked complete. The consumer keeps asking until the coordinator sees the failure in the producer's task status and aborts the consumer | the server sends the producer's error in the end message, and the consumer fails at once with that error (proposed, from #19701) |
-| clean end | a page is marked complete when the producer's buffer delivers its end marker, or when the producer `Task` has finished. The consumer then deletes its results on the producer with `DELETE` | the server sends the end message, and deletes the destination's results when that send completes (proposed, from #19047). The consumer ends after it has received that message |
-| producer memory freed | when the consumer acknowledges a sequence number or deletes its results. Until then the producer keeps the pages, so that the consumer can ask for them again after an error | when the send of a chunk completes. The design never retransmits, so nothing is kept for a second attempt |
-| transport errors | every request is retried for up to `exchange.max-error-duration`, 3 minutes by default. Only then does the consumer's queue get the error, and the consumer fails | a failed receive, an undecodable message or a failed allocation fails the source at once, and with it the consumer. A send that fails while its endpoint stays open fails the producer task (proposed) |
-| dead peer | always detected in the end: every request expires, and the retries stop after `exchange.max-error-duration` | detected only with `ucxx.error_handling` on. UCX then reports it on the endpoint, and every server and source on that endpoint ends. With it off, a dead peer is never reported, and its channels wait until the coordinator aborts their tasks |
-| consumer closes early | the consumer sends `DELETE` for its results, which calls `deleteResults()` on the producer. The request is retried, and a `DELETE` that keeps failing fails the consumer | the source sends the close message once, and the server then deletes the destination's results. If the server ended first, the producer's Communicator receives the message and drops it (proposed; the current design has no close message, and the producer keeps the destination's results until it is removed) |
-| consumer before its producer exists | the request waits in a `PrestoTask` that has no Velox `Task` yet. It expires after its maximum wait, and the consumer asks again. A `PrestoTask` that never gets its Velox `Task` is dropped after 60 seconds without a heartbeat from the coordinator | the server's request waits in a Pending `UcxOutputQueue`, without a timeout. `initializeTask()` makes it the task's Active `UcxOutputQueue`, which then serves the request. `removeTask()` ends it with the error that the producer never initialized its output. If neither comes, the `UcxOutputQueue` is dropped when its last waiting server closes, for example after the coordinator aborts the consumer |
-| consumer after its producer was removed | the `PrestoTask` stays for `old-task-cleanup-ms`, 60 seconds by default, after the task terminated, and answers with empty pages. After that, a request creates a new `PrestoTask` without a Velox `Task`, which also answers with empty pages, until the coordinator aborts the consumer | while the producer's `Task` exists, the server is bound to the Removed `UcxOutputQueue` and sends the end message with the stored outcome, usually the producer's error (proposed; in the current design, it sends a clean end). Once the `Task` is gone, the server's request waits in a new Pending `UcxOutputQueue`, as in the row above |
+| producer failure | never reported on the data path: `TaskManager::getResults()` waits for the request's maximum wait and returns an empty page not marked complete. The consumer asks again until the coordinator sees the failure in the producer's task status and aborts the query | the end message carries the producer's error, and the consumer fails at once (proposed, from #19701) |
+| clean end | a page is marked complete only when the producer's buffer delivers its end marker or the producer `Task` has finished, so a consumer never ends cleanly after lost output. The consumer then deletes its results | the consumer ends on the end message; the server deletes the results when that send completes (proposed, from #19047) |
+| producer memory freed | when the consumer acknowledges a sequence number or deletes its results. A response can be lost after it was sent, so the producer keeps the pages for a second request | when a chunk's send completes; nothing is retransmitted |
+| transport errors | every request is retried for up to `exchange.max-error-duration`, 3 minutes by default, before the consumer fails | a failed receive, decode or allocation fails the consumer at once; a send that fails while its endpoint stays open fails the producer task (proposed) |
+| dead peer | always detected in the end: requests expire, and retries stop after `exchange.max-error-duration` | detected only with `ucxx.error_handling` on; with it off, channels wait until the coordinator aborts their tasks |
+| consumer closes early | `DELETE` for its results calls `deleteResults()` on the producer. It is retried, and a `DELETE` that keeps failing fails the consumer | one close message releases the destination, also after its server ended (proposed) |
+| consumer before its producer exists | the request waits in a `PrestoTask` without a Velox `Task`, expires after its maximum wait, and is repeated. Such a `PrestoTask` is dropped after 60 seconds without a coordinator heartbeat | the request waits in a Pending `UcxOutputQueue`, with no timeout while a server waits; after the consumer's abort, the sweep drops it |
+| consumer after its producer was removed | the `PrestoTask` stays for `old-task-cleanup-ms`, 60 seconds by default, and answers with empty pages. Then a request creates a new `PrestoTask` without a Velox `Task`, which does the same until the coordinator aborts the consumer | while the `Task` exists, the end message carries the stored outcome, usually the producer's error (proposed; today a clean end); afterwards, as in the row above |
+
+The in-band error spares polling a UCX endpoint until the coordinator catches
+up; the query should still report the producer's error as its cause (see Open
+questions).
+
+HTTP needs acknowledgments only because it retries. The UCX exchange needs
+none, which keeps the data path zero-copy: the receiver enforces delivery. A
+completed send means only that its buffer may be reused; for rendezvous the
+receiver has fetched the data, for a small eager message, such as metadata,
+nothing. A source receives exact, sequence-numbered tags in order and ends
+cleanly only on the end message, so it cannot skip a chunk. If a message is
+lost, it never sees the end: with `ucxx.error_handling` on, it fails through
+its endpoint's error callback (`onEndpointClosed()`), since tag receives
+belong to the UCX worker, not an endpoint; with it off, it waits. UCX's
+synchronous tag send, which completes only after a remote match, is not
+supported with peer error handling.
+
+HTTP bounds every wait, and UCX does not: with `ucxx.error_handling` off, even
+an acknowledgment would not help without a timeout (see Open questions).
 
 ## Alternatives considered
 
 **A per-worker channel registry in the Communicator.** One registry per worker
-would hold per-task records and both halves of the channels on that worker, and the
+would hold per-task records and both sides of the channels on that worker, and the
 output queue manager and the client would forward into it. Its main argument,
-symmetry, does not hold: a channel's two halves run on different workers, so a
-registry never holds both halves of one channel. The producer's decisions are
+symmetry, does not hold: a channel's two sides run on different workers, so a
+registry never holds both sides of one channel. The producer's decisions are
 task-wide, so a lock per channel would need a task lock above it, which
 is the output queue's lock again. It would also make the transport own Velox
 chunks, unlike Velox's CPU exchange. It would not have prevented #19047 or the
@@ -1032,7 +891,7 @@ output queue manager synchronously (`stats()`, `getUtilization()`,
 from their drivers, so these calls would have to read snapshots, and
 backpressure futures would be fulfilled from the loop. One thread would also
 be a CPU ceiling for all channels on a worker. The proposal keeps this option
-open: each half's table is a function of state and event, which a loop could
+open: each side's table is a function of state and event, which a loop could
 run as well.
 
 **Capability flags instead of a protocol version.** #19701 marks the close
@@ -1074,8 +933,8 @@ races found in them.
    and #19701. It carries their tests, with the changes listed above, and adds
    one test per row of the outcome tables, one for each of the four close
    races, and one for each of the three version cases. Inside the PR, the
-   protocol, the producer half and the consumer half can be separate commits;
-   the two halves are independent of each other.
+   protocol, the producer side and the consumer side can be separate commits;
+   the two sides are independent of each other.
 2. #19859 rebases on that PR; its rule that a close does not hide an earlier
    error is already the design's.
 3. Later protocol changes each increment the protocol version.
@@ -1106,7 +965,8 @@ upgrade, the queries that span the two versions fail with the version error.
 - How should a per-channel timeout be defined when `ucxx.error_handling` is
   off? Review agreed that it should be based on protocol progress, not on the
   absence of data while a healthy channel is backpressured. It is follow-up
-  work.
+  work, together with an endpoint close that does not block the Communicator
+  thread on an unresponsive peer.
 
 Resolved in review:
 - A consumer that connects after both its producer's `Task` and its Removed
